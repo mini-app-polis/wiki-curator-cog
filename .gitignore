@@ -1,0 +1,23 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.coverage
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+dist/
+*.egg-info/
+
+# Local curator state (incremental-mode timestamp etc.)
+.wiki-curator-state.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
