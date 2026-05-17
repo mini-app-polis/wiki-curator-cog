@@ -1,2 +1,13 @@
+[variables]
+# Pin uv to a version that understands the `revision = 3` lockfile
+# format that current uv writes. Nixpacks v1.41's hardcoded default
+# (0.4.30) is too old and exits 127 trying to parse the lockfile,
+# which appears as a confusing "second build always fails" symptom
+# after semantic-release regenerates uv.lock with newer uv. This
+# fixes it at the repo level so any service (not just one with the
+# right dashboard env var) can build cleanly.
+NIXPACKS_UV_VERSION = "0.7.0"
+
 [phases.setup]
+# git is needed at runtime to clone wcs-wiki on boot.
 nixPkgs = ["git"]
