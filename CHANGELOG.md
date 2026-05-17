@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.0...v1.0.1) (2026-05-17)
+
+
+### Bug Fixes
+
+* CuratorState.curator_version_at_last_run is str, not int ([31f39c8](https://github.com/mini-app-polis/wiki-curator-cog/commit/31f39c86908fe946c331d1c98105dc5b6bf50e06))
+
 # 1.0.0 (2026-05-17)
 
 
