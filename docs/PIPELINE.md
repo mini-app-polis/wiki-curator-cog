@@ -57,4 +57,4 @@ Single-instance Prefect flow (concurrency slot of 1). Two concurrent runs would 
 
 ## Operating manual
 
-The curator's per-source behavior is governed by `wcs-wiki/CLAUDE.md`. That file is the operating manual; this repo is the runtime. Schema changes happen in `CLAUDE.md`, paired with a bump to `WIKI_CURATOR_VERSION` when behavior changes in a way that affects existing output.
+The curator's per-source behavior is governed by `wcs-wiki/CLAUDE.md`. That file is the operating manual; this repo is the runtime. Schema changes happen in `CLAUDE.md`; the corresponding curator code change lands here as a `feat:` / `fix:` commit so semantic-release bumps the package version, which the curator picks up on its next deploy and uses to invalidate prior output via the equality-based idempotency check.

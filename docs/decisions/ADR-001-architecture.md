@@ -23,7 +23,7 @@ The design conversation that produced this cog is recorded in the project histor
 - `incremental` — steady-state, processes notes created since the last run (Phase 2).
 - `interactive` (future) — Kaiano-in-the-loop ingest, primarily for Claude Code sessions; not a Prefect flow.
 
-**Idempotency via `WIKI_CURATOR_VERSION`.** Ingesting the same `note_id` at the same curator version is a no-op. Bumping the version triggers reprocessing.
+**Idempotency via curator version (equality).** The curator version is auto-derived from `pyproject.toml` (`importlib.metadata.version("wiki-curator-cog")`); semantic-release bumps it on every `feat:`/`fix:` push to main. Ingesting the same `note_id` at the same curator version is a no-op; any version mismatch (forward or backward) triggers reprocessing. No manual version management.
 
 ## Consequences
 
