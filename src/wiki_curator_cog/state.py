@@ -31,7 +31,7 @@ def save_state(
     config: Config,
     *,
     last_run_at: dt.datetime,
-    curator_version_at_last_run: int,
+    curator_version_at_last_run: str,
 ) -> None:
     """Persist state. Caller passes the new values explicitly."""
     state = CuratorState(

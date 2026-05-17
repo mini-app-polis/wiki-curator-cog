@@ -57,6 +57,9 @@ class CuratorState(BaseModel):
 
     last_run_at: dt.datetime | None = None
     last_successful_note_id: uuid.UUID | None = None
-    curator_version_at_last_run: int = 0
+    # Now a semver string (e.g. "0.1.0") since the curator reads its
+    # version from package metadata via importlib.metadata. Default ""
+    # means "no prior run recorded" — matches the prior 0-as-sentinel.
+    curator_version_at_last_run: str = ""
 
     model_config = ConfigDict(extra="ignore")
