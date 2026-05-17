@@ -125,6 +125,28 @@ def test_slugify(raw: str, expected: str) -> None:
     assert slugify(raw) == expected
 
 
+def test_slugify_caps_excessively_long_input() -> None:
+    """Survive the upstream LLM emitting a sentence as a concept name.
+
+    Real corpus example that previously crashed with ENAMETOOLONG:
+    "Watch-hover-touch-lead drill: followers first demonstrate their
+    own version of a pattern, then leaders hover without touching..."
+    """
+    long_phrase = (
+        "Watch-hover-touch-lead drill: followers first demonstrate "
+        "their own version of a pattern, then leaders hover without "
+        "touching, then leaders touch but followers still self-generate, "
+        "then leaders fully lead — calibrating the lead to the "
+        "follower's natural movement."
+    )
+    out = slugify(long_phrase)
+    assert len(out) <= 80
+    # Truncated at a hyphen boundary, so never ends mid-word.
+    assert not out.endswith("-")
+    # Still meaningful — beginning of the phrase preserved.
+    assert out.startswith("watch-hover-touch-lead")
+
+
 # ── build_source_slug ───────────────────────────────────────────────────
 
 

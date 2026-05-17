@@ -127,21 +127,47 @@ def bucket_for_instructors(canonical_instructors: list[str]) -> str:
     return EXTERNAL_BUCKET
 
 
+# Slugs become filename components, and most filesystems cap
+# individual components at 255 bytes. We cap well below that so the
+# `.md` extension, any disambiguator suffix (``-2``, ``-3``), and any
+# wikilink formatting all fit comfortably. The upstream LLM
+# occasionally emits a full procedural description in a
+# ``key_concept.concept`` field where a short noun-phrase is expected
+# (e.g. "Watch-hover-touch-lead drill: followers first demonstrate
+# their own version of a pattern, then leaders hover without
+# touching..."); rather than fail the ingest with ENAMETOOLONG, we
+# truncate. 80 chars is short enough to be safe across exotic
+# filesystems and long enough to retain useful semantic content.
+_SLUG_MAX_LEN: int = 80
+
+
 def slugify(text: str) -> str:
     """Generic slugifier for free-form strings (e.g., note titles).
 
     Lowercase, collapse whitespace and underscores to single hyphens,
     drop characters outside ``[a-z0-9-]``. Multiple consecutive hyphens
-    are collapsed; leading/trailing hyphens are trimmed.
+    are collapsed; leading/trailing hyphens are trimmed. The result is
+    capped at ``_SLUG_MAX_LEN`` chars, truncating at the last hyphen
+    boundary so we never end mid-word.
 
     Distinct from ``aliases._normalize_key`` only in name — the rules
-    are identical. Reused here under a friendlier alias to keep the
-    intent clear at call sites.
+    are identical (modulo the length cap). Reused here under a
+    friendlier alias to keep the intent clear at call sites.
     """
     s = text.strip().lower()
     s = re.sub(r"[\s_]+", "-", s)
     s = re.sub(r"[^a-z0-9\-]", "", s)
     s = re.sub(r"-+", "-", s).strip("-")
+    if len(s) > _SLUG_MAX_LEN:
+        truncated = s[:_SLUG_MAX_LEN]
+        last_hyphen = truncated.rfind("-")
+        # Only fall back to the hard cut if there's no hyphen at all
+        # in the truncated window (pathological — would mean an 80-char
+        # word with no spaces, which slugify wouldn't produce).
+        if last_hyphen > 0:
+            s = truncated[:last_hyphen]
+        else:
+            s = truncated
     return s
 
 
