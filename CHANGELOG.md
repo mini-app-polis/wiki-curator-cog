@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.2...v1.0.3) (2026-05-17)
+
+
+### Bug Fixes
+
+* pin NIXPACKS_UV_VERSION via nixpacks.toml so Railway build resolves uv ([3f19a50](https://github.com/mini-app-polis/wiki-curator-cog/commit/3f19a50887be4fbecff3c16729addda43c3952a2))
+
 ## [1.0.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.1...v1.0.2) (2026-05-17)
 
 
