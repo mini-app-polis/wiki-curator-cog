@@ -56,7 +56,7 @@ WIKI_BRANCH=phase-1-backfill                       # the backfill lands here; me
 WIKI_REPO_PATH=/tmp/wcs-wiki                       # ephemeral filesystem on Railway
 WIKI_GIT_AUTHOR_NAME=wiki-curator-cog
 WIKI_GIT_AUTHOR_EMAIL=wiki-curator@kaianolevine.com
-WIKI_CURATOR_VERSION=2
+WIKI_CURATOR_VERSION=3
 ```
 
 Optional but recommended (mirror transcription-cog):

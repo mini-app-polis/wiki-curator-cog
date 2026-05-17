@@ -153,7 +153,7 @@ def load_config() -> Config:
             "WIKI_GIT_AUTHOR_EMAIL", "wiki-curator@kaianolevine.com"
         ),
         gh_token=gh_token,
-        curator_version=int(os.getenv("WIKI_CURATOR_VERSION", "2")),
+        curator_version=int(os.getenv("WIKI_CURATOR_VERSION", "3")),
         backfill_page_size=int(os.getenv("WIKI_BACKFILL_PAGE_SIZE", "100")),
         state_path=state_path,
         healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),

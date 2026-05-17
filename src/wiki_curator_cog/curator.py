@@ -36,6 +36,11 @@ from typing import TYPE_CHECKING
 from mini_app_polis import logger as log
 
 from .aliases import AliasMap
+from .derived_pages import (
+    apply_contributions,
+    derived_slugs_by_type,
+    plan_contributions,
+)
 from .inventory import SourceRecord, WikiInventory
 from .models import WcsNote
 from .rendering import detect_quality_issues, render_source_page
@@ -268,6 +273,20 @@ def ingest_one_source(
     if collision_note:
         extra_notes.append(collision_note)
 
+    # ── 4b. Plan derived-page contributions (pure) ──────────────────
+    # Deterministic fan-out: walk notes_json and figure out which
+    # concept/technique/instructor pages this source should land
+    # contributions on. No disk writes yet; we need the list so the
+    # source page's contributed_to frontmatter can reflect the
+    # back-references before we render it.
+    contributions = plan_contributions(
+        notes_json=note.notes_json,
+        canonical_instructors=canonical_instructors,
+        source_slug=final_slug,
+        source_bucket=bucket,
+    )
+    contributed_to = derived_slugs_by_type(contributions)
+
     # ── 5. Render and write the source page ─────────────────────────
     rendered = render_source_page(
         note,
@@ -275,21 +294,20 @@ def ingest_one_source(
         canonical_students=canonical_students,
         instructors_raw=list(note.instructors),
         students_raw=list(note.students),
-        contributed_to={
-            # Phase 1: deterministic source-page-only ingest. Other
-            # page types are not yet created or updated; these lists
-            # stay empty until the LLM step lands.
-            "concepts": [],
-            "techniques": [],
-            "instructors": [],
-            "terminology": [],
-        },
+        contributed_to=contributed_to,
         curator_version=curator_version,
         ingested_at=dt.date.today(),
         extra_notes=extra_notes,
     )
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(rendered)
+
+    # ── 5a. Apply derived-page contributions ────────────────────────
+    # Each contribution upserts a teacher paragraph (or referenced-by
+    # entry) into the relevant derived page. Returns the absolute
+    # paths of every page touched so the per-source commit captures
+    # them all atomically with the source page.
+    derived_paths = apply_contributions(contributions, wiki_repo_path=wiki_repo_path)
 
     index_path = wiki_repo_path / "index.md"
 
@@ -364,7 +382,12 @@ def ingest_one_source(
 
     # ── 10. Fill in the result ──────────────────────────────────────
     result.source_path = source_path
-    result.touched_paths = [source_path, index_path, log_path]
+    result.touched_paths = [
+        source_path,
+        index_path,
+        log_path,
+        *derived_paths,
+    ]
 
     LOG.info(
         "ingest.complete",
@@ -375,6 +398,7 @@ def ingest_one_source(
             "bucket": bucket,
             "instructors": canonical_instructors,
             "students": canonical_students,
+            "derived_pages": len(derived_paths),
             "findings_emitted": result.findings_emitted,
             "extra_notes": len(extra_notes),
         },

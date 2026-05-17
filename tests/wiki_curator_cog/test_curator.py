@@ -186,13 +186,13 @@ def test_ingest_updates_index_and_log(populated_wiki: Path) -> None:
     # Original schema-update entry preserved.
     assert "schema-update | initial repo creation" in log_text
 
-    # touched_paths covers all three.
+    # touched_paths covers the source page, index, log, and any
+    # derived (concept/technique/instructor) pages produced by the
+    # deterministic fan-out. The default _make_note has one key_concept
+    # ("Anchor step") so we expect at least one derived concept page.
     paths = {p.name for p in result.touched_paths}
-    assert paths == {
-        "2025-09-15-anchor-step-quality.md",
-        "index.md",
-        "log.md",
-    }
+    assert {"2025-09-15-anchor-step-quality.md", "index.md", "log.md"}.issubset(paths)
+    assert "anchor-step.md" in paths
 
 
 def test_ingest_auto_adds_new_aliases_in_backfill(populated_wiki: Path) -> None:
