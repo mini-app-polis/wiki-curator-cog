@@ -307,7 +307,33 @@ def ingest_one_source(
     # entry) into the relevant derived page. Returns the absolute
     # paths of every page touched so the per-source commit captures
     # them all atomically with the source page.
-    derived_paths = apply_contributions(contributions, wiki_repo_path=wiki_repo_path)
+    #
+    # Partial-failure cleanup: if apply_contributions raises (e.g.
+    # ENAMETOOLONG on a pathological slug, disk full, permission
+    # error), the source page we just wrote in step 5 is left
+    # uncommitted — but backfill_flow's residual-commit at end of run
+    # picks up the orphan as an untracked file and commits it anyway,
+    # poisoning the inventory slot with a curator_version=N frontmatter
+    # that blocks any future re-ingest. Unlink the partial source page
+    # before propagating the exception so the next run can retry.
+    try:
+        derived_paths = apply_contributions(
+            contributions, wiki_repo_path=wiki_repo_path
+        )
+    except Exception:
+        try:
+            source_path.unlink()
+        except OSError:
+            pass  # already gone or unwritable; preserve the original error
+        LOG.error(
+            "ingest.apply_failed",
+            extra={
+                "note_id": str(note.id),
+                "source_path": str(source_path.relative_to(wiki_repo_path)),
+                "removed_partial": True,
+            },
+        )
+        raise
 
     index_path = wiki_repo_path / "index.md"
 

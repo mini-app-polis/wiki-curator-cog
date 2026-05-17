@@ -443,6 +443,40 @@ def test_ingest_emits_quality_finding_for_empty_notes_json(
     assert "## Notes" in result.source_path.read_text()  # type: ignore[union-attr]
 
 
+def test_ingest_cleans_up_partial_source_when_fanout_fails(
+    populated_wiki: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If apply_contributions raises mid-ingest, the partial source
+    page must be unlinked so the next run can retry instead of seeing
+    it as already-ingested."""
+    from wiki_curator_cog import curator as curator_mod
+
+    note = _make_note()
+    inventory = build_inventory(populated_wiki)
+    aliases = AliasMap.load(populated_wiki)
+
+    def boom(*_a, **_kw):
+        raise OSError(36, "File name too long")
+
+    monkeypatch.setattr(curator_mod, "apply_contributions", boom)
+
+    with pytest.raises(OSError):
+        ingest_one_source(
+            note=note,
+            mode=IngestMode.BACKFILL,
+            inventory=inventory,
+            aliases=aliases,
+            wiki_repo_path=populated_wiki,
+            curator_version=1,
+        )
+
+    # The source page must NOT exist on disk after the cleanup.
+    expected_path = (
+        populated_wiki / "sources" / "kate" / "2025-09-15-anchor-step-quality.md"
+    )
+    assert not expected_path.exists()
+
+
 def test_ingest_interactive_mode_skips_findings_emission(
     populated_wiki: Path,
 ) -> None:
