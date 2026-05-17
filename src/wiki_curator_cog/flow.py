@@ -22,7 +22,8 @@ from prefect.concurrency.sync import concurrency
 
 from .aliases import AliasMap
 from .api_client import WikiCuratorApiClient
-from .config import load_config
+from .boot import ensure_wiki_clone, mask_url
+from .config import assert_wiki_clone_ready, load_config
 from .curator import IngestMode, ingest_one_source
 from .git_ops import WikiRepo
 from .inventory import build_inventory
@@ -53,7 +54,19 @@ def backfill_flow() -> dict:
     config = load_config()
 
     with concurrency("wiki-curator-cog", occupy=1):
-        logger.info("backfill.start curator_version=%s", config.curator_version)
+        logger.info(
+            "backfill.start curator_version=%s branch=%s repo=%s",
+            config.curator_version,
+            config.wiki_branch,
+            mask_url(config.wiki_repo_url),
+        )
+
+        # Ephemeral-environment safe: clone or refresh the local wiki
+        # clone before touching it. No-op on a developer machine with
+        # a pre-existing clone at WIKI_REPO_PATH; on Railway this
+        # performs the actual clone into /tmp/wcs-wiki.
+        ensure_wiki_clone(config)
+        assert_wiki_clone_ready(config)
 
         api = WikiCuratorApiClient()
         wiki_repo = WikiRepo(config)
@@ -135,10 +148,15 @@ def incremental_flow() -> dict:
         state = load_state(config)
         since = state.last_run_at
         logger.info(
-            "incremental.start since=%s curator_version=%s",
+            "incremental.start since=%s curator_version=%s branch=%s repo=%s",
             since,
             config.curator_version,
+            config.wiki_branch,
+            mask_url(config.wiki_repo_url),
         )
+
+        ensure_wiki_clone(config)
+        assert_wiki_clone_ready(config)
 
         api = WikiCuratorApiClient()
         wiki_repo = WikiRepo(config)

@@ -6,6 +6,15 @@ no locking is needed here.
 
 Uses GitPython rather than shelling out so errors are typed and tests
 can mock cleanly.
+
+Branching model (Phase 1):
+  - WIKI_BRANCH selects the branch the curator commits and pushes to.
+  - For Phase 1 backfill we use a feature branch (e.g.
+    ``phase-1-backfill``) so the entire backfill lands as a reviewable
+    PR. Subsequent incremental runs target ``main`` directly.
+  - The branch is checked out (and, if it exists on the remote, reset
+    to the remote tip) by ``boot.ensure_wiki_clone`` BEFORE WikiRepo is
+    instantiated. WikiRepo only commits and pushes.
 """
 
 from __future__ import annotations
@@ -30,6 +39,13 @@ class WikiRepo:
     def path(self) -> Path:
         return self._config.wiki_repo_path
 
+    @property
+    def branch(self) -> str:
+        return self._config.wiki_branch
+
+    def current_branch_name(self) -> str:
+        return self._repo.active_branch.name
+
     def has_changes(self) -> bool:
         """Return True if there are staged or unstaged changes."""
         return self._repo.is_dirty(untracked_files=True)
@@ -52,6 +68,17 @@ class WikiRepo:
         return commit.hexsha
 
     def push(self) -> None:
-        """Push to the configured remote (default: origin)."""
-        remote = self._repo.remote(self._config.wiki_repo_remote)
-        remote.push()
+        """Push the configured branch to the configured remote.
+
+        Always uses an explicit refspec (``<branch>:<branch>``) so the
+        push target is unambiguous regardless of the local branch's
+        tracking state. Sets upstream on first push so any subsequent
+        manual git operations from the same working tree behave
+        normally.
+        """
+        remote_name = self._config.wiki_repo_remote
+        branch = self._config.wiki_branch
+        remote = self._repo.remote(remote_name)
+        # ``set_upstream=True`` is harmless on subsequent runs and
+        # essential on the first push for a freshly-created branch.
+        remote.push(refspec=f"{branch}:{branch}", set_upstream=True)
