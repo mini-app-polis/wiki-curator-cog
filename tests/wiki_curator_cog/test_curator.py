@@ -140,7 +140,7 @@ def test_ingest_writes_source_page_with_expected_frontmatter(
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
 
     assert result.skipped is False
@@ -158,7 +158,7 @@ def test_ingest_writes_source_page_with_expected_frontmatter(
     assert fm["instructors_raw"] == ["Kate"]
     assert fm["students"] == ["kaiano"]
     assert fm["students_raw"] == ["Kaiano"]
-    assert fm["curator_version"] == 1
+    assert fm["curator_version"] == "1.0.0"
     assert fm["session_date"] == "2025-09-15"
     assert fm["title"] == "Anchor step quality"
 
@@ -174,7 +174,7 @@ def test_ingest_updates_index_and_log(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
 
     index_text = (populated_wiki / "index.md").read_text()
@@ -206,7 +206,7 @@ def test_ingest_auto_adds_new_aliases_in_backfill(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
 
     assert aliases.to_slug("Kate B") == "kate-b"
@@ -225,7 +225,7 @@ def test_ingest_interactive_raises_on_unknown_name(populated_wiki: Path) -> None
             inventory=inventory,
             aliases=aliases,
             wiki_repo_path=populated_wiki,
-            curator_version=1,
+            curator_version="1.0.0",
         )
 
 
@@ -240,7 +240,7 @@ def test_ingest_idempotent_at_same_curator_version(populated_wiki: Path) -> None
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert first.skipped is False
 
@@ -250,7 +250,7 @@ def test_ingest_idempotent_at_same_curator_version(populated_wiki: Path) -> None
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert second.skipped is True
     assert "already ingested" in (second.skip_reason or "")
@@ -267,7 +267,7 @@ def test_ingest_reprocesses_on_bumped_curator_version(populated_wiki: Path) -> N
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     # Re-build inventory and pass through with a higher curator_version
     # — this mirrors how flow.py would reload state between runs.
@@ -278,12 +278,12 @@ def test_ingest_reprocesses_on_bumped_curator_version(populated_wiki: Path) -> N
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=2,
+        curator_version="1.0.1",
     )
     assert second.skipped is False
     assert second.source_path == first.source_path
     fm = _frontmatter(second.source_path)  # type: ignore[arg-type]
-    assert fm["curator_version"] == 2
+    assert fm["curator_version"] == "1.0.1"
 
 
 def test_ingest_updates_in_memory_inventory(populated_wiki: Path) -> None:
@@ -298,12 +298,12 @@ def test_ingest_updates_in_memory_inventory(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert inventory.has_note(note.id)
     rec = inventory.existing_record(note.id)
     assert rec is not None
-    assert rec.curator_version == 1
+    assert rec.curator_version == "1.0.0"
 
 
 def test_ingest_moves_file_when_bucket_changes(populated_wiki: Path) -> None:
@@ -320,7 +320,7 @@ def test_ingest_moves_file_when_bucket_changes(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert first.source_path is not None
     assert "sources/external/" in str(first.source_path).replace("\\", "/")
@@ -342,7 +342,7 @@ def test_ingest_moves_file_when_bucket_changes(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=2,
+        curator_version="1.0.1",
     )
     assert second.source_path is not None
     assert "sources/kate/" in str(second.source_path).replace("\\", "/")
@@ -374,7 +374,7 @@ def test_ingest_external_bucket_when_no_bucketed_instructor(
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert result.source_path is not None
     assert "sources/external/" in str(result.source_path).replace("\\", "/")
@@ -394,7 +394,7 @@ def test_ingest_slug_collision_disambiguates(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
     b = ingest_one_source(
         note=note_b,
@@ -402,7 +402,7 @@ def test_ingest_slug_collision_disambiguates(populated_wiki: Path) -> None:
         inventory=inventory,
         aliases=aliases,
         wiki_repo_path=populated_wiki,
-        curator_version=1,
+        curator_version="1.0.0",
     )
 
     assert a.source_path != b.source_path
@@ -435,7 +435,7 @@ def test_ingest_emits_quality_finding_for_empty_notes_json(
         aliases=aliases,
         wiki_repo_path=populated_wiki,
         api=FakeApi(),  # type: ignore[arg-type]
-        curator_version=1,
+        curator_version="1.0.0",
     )
     assert result.findings_emitted >= 1
     assert any(c.get("dimension") == "wiki.source.quality_issue" for c in calls)
@@ -467,7 +467,7 @@ def test_ingest_cleans_up_partial_source_when_fanout_fails(
             inventory=inventory,
             aliases=aliases,
             wiki_repo_path=populated_wiki,
-            curator_version=1,
+            curator_version="1.0.0",
         )
 
     # The source page must NOT exist on disk after the cleanup.
@@ -500,7 +500,7 @@ def test_ingest_interactive_mode_skips_findings_emission(
         aliases=aliases,
         wiki_repo_path=populated_wiki,
         api=FakeApi(),  # type: ignore[arg-type]
-        curator_version=1,
+        curator_version="1.0.0",
     )
     # Interactive mode: Kaiano is in the loop, no queue findings emitted.
     assert result.findings_emitted == 0

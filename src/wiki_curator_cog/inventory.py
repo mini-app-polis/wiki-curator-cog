@@ -24,11 +24,19 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
 @dataclass(frozen=True)
 class SourceRecord:
-    """One known source page in the inventory."""
+    """One known source page in the inventory.
+
+    ``curator_version`` is stored as a string because the wiki curator
+    derives its version from package metadata (semver via
+    ``importlib.metadata.version``). Legacy source pages that have
+    integer-valued ``curator_version`` frontmatter are coerced to
+    ``str`` at parse time so the equality check in
+    ``ingest_one_source`` works against both old and new pages.
+    """
 
     note_id: uuid.UUID
     path: Path
-    curator_version: int
+    curator_version: str
 
 
 @dataclass
@@ -101,10 +109,13 @@ def build_inventory(wiki_repo_path: Path) -> WikiInventory:
             note_id = uuid.UUID(str(note_id_raw))
         except (ValueError, TypeError):
             continue
-        try:
-            curator_version = int(fm.get("curator_version") or 0)
-        except (ValueError, TypeError):
-            curator_version = 0
+        # Coerce to str regardless of how it was stored in YAML.
+        # Legacy pages have int (1, 2, 3, 4); current pages have semver
+        # strings like "0.1.0". The idempotency check is equality-only,
+        # so old-format pages will naturally re-process at the next run
+        # (their stringified int won't equal the new semver).
+        raw_cv = fm.get("curator_version")
+        curator_version = "" if raw_cv is None else str(raw_cv).strip()
         inv.source_records[note_id] = SourceRecord(
             note_id=note_id,
             path=path,

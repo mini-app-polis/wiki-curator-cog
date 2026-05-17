@@ -21,6 +21,7 @@ Deployment shape (Railway, ephemeral filesystem):
 
 from __future__ import annotations
 
+import importlib.metadata
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,30 @@ def _require(name: str) -> str:
     if not v:
         raise RuntimeError(f"Missing required environment variable: {name}")
     return v
+
+
+def _resolve_curator_version() -> str:
+    """Return the curator's release version.
+
+    Resolution order:
+      1. ``WIKI_CURATOR_VERSION`` env var (escape hatch for forcing a
+         re-process at a specific version string in local dev or tests).
+      2. ``importlib.metadata.version("wiki-curator-cog")`` — reads
+         ``pyproject.toml`` via the installed-package metadata.
+         semantic-release in CI bumps that version on every release,
+         so the curator version automatically tracks the deployment.
+      3. ``"dev"`` — when the package isn't installed (raw ``PYTHONPATH``
+         test runs, etc.).
+
+    Stored on every source page as ``curator_version`` frontmatter and
+    used by the inventory's idempotency check (equality, not >=).
+    """
+    if explicit := os.getenv("WIKI_CURATOR_VERSION"):
+        return explicit.strip()
+    try:
+        return importlib.metadata.version("wiki-curator-cog")
+    except importlib.metadata.PackageNotFoundError:
+        return "dev"
 
 
 @dataclass(frozen=True)
@@ -75,7 +100,7 @@ class Config:
     gh_token: str  # may be empty for SSH-based remotes or local-only runs
 
     # Curator behavior
-    curator_version: int
+    curator_version: str  # auto-derived from package metadata (semver) or env override
     backfill_page_size: int
     state_path: Path  # incremental-mode state file (relative to repo or absolute)
 
@@ -153,7 +178,7 @@ def load_config() -> Config:
             "WIKI_GIT_AUTHOR_EMAIL", "wiki-curator@kaianolevine.com"
         ),
         gh_token=gh_token,
-        curator_version=int(os.getenv("WIKI_CURATOR_VERSION", "4")),
+        curator_version=_resolve_curator_version(),
         backfill_page_size=int(os.getenv("WIKI_BACKFILL_PAGE_SIZE", "100")),
         state_path=state_path,
         healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),

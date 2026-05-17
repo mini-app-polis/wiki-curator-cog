@@ -56,8 +56,9 @@ WIKI_BRANCH=phase-1-backfill                       # the backfill lands here; me
 WIKI_REPO_PATH=/tmp/wcs-wiki                       # ephemeral filesystem on Railway
 WIKI_GIT_AUTHOR_NAME=wiki-curator-cog
 WIKI_GIT_AUTHOR_EMAIL=wiki-curator@kaianolevine.com
-WIKI_CURATOR_VERSION=4
 ```
+
+The curator's version is auto-derived from `pyproject.toml` at runtime (semantic-release bumps it on every push to main), so there's no `WIKI_CURATOR_VERSION` to set. Override only if you need to force a re-render at a specific label.
 
 Optional but recommended (mirror transcription-cog):
 
@@ -101,10 +102,7 @@ Once env vars are set:
 
 ## Re-running the backfill
 
-The curator is idempotent: re-running at the same `WIKI_CURATOR_VERSION` skips every source already at that version. If you want to force a re-render of all sources (e.g., after a `rendering.py` change):
-
-1. Bump `WIKI_CURATOR_VERSION` in Railway env vars (e.g., 1 → 2).
-2. Re-trigger the backfill run.
+The curator is idempotent on `(note_id, curator_version)` pairs: re-running with the same package version skips every already-ingested source. To force a re-render of all sources, ship a release (semantic-release bumps the version) — the next backfill trigger sees a new version and re-renders everything. The `WIKI_CURATOR_VERSION` env var is an escape hatch to set the version string manually (rarely needed).
 
 Every source page's `curator_version` frontmatter gets updated and the page content is re-emitted. Existing source pages on the branch are overwritten; index and log entries are updated in place / appended.
 

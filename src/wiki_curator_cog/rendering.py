@@ -41,7 +41,7 @@ def render_source_frontmatter(
     instructors_raw: list[str],
     students_raw: list[str],
     contributed_to: dict[str, list[str]],
-    curator_version: int,
+    curator_version: str,
     ingested_at: dt.date,
 ) -> str:
     """Build the YAML frontmatter block, including the surrounding ``---`` fences.
@@ -75,7 +75,7 @@ def render_source_frontmatter(
             "instructors": list(contributed_to.get("instructors", [])),
             "terminology": list(contributed_to.get("terminology", [])),
         },
-        "curator_version": int(curator_version),
+        "curator_version": str(curator_version),
         "ingested_at": ingested_at.isoformat(),
     }
 
@@ -361,7 +361,7 @@ def render_source_page(
     instructors_raw: list[str],
     students_raw: list[str],
     contributed_to: dict[str, list[str]],
-    curator_version: int,
+    curator_version: str,
     ingested_at: dt.date,
     extra_notes: list[str] | None = None,
 ) -> str:

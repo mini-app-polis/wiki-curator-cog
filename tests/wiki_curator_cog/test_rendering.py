@@ -232,7 +232,7 @@ def test_frontmatter_is_valid_yaml_with_required_fields() -> None:
             "instructors": [],
             "terminology": [],
         },
-        curator_version=1,
+        curator_version="1.0.0",
         ingested_at=dt.date(2026, 5, 16),
     )
     assert block.startswith("---\n")
@@ -257,7 +257,7 @@ def test_frontmatter_is_valid_yaml_with_required_fields() -> None:
         "instructors": [],
         "terminology": [],
     }
-    assert parsed["curator_version"] == 1
+    assert parsed["curator_version"] == "1.0.0"
     assert parsed["ingested_at"] == "2026-05-16"
 
 
@@ -275,7 +275,7 @@ def test_frontmatter_handles_null_title_and_missing_date() -> None:
             "instructors": [],
             "terminology": [],
         },
-        curator_version=1,
+        curator_version="1.0.0",
         ingested_at=dt.date(2026, 5, 16),
     )
     parsed = yaml.safe_load(block.strip().strip("-").strip())
@@ -325,7 +325,7 @@ def test_render_source_page_smoke() -> None:
             "instructors": [],
             "terminology": [],
         },
-        curator_version=1,
+        curator_version="1.0.0",
         ingested_at=dt.date(2026, 5, 16),
     )
     assert "## Summary" in out
@@ -359,7 +359,7 @@ def test_render_source_page_empty_notes_json_still_writes_header() -> None:
             "instructors": [],
             "terminology": [],
         },
-        curator_version=1,
+        curator_version="1.0.0",
         ingested_at=dt.date(2026, 5, 16),
     )
     # Frontmatter is always present.
@@ -383,7 +383,7 @@ def test_render_source_page_with_extra_notes() -> None:
             "instructors": [],
             "terminology": [],
         },
-        curator_version=1,
+        curator_version="1.0.0",
         ingested_at=dt.date(2026, 5, 16),
         extra_notes=["Possible extraction issue.", "Slug collision avoided."],
     )

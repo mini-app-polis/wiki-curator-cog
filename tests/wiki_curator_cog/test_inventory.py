@@ -14,7 +14,7 @@ def _write_source_page(
     slug: str,
     *,
     note_id: uuid.UUID,
-    curator_version: int = 1,
+    curator_version: str = "1.0.0",
 ) -> Path:
     path = wiki_repo_path / "sources" / bucket / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -23,7 +23,7 @@ def _write_source_page(
 type: source
 note_id: {note_id}
 transcript_id: {uuid.uuid4()}
-curator_version: {curator_version}
+curator_version: "{curator_version}"
 ---
 
 # {slug}
@@ -47,7 +47,7 @@ def test_source_pages_indexed_by_note_id(wiki_repo_path: Path) -> None:
     assert inv.has_note(note_id)
     record = inv.existing_record(note_id)
     assert record is not None
-    assert record.curator_version == 1
+    assert record.curator_version == "1.0.0"
 
 
 def test_concept_slugs_collected_by_filename(wiki_repo_path: Path) -> None:

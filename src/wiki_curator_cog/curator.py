@@ -199,7 +199,7 @@ def ingest_one_source(
     aliases: AliasMap,
     wiki_repo_path: Path,
     api: WikiCuratorApiClient | None = None,
-    curator_version: int,
+    curator_version: str,
 ) -> IngestResult:
     """Ingest a single upstream note into the wiki.
 
@@ -216,8 +216,14 @@ def ingest_one_source(
     result = IngestResult(note_id=str(note.id))
 
     # ── 1. Idempotency check ────────────────────────────────────────
+    # Equality (not >=) because curator_version is now a semver string
+    # auto-derived from the package release. Any change to the cog —
+    # release bump, manual env override, or rolling back to a previous
+    # deploy — triggers a re-render. This is more correct than the
+    # monotonic-int comparison: rolling back from v2 to v1 SHOULD
+    # re-render everything against v1's behavior.
     existing = inventory.existing_record(note.id)
-    if existing is not None and existing.curator_version >= curator_version:
+    if existing is not None and existing.curator_version == curator_version:
         result.skipped = True
         result.skip_reason = (
             f"already ingested at curator_version={existing.curator_version}"
@@ -440,8 +446,8 @@ def _build_log_body(
     canonical_instructors: list[str],
     canonical_students: list[str],
     is_reingest: bool,
-    old_curator_version: int | None,
-    new_curator_version: int,
+    old_curator_version: str | None,
+    new_curator_version: str,
     quality_observations: list[str],
     collision_note: str | None,
     moved_from: Path | None = None,
