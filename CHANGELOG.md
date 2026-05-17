@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.3...v1.0.4) (2026-05-17)
+
+
+### Bug Fixes
+
+* align release+build setup with evaluator-cog pattern ([ac33e8b](https://github.com/mini-app-polis/wiki-curator-cog/commit/ac33e8b6f8f61560010c08e17676f3e01a5f86df))
+
 ## [1.0.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.2...v1.0.3) (2026-05-17)
 
 
