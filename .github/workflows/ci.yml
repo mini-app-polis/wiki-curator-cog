@@ -4,28 +4,68 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run pytest
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v3
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Python
-        run: uv python install 3.11
+      # uv + Python are required by the @semantic-release/exec step,
+      # which runs `uv lock` after sed-bumping pyproject.toml so the
+      # lockfile's record of THIS package's own version stays in sync
+      # with the released version. Without this, every post-release
+      # `uv sync` produces a dirty lockfile diff and developers loop
+      # on "fix: lock" commits. Mirrors transcription-cog setup.
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
 
-      - name: Install dependencies
-        run: uv sync --all-extras
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
 
-      - name: Run ruff (lint)
-        run: uv run ruff check .
+      - name: Install semantic-release plugins
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/changelog \
+            @semantic-release/commit-analyzer \
+            @semantic-release/exec \
+            @semantic-release/git \
+            @semantic-release/github \
+            @semantic-release/release-notes-generator
 
-      - name: Run ruff (format check)
-        run: uv run ruff format --check .
-
-      - name: Run pytest
-        run: uv run pytest
+      - name: Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
