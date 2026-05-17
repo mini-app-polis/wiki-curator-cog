@@ -1,3 +1,24 @@
+# 1.0.0 (2026-05-17)
+
+
+### Bug Fixes
+
+* cap slugify length to survive long upstream concept names ([7e778a4](https://github.com/mini-app-polis/wiki-curator-cog/commit/7e778a4299a5a193a80a37fc2934e99bf064c75a))
+* clean up partial source page on derived-fanout failure + cap slug length ([c73808a](https://github.com/mini-app-polis/wiki-curator-cog/commit/c73808a0b039f996e452fdda2764c42c56a4a61f))
+* release pattern ([8d1cfe5](https://github.com/mini-app-polis/wiki-curator-cog/commit/8d1cfe59ea50d9b3e2a7f1f9cc4e4c980c6a5a9e))
+* release pattern ([520f04a](https://github.com/mini-app-polis/wiki-curator-cog/commit/520f04a54f3c22dea87ab8a9aa1728bc276fae8e))
+* rev 2 ([6d83a77](https://github.com/mini-app-polis/wiki-curator-cog/commit/6d83a775f16158e45a032820d871c7ab1afd70b7))
+* rev 3 - concept based ([85e9e88](https://github.com/mini-app-polis/wiki-curator-cog/commit/85e9e889f7a66ba818890a04b63672ff2d171f99))
+* updates for running on railway ([ed52971](https://github.com/mini-app-polis/wiki-curator-cog/commit/ed5297191d5bf55ae13f93306c6e6a1c53e32b90))
+* updates to the process ([6aa8561](https://github.com/mini-app-polis/wiki-curator-cog/commit/6aa8561c38336a43736cf7864ec5fd171c3d1c07))
+
+
+### Features
+
+* curator v4 quality filters for concept/instructor fanout ([1bc1047](https://github.com/mini-app-polis/wiki-curator-cog/commit/1bc1047b424e6ea018f7e37f9ef8505b543bddcf))
+* Inital checkin ([fdb10ee](https://github.com/mini-app-polis/wiki-curator-cog/commit/fdb10ee682dae2e815d14fedf2e735fc0e0e5eed))
+* phase one implementation, untested ([22aa08d](https://github.com/mini-app-polis/wiki-curator-cog/commit/22aa08d35147665500443068aa5b79918bfec0ff))
+
 # Changelog
 
 All notable changes to this project will be documented in this file. The format follows [semantic-release](https://github.com/semantic-release/semantic-release) conventions; entries are generated from commit messages.
