@@ -21,8 +21,7 @@ def test_inject_token_into_https_url() -> None:
         "https://github.com/mini-app-polis/wcs-wiki.git", "github_pat_abc"
     )
     assert out == (
-        "https://x-access-token:github_pat_abc@github.com/"
-        "mini-app-polis/wcs-wiki.git"
+        "https://x-access-token:github_pat_abc@github.com/mini-app-polis/wcs-wiki.git"
     )
 
 
