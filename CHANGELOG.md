@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.1...v1.0.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* add .python-version so Nixpacks picks the right Python (matches transcription-cog) ([ba23841](https://github.com/mini-app-polis/wiki-curator-cog/commit/ba2384118def1d160c6a59dafff26bf22cc8ac49))
+
 ## [1.0.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.0...v1.0.1) (2026-05-17)
 
 
