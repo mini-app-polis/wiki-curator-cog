@@ -55,9 +55,7 @@ def wiki_curator_router(mode: WikiCuratorMode) -> Any:
     """Single entrypoint flow that dispatches to a sub-flow by ``mode``."""
     target = _MODE_DISPATCH.get(mode)
     if target is None:
-        raise ValueError(
-            f"Unknown mode {mode!r}. Supported: {sorted(_MODE_DISPATCH)}"
-        )
+        raise ValueError(f"Unknown mode {mode!r}. Supported: {sorted(_MODE_DISPATCH)}")
     return target()
 
 

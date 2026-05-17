@@ -16,7 +16,8 @@ visibility).
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
 from mini_app_polis.api import KaianoApiClient
 
@@ -72,9 +73,7 @@ class WikiCuratorApiClient:
         """
         offset = 0
         while True:
-            envelope = self.list_notes_all(
-                limit=page_size, offset=offset, since=since
-            )
+            envelope = self.list_notes_all(limit=page_size, offset=offset, since=since)
             data = envelope.get("data") or []
             if not data:
                 return

@@ -22,7 +22,7 @@ from prefect.concurrency.sync import concurrency
 
 from .aliases import AliasMap
 from .api_client import WikiCuratorApiClient
-from .config import Config, load_config
+from .config import load_config
 from .curator import IngestMode, ingest_one_source
 from .git_ops import WikiRepo
 from .inventory import build_inventory

@@ -41,9 +41,7 @@ def test_empty_repo_has_empty_inventory(wiki_repo_path: Path) -> None:
 
 def test_source_pages_indexed_by_note_id(wiki_repo_path: Path) -> None:
     note_id = uuid.uuid4()
-    _write_source_page(
-        wiki_repo_path, "kate", "2025-09-15-test", note_id=note_id
-    )
+    _write_source_page(wiki_repo_path, "kate", "2025-09-15-test", note_id=note_id)
 
     inv = build_inventory(wiki_repo_path)
     assert inv.has_note(note_id)

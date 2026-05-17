@@ -105,9 +105,7 @@ def load_config() -> Config:
         kaiano_api_base_url=_require("KAIANO_API_BASE_URL"),
         wiki_repo_path=wiki_repo_path,
         wiki_repo_remote=os.getenv("WIKI_REPO_REMOTE", "origin"),
-        wiki_git_author_name=os.getenv(
-            "WIKI_GIT_AUTHOR_NAME", "wiki-curator-cog"
-        ),
+        wiki_git_author_name=os.getenv("WIKI_GIT_AUTHOR_NAME", "wiki-curator-cog"),
         wiki_git_author_email=os.getenv(
             "WIKI_GIT_AUTHOR_EMAIL", "wiki-curator@kaianolevine.com"
         ),

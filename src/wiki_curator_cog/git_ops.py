@@ -10,8 +10,8 @@ can mock cleanly.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from git import Actor, Repo
 
@@ -24,9 +24,7 @@ class WikiRepo:
     def __init__(self, config: Config) -> None:
         self._config = config
         self._repo = Repo(config.wiki_repo_path)
-        self._author = Actor(
-            config.wiki_git_author_name, config.wiki_git_author_email
-        )
+        self._author = Actor(config.wiki_git_author_name, config.wiki_git_author_email)
 
     @property
     def path(self) -> Path:

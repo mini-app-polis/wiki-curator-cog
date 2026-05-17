@@ -1,31 +1,50 @@
 """Per-source ingest logic — the heart of wiki-curator-cog.
 
-ingest_one_source(note, mode, inventory, aliases, wiki_repo_path) is the
-single entry point. The function:
+``ingest_one_source(note, mode, inventory, aliases, wiki_repo_path)`` is the
+single entry point. It:
 
   1. Decides whether to skip (idempotency check against inventory).
-  2. Writes the source page.
-  3. Updates affected concept/technique/instructor/terminology pages.
-  4. Updates index.md and appends to log.md.
-  5. Returns a result describing what was touched.
+  2. Canonicalizes instructor/student names (mutating the alias map in
+     backfill/automated mode; raising UnknownNameError in interactive
+     mode so the caller can prompt Kaiano).
+  3. Computes the source page's bucket directory and slug.
+  4. Renders and writes the source page.
+  5. Idempotently updates ``index.md`` and appends to ``log.md``.
+  6. Updates the in-memory inventory so subsequent iterations in the
+     same run see this note as already-ingested.
+  7. Emits ``wiki.source.quality_issue`` and
+     ``wiki.schema.suggested_section`` findings (automated/backfill modes).
+  8. Returns an IngestResult describing what was touched.
 
-Steps 2–3 require LLM-driven judgment (see wcs-wiki/CLAUDE.md). Phase 1
-implementation will fill those in; this module currently defines the
-shape and the deterministic parts.
+Phase 1 scope: source pages only. Concept, technique, instructor, and
+terminology pages are NOT created or updated here yet — that's the LLM
+step, slated for Phase 1.5. The IngestResult's ``contributed_to`` lists
+will all be empty until then.
+
+See ``wcs-wiki/CLAUDE.md`` ("Ingest workflow") for the full operational
+spec the curator is implementing.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from mini_app_polis import logger as log
 
 from .aliases import AliasMap
-from .inventory import WikiInventory
+from .inventory import SourceRecord, WikiInventory
 from .models import WcsNote
+from .rendering import detect_quality_issues, render_source_page
+from .slugs import (
+    bucket_for_instructors,
+    build_source_slug,
+    canonicalize_names,
+)
+from .wiki_files import append_log_entry, upsert_source_in_index
 
 if TYPE_CHECKING:
     from .api_client import WikiCuratorApiClient
@@ -33,10 +52,17 @@ if TYPE_CHECKING:
 LOG = log.get_logger()
 
 
-class IngestMode(str, Enum):
+class IngestMode(StrEnum):
     INTERACTIVE = "interactive"
     AUTOMATED = "automated"
     BACKFILL = "backfill"
+
+
+# Modes that auto-add new names to the alias map vs. raising for
+# operator intervention.
+_AUTO_ADD_MODES: frozenset[IngestMode] = frozenset(
+    {IngestMode.AUTOMATED, IngestMode.BACKFILL}
+)
 
 
 @dataclass
@@ -51,6 +77,102 @@ class IngestResult:
     findings_emitted: int = 0
 
 
+def _resolve_unique_source_path(
+    wiki_repo_path: Path,
+    *,
+    bucket: str,
+    base_slug: str,
+    note_id: str,
+) -> tuple[Path, str, str | None]:
+    """Pick a non-colliding path for the source page.
+
+    The base slug is derived from session_date + title-or-fallback;
+    distinct notes can collide (same date, same title, different
+    teachers). When the destination already exists for a DIFFERENT
+    note_id, we suffix the slug (``-2``, ``-3``, …) until we find a
+    free name.
+
+    Returns ``(final_path, final_slug, collision_note)`` where
+    ``collision_note`` is a human-readable line to add to the source
+    page's ``## Notes`` section if a suffix was needed, or ``None`` if
+    the base slug was usable as-is.
+    """
+    bucket_dir = wiki_repo_path / "sources" / bucket
+    candidate_slug = base_slug
+    candidate_path = bucket_dir / f"{candidate_slug}.md"
+    collision_note: str | None = None
+    suffix = 1
+
+    while candidate_path.exists():
+        # Re-ingest of the same note (already-processed at a lower
+        # curator_version, falling through the inventory check because
+        # the inventory was loaded BEFORE the bump) reuses the same
+        # path. Distinguish by reading the existing frontmatter's
+        # note_id.
+        existing = candidate_path.read_text()
+        if f"note_id: {note_id}" in existing:
+            # Same note — overwrite is fine. Done.
+            break
+        suffix += 1
+        candidate_slug = f"{base_slug}-{suffix}"
+        candidate_path = bucket_dir / f"{candidate_slug}.md"
+        if collision_note is None:
+            collision_note = (
+                f"Slug ``{base_slug}`` collided with an existing source "
+                f"page for a different note. Disambiguated as "
+                f"``{candidate_slug}``."
+            )
+
+    return candidate_path, candidate_slug, collision_note
+
+
+def _emit_findings(
+    api: WikiCuratorApiClient | None,
+    *,
+    mode: IngestMode,
+    note_id: str,
+    notes_json_observations: list[str],
+) -> int:
+    """Emit pipeline_evaluations findings for the relevant observations.
+
+    Only emits in automated/backfill modes (interactive mode keeps
+    Kaiano in the loop and doesn't need queue-based review). Returns
+    the count of findings emitted. Silently no-ops when no API client
+    was passed in (tests, dry runs).
+    """
+    if api is None or mode == IngestMode.INTERACTIVE:
+        return 0
+    if not notes_json_observations:
+        return 0
+
+    count = 0
+    for obs in notes_json_observations:
+        # Heuristic split: "Upstream LLM suggested" → schema dimension;
+        # everything else → quality dimension. detect_quality_issues
+        # produces both kinds.
+        if obs.startswith("Upstream LLM suggested"):
+            dimension = "wiki.schema.suggested_section"
+        else:
+            dimension = "wiki.source.quality_issue"
+        try:
+            api.post_run_evaluation(
+                dimension=dimension,
+                severity="WARN" if dimension.endswith(".quality_issue") else "INFO",
+                finding=f"note_id={note_id}: {obs}",
+            )
+            count += 1
+        except Exception as exc:  # noqa: BLE001 — best-effort observability
+            LOG.warning(
+                "ingest.finding_emit_failed",
+                extra={
+                    "note_id": note_id,
+                    "dimension": dimension,
+                    "err": str(exc),
+                },
+            )
+    return count
+
+
 def ingest_one_source(
     *,
     note: WcsNote,
@@ -58,29 +180,24 @@ def ingest_one_source(
     inventory: WikiInventory,
     aliases: AliasMap,
     wiki_repo_path: Path,
-    api: "WikiCuratorApiClient",
+    api: WikiCuratorApiClient | None = None,
     curator_version: int,
 ) -> IngestResult:
     """Ingest a single upstream note into the wiki.
 
-    Idempotency contract: a note already present at the same
-    curator_version is a no-op. Different curator_version triggers
-    reprocessing.
+    See module docstring for the sequence. Mutations performed:
 
-    Phase 1 implementation will:
-      - Resolve instructor/student slugs via aliases (escalating new
-        variants to Kaiano in interactive mode, auto-adding in others).
-      - Write the source page from notes_json per the schema in
-        wcs-wiki/CLAUDE.md "Source pages" section.
-      - Call the LLM to identify which existing wiki pages this source
-        affects, and how, then apply updates.
-      - Emit pipeline-evaluation findings for skipped judgment calls
-        (automated mode).
-
-    See wcs-wiki/CLAUDE.md "Ingest workflow" for the full sequence.
+    - ``aliases`` may gain new entries (auto-add modes only). The
+      caller is responsible for ``aliases.save()`` — typically once at
+      end of run.
+    - ``inventory`` gains a ``SourceRecord`` for this note. Subsequent
+      ``inventory.has_note()`` calls will return True.
+    - Files written under ``wiki_repo_path``: the source page,
+      ``index.md``, and ``log.md``.
     """
     result = IngestResult(note_id=str(note.id))
 
+    # ── 1. Idempotency check ────────────────────────────────────────
     existing = inventory.existing_record(note.id)
     if existing is not None and existing.curator_version >= curator_version:
         result.skipped = True
@@ -89,27 +206,167 @@ def ingest_one_source(
         )
         LOG.info(
             "ingest.skip",
-            extra={
-                "note_id": str(note.id),
-                "reason": result.skip_reason,
-            },
+            extra={"note_id": str(note.id), "reason": result.skip_reason},
         )
         return result
 
-    # TODO Phase 1: implement the steps from CLAUDE.md "Ingest workflow".
-    # The shape below is what callers will receive once it's filled in.
-    LOG.warning(
-        "ingest.not_implemented",
+    # ── 2. Canonicalize names ───────────────────────────────────────
+    auto_add = mode in _AUTO_ADD_MODES
+    canonical_instructors = canonicalize_names(
+        note.instructors, aliases, auto_add=auto_add
+    )
+    canonical_students = canonicalize_names(note.students, aliases, auto_add=auto_add)
+
+    # ── 3. Compute bucket + slug ────────────────────────────────────
+    bucket = bucket_for_instructors(canonical_instructors)
+    base_slug = build_source_slug(
+        session_date=note.session_date,
+        title=note.title,
+        canonical_instructors=canonical_instructors,
+        session_type=note.session_type,
+        created_at=note.created_at,
+    )
+    source_path, final_slug, collision_note = _resolve_unique_source_path(
+        wiki_repo_path,
+        bucket=bucket,
+        base_slug=base_slug,
+        note_id=str(note.id),
+    )
+
+    # ── 4. Build extra notes (quality + collision) ──────────────────
+    quality_observations = detect_quality_issues(note.notes_json)
+    extra_notes: list[str] = []
+    extra_notes.extend(quality_observations)
+    if collision_note:
+        extra_notes.append(collision_note)
+
+    # ── 5. Render and write the source page ─────────────────────────
+    rendered = render_source_page(
+        note,
+        canonical_instructors=canonical_instructors,
+        canonical_students=canonical_students,
+        instructors_raw=list(note.instructors),
+        students_raw=list(note.students),
+        contributed_to={
+            # Phase 1: deterministic source-page-only ingest. Other
+            # page types are not yet created or updated; these lists
+            # stay empty until the LLM step lands.
+            "concepts": [],
+            "techniques": [],
+            "instructors": [],
+            "terminology": [],
+        },
+        curator_version=curator_version,
+        ingested_at=dt.date.today(),
+        extra_notes=extra_notes,
+    )
+    source_path.parent.mkdir(parents=True, exist_ok=True)
+    source_path.write_text(rendered)
+
+    # ── 6. Update index.md ──────────────────────────────────────────
+    index_path = wiki_repo_path / "index.md"
+    upsert_source_in_index(
+        index_path,
+        source_slug=final_slug,
+        bucket=bucket,
+        canonical_instructors=canonical_instructors,
+        session_type=note.session_type,
+        session_date=note.session_date,
+        title=note.title,
+    )
+
+    # ── 7. Append to log.md ─────────────────────────────────────────
+    log_path = wiki_repo_path / "log.md"
+    log_body = _build_log_body(
+        note=note,
+        bucket=bucket,
+        final_slug=final_slug,
+        canonical_instructors=canonical_instructors,
+        canonical_students=canonical_students,
+        is_reingest=existing is not None,
+        old_curator_version=existing.curator_version if existing else None,
+        new_curator_version=curator_version,
+        quality_observations=quality_observations,
+        collision_note=collision_note,
+    )
+    append_log_entry(
+        log_path,
+        action="ingest",
+        subject=final_slug,
+        body=log_body,
+    )
+
+    # ── 8. Update inventory in-place ────────────────────────────────
+    inventory.source_records[note.id] = SourceRecord(
+        note_id=note.id,
+        path=source_path,
+        curator_version=curator_version,
+    )
+
+    # ── 9. Emit findings (automated/backfill only) ──────────────────
+    result.findings_emitted = _emit_findings(
+        api,
+        mode=mode,
+        note_id=str(note.id),
+        notes_json_observations=quality_observations,
+    )
+
+    # ── 10. Fill in the result ──────────────────────────────────────
+    result.source_path = source_path
+    result.touched_paths = [source_path, index_path, log_path]
+
+    LOG.info(
+        "ingest.complete",
         extra={
             "note_id": str(note.id),
             "mode": mode.value,
-            "session_type": note.session_type,
-            "instructors": note.instructors,
-            "students": note.students,
+            "slug": final_slug,
+            "bucket": bucket,
+            "instructors": canonical_instructors,
+            "students": canonical_students,
+            "findings_emitted": result.findings_emitted,
+            "extra_notes": len(extra_notes),
         },
     )
-    raise NotImplementedError(
-        "ingest_one_source is stubbed in this initial skeleton. "
-        "Phase 1 implementation: see wcs-wiki/CLAUDE.md 'Ingest workflow' "
-        "for the sequence."
+    return result
+
+
+def _build_log_body(
+    *,
+    note: WcsNote,
+    bucket: str,
+    final_slug: str,
+    canonical_instructors: list[str],
+    canonical_students: list[str],
+    is_reingest: bool,
+    old_curator_version: int | None,
+    new_curator_version: int,
+    quality_observations: list[str],
+    collision_note: str | None,
+) -> str:
+    """Compose the short body for a single log.md ingest entry."""
+    lines: list[str] = []
+    lines.append(
+        f"Ingested source `{final_slug}` "
+        f"(note_id `{note.id}`) into `sources/{bucket}/`."
     )
+    if canonical_instructors:
+        lines.append(
+            f"Instructors: {', '.join(canonical_instructors)}. "
+            f"Students: "
+            + (", ".join(canonical_students) if canonical_students else "(none)")
+            + "."
+        )
+    if is_reingest:
+        lines.append(
+            f"Re-ingest: was at curator_version={old_curator_version}, "
+            f"now at {new_curator_version}."
+        )
+    if collision_note:
+        lines.append(collision_note)
+    if quality_observations:
+        lines.append(
+            f"Quality observations recorded in source page Notes section "
+            f"({len(quality_observations)})."
+        )
+    return "\n\n".join(lines)
