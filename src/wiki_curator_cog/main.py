@@ -15,11 +15,23 @@ Two invocation styles:
       backfill where no Prefect Cloud trigger is wired up yet, or for
       developer machines that don't want to run a Prefect serve loop.
 
-The router flow itself supports the same modes when triggered via
+  ``python -m wiki_curator_cog.main bootstrap-aliases``
+      Utility. Scans ``instructors/`` for duplicate variants of the
+      same person, writes safe merges into ``_aliases.yaml`` and
+      ambiguous groups into ``_aliases.review.md``. Commits and pushes.
+
+  ``python -m wiki_curator_cog.main regenerate-views``
+      Utility. Re-renders the four required ``views/`` pages from
+      current source state. Commits and pushes.
+
+The router flow itself supports the two main modes when triggered via
 Prefect Cloud:
 
   - ``"backfill"``     → one-time corpus run
   - ``"incremental"``  → process notes since last run
+
+Utilities are intentionally NOT exposed via the Prefect router — they
+are one-off operations, not recurring scheduled flows.
 
 Observability layers:
   L1 — Healthchecks.io: pinged on startup
@@ -41,9 +53,12 @@ from dotenv import load_dotenv
 from mini_app_polis import logger as log
 from prefect import flow, serve
 
-from wiki_curator_cog.boot import mask_url
-from wiki_curator_cog.config import load_config
+from wiki_curator_cog.boot import ensure_wiki_clone, mask_url
+from wiki_curator_cog.bootstrap_aliases import bootstrap_aliases
+from wiki_curator_cog.config import assert_wiki_clone_ready, load_config
 from wiki_curator_cog.flow import backfill_flow, incremental_flow
+from wiki_curator_cog.git_ops import WikiRepo
+from wiki_curator_cog.views import regenerate_views
 
 load_dotenv()
 
@@ -59,6 +74,15 @@ _MODE_DISPATCH: dict[str, Any] = {
     "backfill": backfill_flow,
     "incremental": incremental_flow,
 }
+
+# Utility one-offs that don't go through Prefect — they're synchronous
+# scripts that operate on a working clone of the wiki and exit. Kept
+# separate from _MODE_DISPATCH because Prefect Cloud's router shouldn't
+# offer them as scheduled-flow targets.
+_UTILITY_DISPATCH: frozenset[str] = frozenset({"bootstrap-aliases", "regenerate-views"})
+
+# Every legal CLI subcommand, in stable order for argparse choices.
+_ALL_SUBCOMMANDS: list[str] = sorted(set(_MODE_DISPATCH) | _UTILITY_DISPATCH)
 
 
 @flow(name="wiki-curator-cog")
@@ -142,22 +166,78 @@ def _run_one_off(mode: str) -> int:
     return 0
 
 
+def _run_utility(mode: str) -> int:
+    """Run a non-Prefect utility against the working wiki clone.
+
+    Currently supports:
+
+      - ``bootstrap-aliases`` — scan ``instructors/`` for duplicates,
+        write safe merges into ``_aliases.yaml`` and ambiguous groups
+        into ``_aliases.review.md``. Commits and pushes the result.
+      - ``regenerate-views`` — re-render the four required view pages
+        from current source state. Commits and pushes the result.
+
+    Both utilities go through ``ensure_wiki_clone`` so they work in
+    the same ephemeral-environment shape as the production flows.
+    """
+    config = load_config()
+    _init_observability(config)
+    ensure_wiki_clone(config)
+    assert_wiki_clone_ready(config)
+    wiki_repo = WikiRepo(config)
+
+    summary: dict[str, Any]
+    if mode == "bootstrap-aliases":
+        result = bootstrap_aliases(config.wiki_repo_path)
+        summary = {
+            "instructor_pages_scanned": result.instructor_pages_scanned,
+            "safe_merge_groups": result.safe_merge_groups,
+            "safe_alias_entries_added": result.safe_alias_entries_added,
+            "ambiguous_groups": result.ambiguous_groups,
+        }
+        if wiki_repo.has_changes():
+            wiki_repo.stage([result.aliases_path, result.review_path])
+            wiki_repo.commit(
+                f"bootstrap: alias map ({result.safe_merge_groups} merges, "
+                f"{result.ambiguous_groups} ambiguous)"
+            )
+            wiki_repo.push()
+    elif mode == "regenerate-views":
+        view_paths = regenerate_views(
+            config.wiki_repo_path, curator_version=config.curator_version
+        )
+        summary = {"views_written": [str(p.name) for p in view_paths]}
+        if wiki_repo.has_changes():
+            wiki_repo.stage(view_paths)
+            wiki_repo.commit("regenerate: views")
+            wiki_repo.push()
+    else:
+        sys.stderr.write(f"Unknown utility {mode!r}.\n")
+        return 2
+
+    LOG.info("utility.complete mode=%s summary=%s", mode, summary)
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="wiki-curator-cog",
         description=(
             "Run wiki-curator-cog. With no subcommand, registers a Prefect "
             "deployment and serves forever (Railway default). With "
-            "'backfill' or 'incremental', runs that flow once and exits."
+            "'backfill' / 'incremental', runs that flow once and exits. "
+            "With 'bootstrap-aliases' / 'regenerate-views', runs the named "
+            "utility once and exits."
         ),
     )
     parser.add_argument(
         "mode",
         nargs="?",
         default=None,
-        choices=sorted(_MODE_DISPATCH),
+        choices=_ALL_SUBCOMMANDS,
         help=(
-            "One-off mode to run. Omit to serve the Prefect deployment "
+            "Subcommand to run. Omit to serve the Prefect deployment "
             "in the steady-state pattern."
         ),
     )
@@ -168,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     if args.mode is None:
         return _serve_forever()
+    if args.mode in _UTILITY_DISPATCH:
+        return _run_utility(args.mode)
     return _run_one_off(args.mode)
 
 

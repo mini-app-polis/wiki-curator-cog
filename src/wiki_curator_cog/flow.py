@@ -28,6 +28,7 @@ from .curator import IngestMode, ingest_one_source
 from .git_ops import WikiRepo
 from .inventory import build_inventory
 from .state import load_state, save_state
+from .views import regenerate_views
 
 load_dotenv()
 
@@ -113,9 +114,20 @@ def backfill_flow() -> dict:
 
         # Save aliases once at end of backfill (may have grown).
         aliases.save()
+
+        # Regenerate the four required views once at end of backfill,
+        # per CLAUDE.md "Backfill mode" ("Skip view regeneration per
+        # source; regenerate all views once at the end"). The view
+        # pages are derived artifacts — they're always overwritten
+        # from current source state, so this is idempotent.
+        view_paths = regenerate_views(
+            config.wiki_repo_path, curator_version=config.curator_version
+        )
+        wiki_repo.stage(view_paths)
+
         if wiki_repo.has_changes():
             wiki_repo.stage_all()
-            wiki_repo.commit("backfill: alias map and residual updates")
+            wiki_repo.commit("backfill: alias map, views, and residual updates")
 
         wiki_repo.push()
 
@@ -204,9 +216,20 @@ def incremental_flow() -> dict:
                 wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
 
         aliases.save()
+
+        # Regenerate views only if this run actually ingested at least
+        # one source — otherwise the existing view files are still
+        # accurate and we'd just touch their regenerated_at timestamps
+        # for no reason.
+        if ingested > 0:
+            view_paths = regenerate_views(
+                config.wiki_repo_path, curator_version=config.curator_version
+            )
+            wiki_repo.stage(view_paths)
+
         if wiki_repo.has_changes():
             wiki_repo.stage_all()
-            wiki_repo.commit("incremental: alias map and residual updates")
+            wiki_repo.commit("incremental: alias map, views, and residual updates")
 
         wiki_repo.push()
 

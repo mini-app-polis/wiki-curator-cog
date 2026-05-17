@@ -140,6 +140,91 @@ def test_plan_drops_sentence_shaped_concepts() -> None:
     assert not any("leaders-should" in s for s in slugs)
 
 
+def test_plan_drops_conjunction_shaped_concepts() -> None:
+    """Concepts joined by vs/or are multi-concept smushes, not noun-phrases."""
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                # Real noun-phrase, kept.
+                {"concept": "Settle", "detail": "Sink into the floor."},
+                # "X vs Y" — rejected.
+                {
+                    "concept": "eccentric vs concentric muscle engagement",
+                    "detail": "...",
+                },
+                # "X or Y" — rejected.
+                {"concept": "connect at or below the connection", "detail": "..."},
+                # hyphenated "vs" — rejected via hyphen tokenization.
+                {"concept": "eccentric-vs-concentric", "detail": "..."},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs}
+    assert slugs == {"settle"}
+
+
+def test_plan_drops_repeated_word_concepts() -> None:
+    """Repeated word in a 'concept' almost always means a smushed list."""
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                {"concept": "Frame", "detail": "..."},
+                {"concept": "competitive ceiling competitive floor", "detail": "..."},
+                {"concept": "walk walk triple step triple step", "detail": "..."},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs}
+    assert slugs == {"frame"}
+
+
+def test_plan_drops_variation_suffix_concepts() -> None:
+    """`X variation` belongs on the technique page, not as its own concept."""
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                {"concept": "Anchor", "detail": "..."},
+                {"concept": "parallel hips sugar tuck variation", "detail": "..."},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs}
+    assert slugs == {"anchor"}
+
+
+def test_plan_drops_interior_stopword_concepts() -> None:
+    """`pulling the trigger on redirection` is sentence-shaped (interior 'the')."""
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                {"concept": "Stretch", "detail": "..."},
+                {"concept": "pulling the trigger on redirection", "detail": "..."},
+                # Interior 'of' — rejected.
+                {"concept": "release of compression sequence", "detail": "..."},
+                # First-position 'the' is allowed (not interior).
+                {"concept": "the anchor", "detail": "..."},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs}
+    assert "stretch" in slugs
+    assert "the-anchor" in slugs
+    assert not any("pulling" in s for s in slugs)
+    assert not any("release-of" in s for s in slugs)
+
+
 def test_plan_drops_non_person_references() -> None:
     """References that are events/schools/objects shouldn't create
     instructor pages. Only individual-person references should."""

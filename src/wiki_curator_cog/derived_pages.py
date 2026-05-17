@@ -30,6 +30,7 @@ LATER (deferred LLM passes, not in this module):
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -79,40 +80,238 @@ _INSTRUCTOR_NAME_BLOCKLIST_SUBSTRINGS: tuple[str, ...] = (
     "various",
 )
 
+# ── Concept filter shape rules ──────────────────────────────────────────
+# v4 (word-count only) let through too many sentence-shaped names like
+# "eccentric vs concentric muscle engagement", "connect at or below the
+# connection", "competitive ceiling competitive floor". These rules
+# reject the recurring shapes we saw in the wiki audit. They're all
+# lowercase, whitespace-tokenized checks.
+
+# Conjunctions that signal a multi-concept smush rather than one
+# noun-phrase. "X vs Y", "X or Y", "X versus Y" etc.
+_CONCEPT_CONJUNCTION_TOKENS: frozenset[str] = frozenset(
+    {"vs", "vs.", "versus", "or", "v"}
+)
+
+# Stop / function words that don't appear in noun-phrase concept names
+# but DO appear in sentence-shaped names from the upstream LLM. Order:
+# articles, prepositions, conjunctions of subordination. We check for
+# these as interior tokens (not first/last) so legitimate names that
+# start with "On the …" don't false-positive on day one.
+_CONCEPT_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "with",
+        "without",
+        "from",
+        "into",
+        "by",
+        "as",
+        "above",
+        "below",
+        "between",
+        "before",
+        "after",
+        "when",
+        "while",
+        "until",
+        "during",
+        "via",
+    }
+)
+
+# Suffix words that flag this as belonging on a technique page (a
+# named variant) rather than as its own standalone concept page.
+_CONCEPT_TECHNIQUE_SUFFIX_WORDS: frozenset[str] = frozenset(
+    {"variation", "variations", "drill", "drills"}
+)
+
 
 def _passes_concept_filter(concept_name: str) -> bool:
     """Heuristic: a real concept name is a noun-phrase, not a sentence.
 
-    Drop if word-count exceeds the cap. Word-count is computed on the
-    raw name (before slugify) so we don't trip on hyphens-as-separators
-    in legitimate compound terms ("bow-and-snap" is one phrase, two
-    hyphens).
+    Reject when any of the following hold:
+
+      - Empty / blank.
+      - More than ``_CONCEPT_NAME_MAX_WORDS`` whitespace-separated tokens.
+      - Contains a conjunction token (``vs`` / ``or`` / ``versus``) that
+        joins multiple concepts in one name.
+      - Contains a stopword/function word in an interior position
+        (``connect at or below the connection``, ``pulling the trigger
+        on redirection``) — these are sentence-shaped, not noun-phrases.
+      - Contains a repeated word (``competitive ceiling competitive
+        floor``, ``walk walk triple step triple step``) — pretty
+        reliably a smushed list rather than one concept.
+      - Ends in a technique-variant suffix (``parallel hips sugar tuck
+        variation``) — belongs on the parent technique page, not as its
+        own concept.
+
+    Word-count is computed on the raw name (before slugify) so we don't
+    trip on hyphens-as-separators in legitimate compound terms
+    (``bow-and-snap`` is one phrase, two hyphens).
     """
-    words = concept_name.split()
-    return 0 < len(words) <= _CONCEPT_NAME_MAX_WORDS
+    if not concept_name or not concept_name.strip():
+        return False
+    # Treat hyphens as word separators for shape analysis — many upstream
+    # values arrive pre-hyphenated ("eccentric-vs-concentric-muscle-
+    # engagement") and we need to see "vs" as its own token.
+    tokens = [t for t in re.split(r"[\s\-]+", concept_name.lower()) if t]
+    if not 0 < len(tokens) <= _CONCEPT_NAME_MAX_WORDS:
+        return False
+    if any(tok in _CONCEPT_CONJUNCTION_TOKENS for tok in tokens):
+        return False
+    # Interior stopwords only — allow a name like "anchor" or "the
+    # anchor" (first-position "the" is uncommon but not disqualifying;
+    # last-position stopwords don't really occur in practice).
+    if len(tokens) >= 3:
+        interior = tokens[1:-1]
+        if any(tok in _CONCEPT_STOPWORDS for tok in interior):
+            return False
+    if len(tokens) != len(set(tokens)):
+        # A repeated word almost always means we're looking at a smushed
+        # list ("X-X-Y-X-Y") rather than a concept.
+        return False
+    if tokens[-1] in _CONCEPT_TECHNIQUE_SUFFIX_WORDS:
+        return False
+    return True
+
+
+# ── Instructor filter shape rules ───────────────────────────────────────
+# v4 (allowlist of ref types + person-shape heuristic) let through
+# events ("Cash Bash", "Champ Camps"), dance styles ("Argentine Tango",
+# "Contact Improvisation"), org acronyms ("ASDC"), geographic event
+# names ("Chicago Classic", "City of Angels"), and even a technique
+# ("Chenet Turn"). These rules add explicit denials for the recurring
+# non-person shapes we saw in the wiki audit.
+
+# Dance style names. Match as whole tokens within the lowercased name.
+_NON_PERSON_DANCE_STYLES: frozenset[str] = frozenset(
+    {
+        "tango",
+        "salsa",
+        "hustle",
+        "bachata",
+        "kizomba",
+        "zouk",
+        "lindy",
+        "balboa",
+        "blues",
+        "ballroom",
+        "jive",
+        "samba",
+        "rumba",
+        "cha-cha",
+        "improvisation",
+        "wcs",
+    }
+)
+
+# Event / competition / workshop name suffix tokens. If the name ends
+# in any of these (case-insensitive), it's almost certainly an event,
+# not a person.
+_NON_PERSON_EVENT_SUFFIXES: frozenset[str] = frozenset(
+    {
+        "bash",
+        "classic",
+        "cup",
+        "jam",
+        "camp",
+        "camps",
+        "open",
+        "finals",
+        "champs",
+        "championships",
+        "championship",
+        "convention",
+        "competition",
+        "comp",
+        "festival",
+        "weekend",
+        "intensive",
+        "workshop",
+        "workshops",
+        "battle",
+        "showcase",
+        "showdown",
+    }
+)
+
+# Common geographic / generic words that appear in event names but never
+# in person names. Matched as any-position whole tokens.
+_NON_PERSON_PLACE_TOKENS: frozenset[str] = frozenset(
+    {
+        "city",
+        "of",
+        "angels",
+        "academy",
+        "studio",
+        "school",
+        "dance",
+        "swing",
+    }
+)
+
+
+def _looks_like_acronym(name: str) -> bool:
+    """All-uppercase 2-5 char token with no whitespace — likely an org acronym."""
+    s = name.strip()
+    return 2 <= len(s) <= 5 and s.isupper() and s.isalpha()
 
 
 def _passes_instructor_filter(name: str, ref_type: str) -> bool:
     """Heuristic: a real instructor reference is an individual person.
 
-    Allowed if:
-      - ``ref_type`` matches the allowlist (caller's claim that this is a
-        person we should track), OR
-      - ``name`` shape passes: 1-3 whitespace-separated words, no
-        blocklist substrings.
+    Two-stage check:
 
-    The combined check tolerates the upstream LLM's inconsistent type
-    population while still excluding events, schools, and multi-person
-    entries when no type signal exists.
+      1. Hard rejections that apply regardless of ``ref_type``: hedged
+         placeholders ("not stated"), multi-person joiners ("and"/"&"),
+         dance-style tokens, event-suffix tokens, place tokens, org
+         acronyms. These shapes are reliably not-a-person even when
+         upstream mis-tags them with ``type=instructor``.
+      2. If ``ref_type`` is in the allowlist, allow. Otherwise fall back
+         to a name-shape check: 1-3 alphabetic-led tokens.
+
+    Returns True for real-looking individual people, False otherwise.
     """
     if not name or not name.strip():
         return False
 
     lowered = name.lower()
+
+    # Stage 1: hard rejections.
     for blocked in _INSTRUCTOR_NAME_BLOCKLIST_SUBSTRINGS:
         if blocked in lowered:
             return False
 
+    tokens = [t for t in re.split(r"[\s\-]+", lowered) if t]
+    if not tokens:
+        return False
+
+    # Acronyms — usually orgs, not people.
+    if _looks_like_acronym(name.strip()):
+        return False
+
+    # Dance style names (whole-token match).
+    if any(tok in _NON_PERSON_DANCE_STYLES for tok in tokens):
+        return False
+
+    # Event-suffix names (suffix match on last token).
+    if tokens[-1] in _NON_PERSON_EVENT_SUFFIXES:
+        return False
+
+    # Place / generic tokens (whole-token match).
+    if any(tok in _NON_PERSON_PLACE_TOKENS for tok in tokens):
+        return False
+
+    # Stage 2: type-based allow, else shape fallback.
     if ref_type and ref_type.lower() in _INSTRUCTOR_TYPE_ALLOWLIST:
         return True
 
@@ -617,10 +816,134 @@ def apply_contributions(
                         pass
                 md.add_unique(page.frontmatter, "sources", c.source_slug)
 
+        # Structural synthesis pass — populates ## Overview (if blank)
+        # and re-renders ## Across sources from the now-up-to-date page.
+        _synthesize_page(page, page_type)
+
         page_path.write_text(md.serialize(page))
         touched[page_path] = None
 
     return list(touched.keys())
+
+
+# ── Structural synthesis: ## Overview + ## Across sources ──────────────
+# Run after all contributions for a page are upserted. Populates two
+# sections from data already on the page (no LLM, no external lookup):
+#
+#   ## Overview        — one neutral sentence summarizing how many
+#                        teachers + sources contribute to this concept,
+#                        only when the page has crossed the >=3-source
+#                        threshold. Skipped if a human or LLM has
+#                        already written an Overview, so prose
+#                        improvements are durable across re-renders.
+#
+#   ## Across sources  — per-teacher source counts, computed by
+#                        scanning ## By teacher's H3 subsections for
+#                        source citation tokens. Always re-written when
+#                        the page has >=3 sources, since this section
+#                        is wholly mechanical.
+#
+# These are layered on top of the existing By-teacher rendering; they
+# don't change attribution or claims, just structure the metadata.
+
+_MIN_SOURCES_FOR_SYNTHESIS: int = 3
+
+# Matches the source-citation token rendered by _source_citation: e.g.
+# "([[sources/kaiano/2025-09-15-kate-private-lesson]])". One match per
+# paragraph in a teacher's subsection means one source contribution.
+_CITATION_RE = re.compile(r"\(\[\[sources/[^/]+/([^\]]+)\]\]\)")
+
+
+def _placeholder_only(body_lines: list[str]) -> bool:
+    """Section body is empty or whitespace — safe to overwrite."""
+    return not any(line.strip() for line in body_lines)
+
+
+def _count_sources_per_teacher(by_teacher_body: list[str]) -> list[tuple[str, int]]:
+    """Return [(teacher_heading, distinct_source_count), ...] in document order.
+
+    Skips any prose preceding the first H3. A teacher subsection whose
+    body has no source citations contributes (heading, 0) — we keep the
+    entry so the Across-sources rendering matches By-teacher order.
+    """
+    chunks = md.split_h3(by_teacher_body)
+    counts: list[tuple[str, int]] = []
+    for heading, body in chunks:
+        if heading is None:
+            continue
+        text = "\n".join(body)
+        sources = set(_CITATION_RE.findall(text))
+        counts.append((heading, len(sources)))
+    return counts
+
+
+def _render_overview(
+    *, source_count: int, teacher_count: int, teachers_in_order: list[str]
+) -> list[str]:
+    """One-sentence neutral gloss for the ## Overview section.
+
+    Kept deliberately mechanical so it's obvious to a reader that this
+    is auto-generated metadata, not a synthesized definition. If the
+    curator later gains LLM synthesis, _placeholder_only() will let
+    this get replaced once with real prose and then preserved.
+    """
+    if teacher_count == 1:
+        teachers_clause = f"by {teachers_in_order[0]}"
+    elif teacher_count == 2:
+        teachers_clause = f"by {teachers_in_order[0]} and {teachers_in_order[1]}"
+    else:
+        teachers_clause = (
+            f"by {', '.join(teachers_in_order[:-1])}, and {teachers_in_order[-1]}"
+        )
+    return [
+        f"Taught across {source_count} sources {teachers_clause}. "
+        "See **By teacher** below for each teacher's framing.",
+    ]
+
+
+def _render_across_sources(per_teacher: list[tuple[str, int]]) -> list[str]:
+    """Bullet list of teachers and their source counts."""
+    lines: list[str] = []
+    for heading, n in per_teacher:
+        if n <= 0:
+            continue
+        s = "source" if n == 1 else "sources"
+        lines.append(f"- **{heading}** — {n} {s}")
+    return lines
+
+
+def _synthesize_page(page: md.Page, page_type: PageType) -> None:
+    """Populate ## Overview (if blank) and ## Across sources for concept/technique pages.
+
+    Mutates ``page`` in place. No-op if the page has fewer than
+    ``_MIN_SOURCES_FOR_SYNTHESIS`` distinct sources or isn't a
+    synthesizable page type.
+    """
+    if page_type not in {"concept", "technique"}:
+        return
+    sources = page.frontmatter.get("sources") or []
+    if not isinstance(sources, list) or len(sources) < _MIN_SOURCES_FOR_SYNTHESIS:
+        return
+    by_teacher = page.get_section("By teacher") or []
+    per_teacher = _count_sources_per_teacher(by_teacher)
+    if not per_teacher:
+        return
+    teachers_in_order = [h for h, _ in per_teacher]
+
+    # ## Overview — only if a human/LLM hasn't written one.
+    overview = page.get_section("Overview")
+    if overview is None or _placeholder_only(overview):
+        page.set_section(
+            "Overview",
+            _render_overview(
+                source_count=len(sources),
+                teacher_count=len(teachers_in_order),
+                teachers_in_order=teachers_in_order,
+            ),
+        )
+
+    # ## Across sources — always re-written from data.
+    page.set_section("Across sources", _render_across_sources(per_teacher))
 
 
 def derived_slugs_by_type(contributions: list[Contribution]) -> dict[str, list[str]]:
