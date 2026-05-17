@@ -114,6 +114,62 @@ def test_plan_references_produce_instructor_referenced_by() -> None:
     assert all(c.kind == "referenced-by" for c in ref)
 
 
+def test_plan_drops_sentence_shaped_concepts() -> None:
+    """Upstream LLM occasionally puts a full sentence in concept.name —
+    those should not become their own concept pages."""
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                {"concept": "Anchor step", "detail": "Sink, don't bounce."},
+                # 14 words, clearly a sentence pretending to be a concept.
+                {
+                    "concept": (
+                        "leaders should give space on the anchor so followers "
+                        "can continue traveling backward"
+                    ),
+                    "detail": "...",
+                },
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs}
+    assert "anchor-step" in slugs
+    assert not any("leaders-should" in s for s in slugs)
+
+
+def test_plan_drops_non_person_references() -> None:
+    """References that are events/schools/objects shouldn't create
+    instructor pages. Only individual-person references should."""
+    contribs = plan_contributions(
+        notes_json={
+            "references": [
+                # Allowed: clear person, ≤3 words, title-case.
+                {"name": "Robert Royston", "type": "instructor"},
+                {"name": "PJ", "context": "no type"},
+                # Allowed via type even though name shape is iffy.
+                {"name": "John M", "type": "dancer"},
+                # Blocked: multi-person.
+                {"name": "Ben and Cameo", "type": "instructor"},
+                {"name": "KP & Bryn"},
+                # Blocked: hedge phrases.
+                {"name": "alyssa (last name not stated)"},
+                {"name": "Benji Schwimmer (implied)"},
+                # Blocked: looks like event/org (no type, too many words).
+                {"name": "Austin Swing Dance Championships"},
+                {"name": "American Journal of Science"},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    slugs = {c.page_slug for c in contribs if c.page_type == "instructor"}
+    assert slugs == {"robert-royston", "pj", "john-m"}
+
+
 def test_plan_skips_unstructured_fields() -> None:
     contribs = plan_contributions(
         notes_json={

@@ -40,6 +40,96 @@ from .slugs import slugify
 PageType = Literal["concept", "technique", "instructor", "terminology"]
 
 
+# ── Quality filters ─────────────────────────────────────────────────────
+# The upstream notes-ingest-cog LLM extractor sometimes puts paragraph-
+# shaped content into ``key_concept.concept`` (where a 5-12-word
+# noun-phrase belongs) and non-person entities into ``references[i]``
+# (events, schools, objects). Faithfully rendering all of it produces
+# a derived layer dominated by one-off pages that drown the real
+# cross-source concepts. These filters drop the worst offenders BEFORE
+# a derived page gets created. The source page still renders the full
+# notes_json verbatim — only the derived-page fanout is filtered.
+#
+# These filters are workarounds for an upstream data-quality issue.
+# The real fix is constraining the extractor prompt to produce clean
+# concept/reference fields. When that lands, re-extraction +
+# curator_version bump will produce a clean derived layer with these
+# filters becoming mostly no-op.
+
+_CONCEPT_NAME_MAX_WORDS: int = 6  # "directional intent away from partner" = 5
+_INSTRUCTOR_NAME_MAX_WORDS: int = 3  # "Robert Royston" or "PJ" or "John M"
+
+# Reference types that pass the instructor-page filter without further
+# name-shape checks. Lowercase comparison. Anything not on this list
+# falls through to the name-shape heuristic.
+_INSTRUCTOR_TYPE_ALLOWLIST: frozenset[str] = frozenset(
+    {"instructor", "teacher", "coach", "judge", "dancer", "competitor", "pro"}
+)
+
+# Lowercase substrings whose presence in a reference name disqualifies
+# it as an individual person. "and" / "&" catch multi-person entries
+# ("Ben and Cameo", "KP and Bryn"); the rest catch the upstream LLM's
+# hedge phrases.
+_INSTRUCTOR_NAME_BLOCKLIST_SUBSTRINGS: tuple[str, ...] = (
+    " and ",
+    " & ",
+    "not stated",
+    "implied",
+    "unknown",
+    "various",
+)
+
+
+def _passes_concept_filter(concept_name: str) -> bool:
+    """Heuristic: a real concept name is a noun-phrase, not a sentence.
+
+    Drop if word-count exceeds the cap. Word-count is computed on the
+    raw name (before slugify) so we don't trip on hyphens-as-separators
+    in legitimate compound terms ("bow-and-snap" is one phrase, two
+    hyphens).
+    """
+    words = concept_name.split()
+    return 0 < len(words) <= _CONCEPT_NAME_MAX_WORDS
+
+
+def _passes_instructor_filter(name: str, ref_type: str) -> bool:
+    """Heuristic: a real instructor reference is an individual person.
+
+    Allowed if:
+      - ``ref_type`` matches the allowlist (caller's claim that this is a
+        person we should track), OR
+      - ``name`` shape passes: 1-3 whitespace-separated words, no
+        blocklist substrings.
+
+    The combined check tolerates the upstream LLM's inconsistent type
+    population while still excluding events, schools, and multi-person
+    entries when no type signal exists.
+    """
+    if not name or not name.strip():
+        return False
+
+    lowered = name.lower()
+    for blocked in _INSTRUCTOR_NAME_BLOCKLIST_SUBSTRINGS:
+        if blocked in lowered:
+            return False
+
+    if ref_type and ref_type.lower() in _INSTRUCTOR_TYPE_ALLOWLIST:
+        return True
+
+    # No usable type; fall back to name shape.
+    words = name.split()
+    if not 1 <= len(words) <= _INSTRUCTOR_NAME_MAX_WORDS:
+        return False
+    # Each word should look name-shaped: starts with an alphabetic char.
+    # Accept things like "PJ" (initials), "Kate", "O'Brien". Reject
+    # numeric leads ("2024-finals", "100"), things starting with weird
+    # punctuation.
+    for word in words:
+        if not word or not word[0].isalpha():
+            return False
+    return True
+
+
 # ── Data model ──────────────────────────────────────────────────────────
 
 
@@ -147,6 +237,11 @@ def plan_contributions(
             detail = ""
         if not name:
             continue
+        if not _passes_concept_filter(name):
+            # Sentence-shaped "concept" name from upstream — don't
+            # create a derived page for it. The full prose still
+            # appears on the source page's ## Key concepts section.
+            continue
         slug = slugify(name)
         if not slug:
             continue
@@ -211,6 +306,8 @@ def plan_contributions(
             definition = ""
         if not term:
             continue
+        if not _passes_concept_filter(term):
+            continue
         slug = slugify(term)
         if not slug:
             continue
@@ -240,11 +337,12 @@ def plan_contributions(
         context = _as_str(item.get("context"))
         if not name:
             continue
-        # Heuristic: skip refs that don't look like a person.
-        # ``type`` may be "instructor", "dancer", "competitor", or absent.
-        # We accept everything (CLAUDE.md says all references go to
-        # instructor pages as stubs); page status stays ``stub`` until
-        # promoted.
+        if not _passes_instructor_filter(name, ref_type):
+            # Reference is an event/school/object/multi-person/hedged
+            # placeholder — don't create an instructor page for it.
+            # The reference still appears on the source page's
+            # ## References section verbatim.
+            continue
         slug = slugify(name)
         if not slug:
             continue
