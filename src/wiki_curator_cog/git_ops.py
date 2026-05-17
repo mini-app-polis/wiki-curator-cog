@@ -60,6 +60,20 @@ class WikiRepo:
         """Stage every change in the working tree."""
         self._repo.git.add(A=True)
 
+    def stage_removal(self, paths: Iterable[Path]) -> None:
+        """Stage already-deleted files for removal in the next commit.
+
+        Callers must have already removed the files from the working
+        tree (curator.ingest_one_source does this when a source moves
+        buckets or slugs). This method only updates the git index to
+        match — it does NOT attempt to remove files itself.
+        """
+        rel = [str(p.relative_to(self.path)) for p in paths]
+        if rel:
+            # working_tree=False because the file is already gone from
+            # disk; we just need git to record the deletion.
+            self._repo.index.remove(rel, working_tree=False)
+
     def commit(self, message: str) -> str:
         """Create a commit. Returns the new commit hex."""
         commit = self._repo.index.commit(

@@ -44,7 +44,11 @@ from .slugs import (
     build_source_slug,
     canonicalize_names,
 )
-from .wiki_files import append_log_entry, upsert_source_in_index
+from .wiki_files import (
+    append_log_entry,
+    remove_source_from_index,
+    upsert_source_in_index,
+)
 
 if TYPE_CHECKING:
     from .api_client import WikiCuratorApiClient
@@ -67,13 +71,22 @@ _AUTO_ADD_MODES: frozenset[IngestMode] = frozenset(
 
 @dataclass
 class IngestResult:
-    """What an ingest call produced."""
+    """What an ingest call produced.
+
+    ``touched_paths`` are files the curator wrote or modified (the
+    source page, ``index.md``, ``log.md``). ``removed_paths`` are
+    files the curator deleted from the working tree because the same
+    note moved to a different path between curator versions — these
+    must be staged with ``git rm`` semantics, not ``git add``. The
+    flow layer handles that distinction via WikiRepo.stage_removal.
+    """
 
     note_id: str
     skipped: bool = False
     skip_reason: str | None = None
     source_path: Path | None = None
     touched_paths: list[Path] = field(default_factory=list)
+    removed_paths: list[Path] = field(default_factory=list)
     findings_emitted: int = 0
 
 
@@ -233,6 +246,21 @@ def ingest_one_source(
         note_id=str(note.id),
     )
 
+    # ── 3b. Detect move (bucket or slug changed since last ingest) ──
+    # When the resolved path differs from the existing inventory
+    # record's path, the source's bucket or slug has changed (alias
+    # collapsed, title filled in, etc.). Plan to delete the old file
+    # and its index entry so the per-source commit reflects an atomic
+    # move rather than producing duplicates.
+    moved_from: Path | None = None
+    if (
+        existing is not None
+        and existing.path is not None
+        and existing.path != source_path
+        and existing.path.exists()
+    ):
+        moved_from = existing.path
+
     # ── 4. Build extra notes (quality + collision) ──────────────────
     quality_observations = detect_quality_issues(note.notes_json)
     extra_notes: list[str] = []
@@ -263,8 +291,28 @@ def ingest_one_source(
     source_path.parent.mkdir(parents=True, exist_ok=True)
     source_path.write_text(rendered)
 
-    # ── 6. Update index.md ──────────────────────────────────────────
     index_path = wiki_repo_path / "index.md"
+
+    # ── 5b. Apply move (delete old file + remove its index line) ────
+    # Done after writing the new file so the new content is in place
+    # before we delete the old, in case anything goes wrong between
+    # the two operations.
+    if moved_from is not None:
+        old_bucket = moved_from.parent.name
+        old_slug = moved_from.stem
+        remove_source_from_index(index_path, source_slug=old_slug, bucket=old_bucket)
+        moved_from.unlink()
+        result.removed_paths.append(moved_from)
+        LOG.info(
+            "ingest.moved",
+            extra={
+                "note_id": str(note.id),
+                "from": str(moved_from.relative_to(wiki_repo_path)),
+                "to": str(source_path.relative_to(wiki_repo_path)),
+            },
+        )
+
+    # ── 6. Update index.md ──────────────────────────────────────────
     upsert_source_in_index(
         index_path,
         source_slug=final_slug,
@@ -288,6 +336,9 @@ def ingest_one_source(
         new_curator_version=curator_version,
         quality_observations=quality_observations,
         collision_note=collision_note,
+        moved_from=moved_from,
+        wiki_repo_path=wiki_repo_path,
+        source_path=source_path,
     )
     append_log_entry(
         log_path,
@@ -343,6 +394,9 @@ def _build_log_body(
     new_curator_version: int,
     quality_observations: list[str],
     collision_note: str | None,
+    moved_from: Path | None = None,
+    wiki_repo_path: Path | None = None,
+    source_path: Path | None = None,
 ) -> str:
     """Compose the short body for a single log.md ingest entry."""
     lines: list[str] = []
@@ -361,6 +415,16 @@ def _build_log_body(
         lines.append(
             f"Re-ingest: was at curator_version={old_curator_version}, "
             f"now at {new_curator_version}."
+        )
+    if (
+        moved_from is not None
+        and wiki_repo_path is not None
+        and source_path is not None
+    ):
+        lines.append(
+            f"Source path changed: `{moved_from.relative_to(wiki_repo_path)}` "
+            f"→ `{source_path.relative_to(wiki_repo_path)}` "
+            f"(bucket or slug shifted after the alias map or title changed)."
         )
     if collision_note:
         lines.append(collision_note)

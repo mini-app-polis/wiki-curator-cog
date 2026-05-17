@@ -10,6 +10,7 @@ import pytest
 from wiki_curator_cog.wiki_files import (
     append_log_entry,
     format_source_index_line,
+    remove_source_from_index,
     upsert_source_in_index,
 )
 
@@ -236,6 +237,56 @@ def test_upsert_creates_sources_section_if_missing(tmp_path: Path) -> None:
     text = p.read_text()
     assert "## Sources" in text
     assert "[[sources/kate/2025-09-15-foo]]" in text
+
+
+# ── remove_source_from_index ────────────────────────────────────────────
+
+
+def test_remove_source_from_index_removes_matching_line(index_path: Path) -> None:
+    upsert_source_in_index(
+        index_path,
+        source_slug="2025-09-15-foo",
+        bucket="external",
+        canonical_instructors=["foo-bar"],
+        session_type="private_lesson",
+        session_date=dt.date(2025, 9, 15),
+        title=None,
+    )
+    upsert_source_in_index(
+        index_path,
+        source_slug="2025-09-16-bar",
+        bucket="kate",
+        canonical_instructors=["kate"],
+        session_type="group_class",
+        session_date=dt.date(2025, 9, 16),
+        title=None,
+    )
+    assert (
+        remove_source_from_index(
+            index_path, source_slug="2025-09-15-foo", bucket="external"
+        )
+        is True
+    )
+    text = index_path.read_text()
+    assert "[[sources/external/2025-09-15-foo]]" not in text
+    # Other source untouched.
+    assert "[[sources/kate/2025-09-16-bar]]" in text
+
+
+def test_remove_source_from_index_no_op_when_missing(index_path: Path) -> None:
+    assert (
+        remove_source_from_index(index_path, source_slug="never-existed", bucket="kate")
+        is False
+    )
+    # Index still has its placeholder.
+    assert "_No sources ingested yet._" in index_path.read_text()
+
+
+def test_remove_source_from_index_no_op_when_file_missing(tmp_path: Path) -> None:
+    nonexistent = tmp_path / "no-such-index.md"
+    assert (
+        remove_source_from_index(nonexistent, source_slug="foo", bucket="kate") is False
+    )
 
 
 # ── append_log_entry ────────────────────────────────────────────────────

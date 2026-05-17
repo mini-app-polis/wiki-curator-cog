@@ -241,6 +241,51 @@ def upsert_source_in_index(
     index_path.write_text(_join_sections(chunks))
 
 
+def remove_source_from_index(
+    index_path: Path,
+    *,
+    source_slug: str,
+    bucket: str,
+) -> bool:
+    """Drop the entry for one source from the index's ``## Sources`` section.
+
+    Used by the curator when a source moves buckets or changes slug
+    between runs (e.g., after an alias-map edit collapses
+    ``kate-benson`` → ``kate``, the v2 re-ingest writes to
+    ``sources/kate/…`` and the old ``sources/external/…`` index line
+    needs to disappear).
+
+    No-op if the file doesn't exist, the section isn't found, or no
+    matching line is present. Returns True if a line was actually
+    removed, False otherwise — callers can use this to skip writing
+    the file when nothing changed.
+    """
+    if not index_path.exists():
+        return False
+
+    text = index_path.read_text()
+    chunks = _split_at_sections(text)
+    target_wikilink_marker = f"[[sources/{bucket}/{source_slug}]]"
+    removed = False
+
+    for i, (title_, body_lines) in enumerate(chunks):
+        if title_ != _SOURCES_HEADING:
+            continue
+        new_body: list[str] = []
+        for line in body_lines:
+            if target_wikilink_marker in line:
+                removed = True
+                continue
+            new_body.append(line)
+        if removed:
+            chunks[i] = (title_, new_body)
+        break
+
+    if removed:
+        index_path.write_text(_join_sections(chunks))
+    return removed
+
+
 # ── log.md helpers ──────────────────────────────────────────────────────
 
 

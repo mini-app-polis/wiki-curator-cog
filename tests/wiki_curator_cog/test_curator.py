@@ -306,6 +306,61 @@ def test_ingest_updates_in_memory_inventory(populated_wiki: Path) -> None:
     assert rec.curator_version == 1
 
 
+def test_ingest_moves_file_when_bucket_changes(populated_wiki: Path) -> None:
+    """Re-ingest after an alias collapse should move the file atomically."""
+    # First ingest: instructor "BrandNewPro" lands in external/ as
+    # canonical 'brandnewpro' (auto-added).
+    note = _make_note(instructors=["BrandNewPro"], title=None)
+    inventory = build_inventory(populated_wiki)
+    aliases = AliasMap.load(populated_wiki)
+
+    first = ingest_one_source(
+        note=note,
+        mode=IngestMode.BACKFILL,
+        inventory=inventory,
+        aliases=aliases,
+        wiki_repo_path=populated_wiki,
+        curator_version=1,
+    )
+    assert first.source_path is not None
+    assert "sources/external/" in str(first.source_path).replace("\\", "/")
+    assert first.removed_paths == []
+    # Confirm index has the external/ entry.
+    index_text = (populated_wiki / "index.md").read_text()
+    assert "[[sources/external/" in index_text
+
+    # Simulate manual alias collapse: BrandNewPro is actually Kate.
+    aliases.add("BrandNewPro", "kate")
+    inventory = build_inventory(populated_wiki)
+
+    # Second ingest at bumped curator_version: bucket should switch
+    # to kate/, old external/ file should be deleted, old index line
+    # should be gone.
+    second = ingest_one_source(
+        note=note,
+        mode=IngestMode.BACKFILL,
+        inventory=inventory,
+        aliases=aliases,
+        wiki_repo_path=populated_wiki,
+        curator_version=2,
+    )
+    assert second.source_path is not None
+    assert "sources/kate/" in str(second.source_path).replace("\\", "/")
+    assert second.source_path != first.source_path
+    # Old file gone, new file present.
+    assert not first.source_path.exists()
+    assert second.source_path.exists()
+    # Move recorded in removed_paths.
+    assert second.removed_paths == [first.source_path]
+    # Index has new entry, no old entry.
+    index_text = (populated_wiki / "index.md").read_text()
+    assert "[[sources/kate/" in index_text
+    assert "[[sources/external/" not in index_text
+    # Log records the move.
+    log_text = (populated_wiki / "log.md").read_text()
+    assert "Source path changed" in log_text
+
+
 def test_ingest_external_bucket_when_no_bucketed_instructor(
     populated_wiki: Path,
 ) -> None:

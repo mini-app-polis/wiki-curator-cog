@@ -102,6 +102,11 @@ def backfill_flow() -> dict:
                 skipped += 1
                 continue
             ingested += 1
+            if result.removed_paths:
+                # Stage deletions first so the per-source commit
+                # captures the move (old path deleted + new path
+                # added) as one atomic change.
+                wiki_repo.stage_removal(result.removed_paths)
             if result.touched_paths:
                 wiki_repo.stage(result.touched_paths)
                 wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
@@ -192,6 +197,8 @@ def incremental_flow() -> dict:
                 skipped += 1
                 continue
             ingested += 1
+            if result.removed_paths:
+                wiki_repo.stage_removal(result.removed_paths)
             if result.touched_paths:
                 wiki_repo.stage(result.touched_paths)
                 wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
