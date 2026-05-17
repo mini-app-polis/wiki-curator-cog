@@ -6,7 +6,7 @@
     "@semantic-release/release-notes-generator",
     ["@semantic-release/changelog", { "changelogFile": "CHANGELOG.md" }],
     ["@semantic-release/exec", {
-      "prepareCmd": "sed -i.bak -E 's/^version = \".*\"/version = \"${nextRelease.version}\"/' pyproject.toml && rm pyproject.toml.bak && uv lock"
+      "prepareCmd": "uv version ${nextRelease.version} && uv lock"
     }],
     ["@semantic-release/git", {
       "assets": ["CHANGELOG.md", "pyproject.toml", "uv.lock"],

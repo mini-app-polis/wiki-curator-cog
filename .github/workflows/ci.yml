@@ -38,17 +38,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       # uv + Python are required by the @semantic-release/exec step,
-      # which runs `uv lock` after sed-bumping pyproject.toml so the
-      # lockfile's record of THIS package's own version stays in sync
-      # with the released version. Without this, every post-release
-      # `uv sync` produces a dirty lockfile diff and developers loop
-      # on "fix: lock" commits. Mirrors transcription-cog setup.
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+      # which runs `uv version X.Y.Z && uv lock` so the lockfile's
+      # record of THIS package's own version stays in sync with the
+      # released version. Mirrors evaluator-cog setup.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Set up Python
+        run: uv python install 3.11
+      - name: Install dependencies
+        run: uv sync --all-extras
 
       - uses: actions/setup-node@v6
         with:

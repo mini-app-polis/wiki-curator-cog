@@ -1,6 +1,2 @@
-[variables]
-# Pin uv explicitly so the Nixpacks-generated install step
-# (`pip install uv==$NIXPACKS_UV_VERSION`) always has a valid version.
-# Without this, Railway has been resolving NIXPACKS_UV_VERSION to an
-# empty string and failing the build at `pip install uv==`.
-NIXPACKS_UV_VERSION = "0.5.11"
+[phases.setup]
+nixPkgs = ["git"]
