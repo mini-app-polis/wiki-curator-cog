@@ -294,6 +294,12 @@ def ingest_one_source(
         source_bucket=bucket,
         concept_aliases=concept_aliases,
         technique_aliases=technique_aliases,
+        # Source metadata flows through to the instructor-page bullet
+        # under ``## Sources`` for each canonical instructor on this
+        # source. See derived_pages._format_author_source_bullet.
+        session_date=note.session_date,
+        session_type=note.session_type,
+        title=note.title,
     )
     contributed_to = derived_slugs_by_type(contributions)
 

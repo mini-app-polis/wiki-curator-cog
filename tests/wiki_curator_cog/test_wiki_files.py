@@ -10,6 +10,7 @@ import pytest
 from wiki_curator_cog.wiki_files import (
     append_log_entry,
     format_source_index_line,
+    regenerate_index_derived_sections,
     remove_source_from_index,
     upsert_source_in_index,
 )
@@ -340,3 +341,192 @@ def test_append_log_entry_multiple_appends_in_order(log_path: Path) -> None:
     alpha_idx = text.index("alpha")
     beta_idx = text.index("beta")
     assert alpha_idx < beta_idx
+
+
+# ── regenerate_index_derived_sections ───────────────────────────────────
+
+
+_INDEX_WITH_DERIVED_SKELETON = """# Index
+
+Catalog of all pages in this wiki.
+
+---
+
+## Concepts
+
+_No concept pages yet. They will be created as sources are ingested._
+
+## Techniques
+
+_No technique pages yet. They will be created as sources are ingested._
+
+## Instructors
+
+_No instructor pages yet. They will be created as sources are ingested._
+
+## Terminology
+
+_No terminology pages yet. They will be created when vocabulary reconciliation is needed._
+
+## Views
+
+- views/full-model.md
+
+## Sources
+
+_No sources ingested yet._
+"""
+
+
+def _seed_derived_page(
+    wiki_repo_path: Path,
+    *,
+    subdir: str,
+    slug: str,
+    frontmatter: dict,
+) -> Path:
+    """Write a minimal derived page with the given frontmatter."""
+    import yaml
+
+    page_path = wiki_repo_path / subdir / f"{slug}.md"
+    page_path.parent.mkdir(parents=True, exist_ok=True)
+    fm_yaml = yaml.safe_dump(frontmatter, sort_keys=False)
+    page_path.write_text(f"---\n{fm_yaml}---\n\n## Overview\n\nx\n")
+    return page_path
+
+
+def test_regenerate_index_rewrites_empty_skeleton_sections(
+    tmp_path: Path,
+) -> None:
+    """The skeleton's placeholder lines get replaced with real bullets
+    once derived pages exist."""
+    index_path = tmp_path / "index.md"
+    index_path.write_text(_INDEX_WITH_DERIVED_SKELETON)
+
+    _seed_derived_page(
+        tmp_path,
+        subdir="concepts",
+        slug="anchor-step",
+        frontmatter={
+            "type": "concept",
+            "slug": "anchor-step",
+            "teachers": ["kate", "robert"],
+            "sources": ["s1", "s2", "s3"],
+            "status": "draft",
+        },
+    )
+    _seed_derived_page(
+        tmp_path,
+        subdir="techniques",
+        slug="whip",
+        frontmatter={
+            "type": "technique",
+            "slug": "whip",
+            "teachers": ["kaiano"],
+            "sources": ["s1"],
+            "status": "stub",
+        },
+    )
+    _seed_derived_page(
+        tmp_path,
+        subdir="instructors",
+        slug="kate",
+        frontmatter={
+            "type": "instructor",
+            "slug": "kate",
+            "sources_count": 18,
+            "references_count": 3,
+            "status": "draft",
+        },
+    )
+
+    changed = regenerate_index_derived_sections(index_path)
+    assert changed is True
+
+    text = index_path.read_text()
+    # Old placeholder text gone.
+    assert "_No concept pages yet" not in text
+    assert "_No technique pages yet" not in text
+    assert "_No instructor pages yet" not in text
+    # New bullets present.
+    assert "[[concepts/anchor-step]]" in text
+    assert "Taught by Kate, Robert (3 sources)" in text
+    assert "[status: draft]" in text
+    assert "[[techniques/whip]]" in text
+    assert "Taught by Kaiano (1 source)" in text
+    assert "[[instructors/kate]]" in text
+    assert "18 sources · 3 referenced" in text
+    # Terminology still shows placeholder since no terminology pages exist.
+    assert "_No terminolog" in text
+    # Untouched sections preserved.
+    assert "## Views" in text
+    assert "views/full-model.md" in text
+    assert "## Sources" in text
+
+
+def test_regenerate_index_handles_missing_derived_dirs(tmp_path: Path) -> None:
+    """The function tolerates a wiki where some derived dirs don't
+    exist on disk yet."""
+    index_path = tmp_path / "index.md"
+    index_path.write_text(_INDEX_WITH_DERIVED_SKELETON)
+    # No concepts/, techniques/, instructors/, terminology/ directories.
+
+    changed = regenerate_index_derived_sections(index_path)
+    assert changed is False
+    # File still got rewritten with the placeholder bodies, no crash.
+    text = index_path.read_text()
+    assert "_No concept" in text or "## Concepts" in text
+
+
+def test_regenerate_index_replaces_stale_entries(tmp_path: Path) -> None:
+    """Re-running after pages were deleted produces a clean index."""
+    index_path = tmp_path / "index.md"
+    index_path.write_text(_INDEX_WITH_DERIVED_SKELETON)
+
+    # First pass: seed two concepts.
+    _seed_derived_page(
+        tmp_path,
+        subdir="concepts",
+        slug="anchor-step",
+        frontmatter={"type": "concept", "slug": "anchor-step"},
+    )
+    stale_path = _seed_derived_page(
+        tmp_path,
+        subdir="concepts",
+        slug="stale-page",
+        frontmatter={"type": "concept", "slug": "stale-page"},
+    )
+    regenerate_index_derived_sections(index_path)
+    text = index_path.read_text()
+    assert "[[concepts/stale-page]]" in text
+
+    # Second pass: stale page deleted on disk → must be gone from index.
+    stale_path.unlink()
+    regenerate_index_derived_sections(index_path)
+    text = index_path.read_text()
+    assert "[[concepts/stale-page]]" not in text
+    assert "[[concepts/anchor-step]]" in text
+
+
+def test_regenerate_index_preserves_sources_section(tmp_path: Path) -> None:
+    """Source entries upserted incrementally must NOT be touched by the
+    derived-page regeneration."""
+    index_path = tmp_path / "index.md"
+    skeleton_with_source = _INDEX_WITH_DERIVED_SKELETON.replace(
+        "_No sources ingested yet._",
+        "- [[sources/kate/2025-09-15-anchors]] — 2025-09-15 · Kate · private lesson",
+    )
+    index_path.write_text(skeleton_with_source)
+    _seed_derived_page(
+        tmp_path,
+        subdir="concepts",
+        slug="settle",
+        frontmatter={"type": "concept", "slug": "settle"},
+    )
+
+    regenerate_index_derived_sections(index_path)
+    text = index_path.read_text()
+    # Source entry survived.
+    assert "[[sources/kate/2025-09-15-anchors]]" in text
+    # New concept entry showed up.
+    assert "[[concepts/settle]]" in text

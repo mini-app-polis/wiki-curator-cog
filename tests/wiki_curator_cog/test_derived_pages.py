@@ -39,13 +39,16 @@ def test_plan_key_concepts_produce_concept_contributions() -> None:
         source_slug="2025-09-15-anchor-step",
         source_bucket="kate",
     )
-    assert len(contribs) == 2
-    assert all(c.page_type == "concept" for c in contribs)
-    assert {c.page_slug for c in contribs} == {"anchor-step", "settle"}
-    assert all(c.teacher == "kate" for c in contribs)
+    concept_contribs = [c for c in contribs if c.page_type == "concept"]
+    assert len(concept_contribs) == 2
+    assert {c.page_slug for c in concept_contribs} == {"anchor-step", "settle"}
+    assert all(c.teacher == "kate" for c in concept_contribs)
     # Citation appended automatically.
-    assert "(([[sources/kate/2025-09-15-anchor-step]]))" not in contribs[0].paragraph_md
-    assert "[[sources/kate/2025-09-15-anchor-step]]" in contribs[0].paragraph_md
+    assert (
+        "(([[sources/kate/2025-09-15-anchor-step]]))"
+        not in concept_contribs[0].paragraph_md
+    )
+    assert "[[sources/kate/2025-09-15-anchor-step]]" in concept_contribs[0].paragraph_md
 
 
 def test_plan_multi_instructor_fans_out_to_all() -> None:
@@ -57,8 +60,9 @@ def test_plan_multi_instructor_fans_out_to_all() -> None:
         source_slug="2025-09-15-workshop",
         source_bucket="kate",
     )
-    assert len(contribs) == 2
-    assert {c.teacher for c in contribs} == {"kate", "robert"}
+    by_teacher = [c for c in contribs if c.kind == "by-teacher"]
+    assert len(by_teacher) == 2
+    assert {c.teacher for c in by_teacher} == {"kate", "robert"}
 
 
 def test_plan_patterns_produce_technique_contributions() -> None:
@@ -91,9 +95,9 @@ def test_plan_vocabulary_produces_concept_contributions() -> None:
         source_slug="2025-06-28-vocab",
         source_bucket="robert",
     )
-    assert len(contribs) == 1
-    c = contribs[0]
-    assert c.page_type == "concept"
+    concept_contribs = [c for c in contribs if c.page_type == "concept"]
+    assert len(concept_contribs) == 1
+    c = concept_contribs[0]
     assert c.page_slug == "compression"
     assert "**compression**" in c.paragraph_md
 
@@ -111,9 +115,10 @@ def test_plan_references_produce_instructor_referenced_by() -> None:
         source_slug="2025-09-15-foo",
         source_bucket="kate",
     )
-    ref = [c for c in contribs if c.page_type == "instructor"]
+    ref = [
+        c for c in contribs if c.page_type == "instructor" and c.kind == "referenced-by"
+    ]
     assert {c.page_slug for c in ref} == {"robert-royston", "pj"}
-    assert all(c.kind == "referenced-by" for c in ref)
 
 
 def test_plan_drops_sentence_shaped_concepts() -> None:
@@ -164,7 +169,7 @@ def test_plan_drops_conjunction_shaped_concepts() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
-    slugs = {c.page_slug for c in contribs}
+    slugs = {c.page_slug for c in contribs if c.page_type == "concept"}
     assert slugs == {"settle"}
 
 
@@ -182,7 +187,7 @@ def test_plan_drops_repeated_word_concepts() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
-    slugs = {c.page_slug for c in contribs}
+    slugs = {c.page_slug for c in contribs if c.page_type == "concept"}
     assert slugs == {"frame"}
 
 
@@ -199,7 +204,7 @@ def test_plan_drops_variation_suffix_concepts() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
-    slugs = {c.page_slug for c in contribs}
+    slugs = {c.page_slug for c in contribs if c.page_type == "concept"}
     assert slugs == {"anchor"}
 
 
@@ -253,11 +258,23 @@ def test_plan_drops_non_person_references() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
-    slugs = {c.page_slug for c in contribs if c.page_type == "instructor"}
+    slugs = {
+        c.page_slug
+        for c in contribs
+        if c.page_type == "instructor" and c.kind == "referenced-by"
+    }
     assert slugs == {"robert-royston", "pj", "john-m"}
 
 
 def test_plan_skips_unstructured_fields() -> None:
+    """student_observations / action_items / off_topic_notes never produce
+    concept, technique, or referenced-by instructor contributions.
+
+    The only contribution that DOES come out is the
+    instructor-as-author entry for the canonical instructor — every
+    source belongs on its instructor's ## Sources list regardless of
+    whether the body had ingestable content.
+    """
     contribs = plan_contributions(
         notes_json={
             "student_observations": [{"observation": "improving"}],
@@ -268,7 +285,13 @@ def test_plan_skips_unstructured_fields() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
-    assert contribs == []
+    # No concept / technique / referenced-by contributions.
+    assert not [c for c in contribs if c.page_type in {"concept", "technique"}]
+    assert not [c for c in contribs if c.kind == "referenced-by"]
+    # Exactly one as-author contribution for ``kate``.
+    as_author = [c for c in contribs if c.kind == "as-author"]
+    assert len(as_author) == 1
+    assert as_author[0].page_slug == "kate"
 
 
 # ── derived_slugs_by_type ───────────────────────────────────────────────
@@ -525,11 +548,12 @@ def test_plan_concept_canonicalizes_via_plural_collapse(
         technique_aliases=technique_aliases,
     )
 
+    concept_contribs = [c for c in contribs if c.page_type == "concept"]
     # Both contributions land on the same canonical slug.
-    assert {c.page_slug for c in contribs} == {"anchor-step"}
+    assert {c.page_slug for c in concept_contribs} == {"anchor-step"}
     # The plural form is recorded as ``raw_slug`` so apply_contributions
     # can surface it on the canonical page's ``aliases:`` frontmatter.
-    raw_slugs = [c.raw_slug for c in contribs]
+    raw_slugs = [c.raw_slug for c in concept_contribs]
     assert "anchor-steps" in raw_slugs
     # The singular form contributed without needing a raw_slug.
     assert None in raw_slugs
@@ -560,8 +584,9 @@ def test_plan_concept_canonicalizes_via_alias_map(wiki_repo_path: Path) -> None:
         technique_aliases=technique_aliases,
     )
 
-    assert {c.page_slug for c in contribs} == {"anchor-step"}
-    raw_slugs = {c.raw_slug for c in contribs}
+    concept_contribs = [c for c in contribs if c.page_type == "concept"]
+    assert {c.page_slug for c in concept_contribs} == {"anchor-step"}
+    raw_slugs = {c.raw_slug for c in concept_contribs}
     assert raw_slugs == {"anchor", "anchoring-action"}
 
 
@@ -589,8 +614,9 @@ def test_plan_technique_canonicalizes_via_alias_map(wiki_repo_path: Path) -> Non
         technique_aliases=technique_aliases,
     )
 
-    assert {c.page_slug for c in contribs} == {"whip"}
-    raw_slugs = {c.raw_slug for c in contribs}
+    technique_contribs = [c for c in contribs if c.page_type == "technique"]
+    assert {c.page_slug for c in technique_contribs} == {"whip"}
+    raw_slugs = {c.raw_slug for c in technique_contribs}
     # ``whip`` mapped to itself contributes None; the other two record
     # their distinct raw forms.
     assert raw_slugs == {"basic-whip", "whip-basic", None}
@@ -611,10 +637,11 @@ def test_plan_without_alias_maps_falls_back_to_legacy_slugify() -> None:
         source_slug="2025-09-15-x",
         source_bucket="kate",
     )
+    concept_contribs = [c for c in contribs if c.page_type == "concept"]
     # Without alias maps, the two forms produce two distinct slugs.
-    assert {c.page_slug for c in contribs} == {"anchor-step", "anchor-steps"}
-    # And raw_slug stays None on every contribution.
-    assert all(c.raw_slug is None for c in contribs)
+    assert {c.page_slug for c in concept_contribs} == {"anchor-step", "anchor-steps"}
+    # And raw_slug stays None on every concept contribution.
+    assert all(c.raw_slug is None for c in concept_contribs)
 
 
 def test_apply_contributions_records_alias_on_canonical_page(
@@ -721,6 +748,363 @@ def test_wipe_derived_pages_does_not_touch_sources_or_index(
     assert (wiki_repo_path / "sources" / "kaiano" / "example.md").exists()
     assert (wiki_repo_path / "index.md").exists()
     assert (wiki_repo_path / "log.md").exists()
+
+
+# ── as-author instructor contributions ──────────────────────────────────
+
+
+def test_plan_emits_as_author_for_each_canonical_instructor() -> None:
+    """Every source produces one as-author contribution per instructor.
+
+    Workshop with two instructors → two contributions targeting their
+    instructor pages, both kind=as-author.
+    """
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [{"concept": "Frame", "detail": "Shoulders down."}],
+        },
+        canonical_instructors=["kate", "robert"],
+        source_slug="2025-09-15-workshop",
+        source_bucket="kate",
+    )
+    as_author = [c for c in contribs if c.kind == "as-author"]
+    assert len(as_author) == 2
+    assert {c.page_slug for c in as_author} == {"kate", "robert"}
+    assert all(c.page_type == "instructor" for c in as_author)
+
+
+def test_plan_as_author_carries_concepts_techniques_taught() -> None:
+    """The as-author contribution carries the per-instructor slug list.
+
+    Kate teaches Settle on this source, Robert teaches Frame. Each
+    instructor's as-author contribution lists only the slugs they're
+    attributed to.
+    """
+    contribs = plan_contributions(
+        notes_json={
+            "key_concepts": [
+                {"concept": "Settle", "detail": "Sink."},
+            ],
+            "patterns_and_sequences": [
+                {"name": "Whip", "description": "Drive forward."},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    as_author = [c for c in contribs if c.kind == "as-author"]
+    assert len(as_author) == 1
+    kate = as_author[0]
+    assert kate.page_slug == "kate"
+    assert kate.concepts_taught == ["settle"]
+    assert kate.techniques_taught == ["whip"]
+
+
+def test_plan_as_author_bullet_includes_source_metadata() -> None:
+    """The bullet text shows date · title · session-type."""
+    import datetime as _dt
+
+    contribs = plan_contributions(
+        notes_json={},
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-anchors",
+        source_bucket="kate",
+        session_date=_dt.date(2025, 9, 15),
+        session_type="private_lesson",
+        title="Anchors and stretch",
+    )
+    as_author = [c for c in contribs if c.kind == "as-author"]
+    assert len(as_author) == 1
+    bullet = as_author[0].paragraph_md
+    assert bullet.startswith("- ")
+    assert "**2025-09-15**" in bullet
+    assert "[[sources/kate/2025-09-15-anchors|Anchors and stretch]]" in bullet
+    assert "private lesson" in bullet
+
+
+def test_apply_as_author_populates_sources_count_and_taught_lists(
+    wiki_repo_path: Path,
+) -> None:
+    """An as-author contribution lands as a ## Sources bullet plus
+    sources_count, concepts_taught, techniques_taught frontmatter."""
+    contribs = [
+        Contribution(
+            page_type="instructor",
+            page_slug="kate",
+            teacher=None,
+            paragraph_md=(
+                "- **2025-09-15** — "
+                "[[sources/kate/2025-09-15-anchors|Anchors and stretch]] · "
+                "private lesson"
+            ),
+            source_slug="2025-09-15-anchors",
+            source_bucket="kate",
+            kind="as-author",
+            concepts_taught=["anchor-step", "settle"],
+            techniques_taught=["whip"],
+        ),
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    page_path = wiki_repo_path / "instructors" / "kate.md"
+    assert page_path.exists()
+    fm = _frontmatter(page_path)
+    assert fm["sources"] == ["2025-09-15-anchors"]
+    assert fm["sources_count"] == 1
+    assert set(fm["concepts_taught"]) == {"anchor-step", "settle"}
+    assert set(fm["techniques_taught"]) == {"whip"}
+    body = page_path.read_text()
+    assert "## Sources" in body
+    assert "[[sources/kate/2025-09-15-anchors|Anchors and stretch]]" in body
+
+
+def test_apply_as_author_is_idempotent(wiki_repo_path: Path) -> None:
+    """Re-applying the same as-author contribution replaces the bullet
+    rather than appending a duplicate, and sources_count stays at 1."""
+    base_kwargs = dict(
+        page_type="instructor",
+        page_slug="kate",
+        teacher=None,
+        source_slug="2025-09-15-anchors",
+        source_bucket="kate",
+        kind="as-author",
+        concepts_taught=["anchor-step"],
+        techniques_taught=[],
+    )
+    first = Contribution(
+        paragraph_md=(
+            "- **2025-09-15** — [[sources/kate/2025-09-15-anchors|First title]]"
+        ),
+        **base_kwargs,
+    )
+    apply_contributions([first], wiki_repo_path=wiki_repo_path)
+
+    # Re-ingest at a bumped title → bullet must be replaced, not duplicated.
+    second = Contribution(
+        paragraph_md=(
+            "- **2025-09-15** — [[sources/kate/2025-09-15-anchors|Updated title]]"
+        ),
+        **base_kwargs,
+    )
+    apply_contributions([second], wiki_repo_path=wiki_repo_path)
+
+    page_path = wiki_repo_path / "instructors" / "kate.md"
+    body = page_path.read_text()
+    # The slug appears twice in the file as a whole: once in the
+    # frontmatter ``sources:`` list and once in the ## Sources bullet.
+    # The bullet itself must not be duplicated.
+    sources_section = body.split("## Sources", 1)[1]
+    assert sources_section.count("2025-09-15-anchors") == 1
+    assert "Updated title" in body
+    assert "First title" not in body
+    fm = _frontmatter(page_path)
+    assert fm["sources_count"] == 1
+    assert fm["sources"] == ["2025-09-15-anchors"]
+
+
+def test_apply_as_author_and_referenced_by_use_separate_sections(
+    wiki_repo_path: Path,
+) -> None:
+    """The same instructor can be both author of one source and
+    referenced by another. ## Sources gets the as-author bullet;
+    ## Referenced by gets the referenced-by bullet."""
+    contribs = [
+        Contribution(
+            page_type="instructor",
+            page_slug="robert",
+            teacher=None,
+            paragraph_md="- **2025-06-28** — [[sources/robert/2025-06-28-x|Workshop]]",
+            source_slug="2025-06-28-x",
+            source_bucket="robert",
+            kind="as-author",
+        ),
+        Contribution(
+            page_type="instructor",
+            page_slug="robert",
+            teacher=None,
+            paragraph_md="**Robert** — Cited as influence ([[sources/kaiano/2025-10-13-x]])",
+            source_slug="2025-10-13-x",
+            source_bucket="kaiano",
+            kind="referenced-by",
+        ),
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    page_path = wiki_repo_path / "instructors" / "robert.md"
+    body = page_path.read_text()
+    fm = _frontmatter(page_path)
+
+    # Frontmatter counts split cleanly.
+    assert fm["sources_count"] == 1
+    assert fm["references_count"] == 1
+    # The two sections both have one bullet each.
+    sources_section = body.split("## Sources", 1)[1].split("## Referenced by", 1)[0]
+    referenced_section = body.split("## Referenced by", 1)[1]
+    assert "2025-06-28-x" in sources_section
+    assert "2025-10-13-x" in referenced_section
+    # Neither bullet leaks across sections.
+    assert "2025-10-13-x" not in sources_section
+    assert "2025-06-28-x" not in referenced_section
+
+
+# ── status promotion ────────────────────────────────────────────────────
+
+
+def test_apply_promotes_concept_status_at_three_sources(
+    wiki_repo_path: Path,
+) -> None:
+    """Three distinct sources crosses the synthesis threshold → status
+    auto-promotes from stub to draft."""
+    contribs = [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="kate",
+            paragraph_md=f"Framing #{i}. ([[sources/kate/s{i}]])",
+            source_slug=f"s{i}",
+            source_bucket="kate",
+        )
+        for i in range(1, 4)
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    fm = _frontmatter(wiki_repo_path / "concepts" / "settle.md")
+    assert fm["status"] == "draft"
+
+
+def test_apply_keeps_stub_below_threshold(wiki_repo_path: Path) -> None:
+    """Two sources is below the promotion threshold → status stays stub."""
+    contribs = [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="kate",
+            paragraph_md=f"Framing #{i}. ([[sources/kate/s{i}]])",
+            source_slug=f"s{i}",
+            source_bucket="kate",
+        )
+        for i in range(1, 3)
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    fm = _frontmatter(wiki_repo_path / "concepts" / "settle.md")
+    assert fm["status"] == "stub"
+
+
+def test_apply_promotes_instructor_status_at_three_sources(
+    wiki_repo_path: Path,
+) -> None:
+    """Three as-author sources promote the instructor page to draft."""
+    contribs = [
+        Contribution(
+            page_type="instructor",
+            page_slug="kate",
+            teacher=None,
+            paragraph_md=f"- [[sources/kate/s{i}|s{i}]]",
+            source_slug=f"s{i}",
+            source_bucket="kate",
+            kind="as-author",
+        )
+        for i in range(1, 4)
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    fm = _frontmatter(wiki_repo_path / "instructors" / "kate.md")
+    assert fm["status"] == "draft"
+
+
+def test_apply_does_not_demote_human_curated_status(
+    wiki_repo_path: Path,
+) -> None:
+    """If a human has promoted a page past stub already, synthesis
+    must not push it back down."""
+    # Pre-populate the page at status=mature.
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    existing = """---
+type: concept
+slug: settle
+sources:
+  - s1
+  - s2
+  - s3
+teachers:
+  - kate
+status: mature
+---
+
+## Overview
+
+Curated overview.
+
+## By teacher
+"""
+    (wiki_repo_path / "concepts" / "settle.md").write_text(existing)
+
+    contribs = [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="kate",
+            paragraph_md="New framing. ([[sources/kate/s4]])",
+            source_slug="s4",
+            source_bucket="kate",
+        ),
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    fm = _frontmatter(wiki_repo_path / "concepts" / "settle.md")
+    assert fm["status"] == "mature"
+
+
+# ── empty-description placeholder ───────────────────────────────────────
+
+
+def test_empty_detail_renders_placeholder_not_parenthetical(
+    wiki_repo_path: Path,
+) -> None:
+    """When notes_json gives a name but no detail, the contribution
+    paragraph reads as the placeholder rather than ``(Name).`` stub."""
+    contribs = plan_contributions(
+        notes_json={
+            "patterns_and_sequences": [
+                {"name": "Sugar Push"},  # no description
+            ],
+        },
+        canonical_instructors=["kaiano"],
+        source_slug="2025-09-15-x",
+        source_bucket="kaiano",
+    )
+    technique = [c for c in contribs if c.page_type == "technique"]
+    assert len(technique) == 1
+    para = technique[0].paragraph_md
+    assert "Referenced without elaboration" in para
+    # The bad old behavior emitted "(Sugar Push)." as the body.
+    assert "(Sugar Push)" not in para
+    # Citation still present so the source-count synthesis still picks it up.
+    assert "[[sources/kaiano/2025-09-15-x]]" in para
+
+
+# ── loose acronym filter ────────────────────────────────────────────────
+
+
+def test_passes_instructor_filter_rejects_loose_acronyms() -> None:
+    """Title-case 4-letter org acronyms (LLM case-folded ``Asdc``,
+    ``Wsdc``, all-consonant strings) should not pass the filter even
+    when the strict isupper() check fails."""
+    from wiki_curator_cog.derived_pages import _passes_instructor_filter
+
+    # Loose-acronym cases — must be rejected.
+    assert not _passes_instructor_filter("Asdc", "")
+    assert not _passes_instructor_filter("Wsdc", "")
+    assert not _passes_instructor_filter("Dcsx", "")  # zero vowels
+
+    # Real 4-letter names — must still pass.
+    assert _passes_instructor_filter("Kate", "")
+    assert _passes_instructor_filter("Joel", "")
+    assert _passes_instructor_filter("Ardy", "")  # y-as-vowel
+    assert _passes_instructor_filter("Jess", "")  # 1 mid-word vowel + repeat
+    assert _passes_instructor_filter("Hugh", "")  # 1 mid-word vowel + repeat
 
 
 def test_wipe_derived_pages_preserves_non_md_files(wiki_repo_path: Path) -> None:

@@ -30,6 +30,7 @@ from .git_ops import WikiRepo
 from .inventory import build_inventory
 from .state import load_state, save_state
 from .views import regenerate_views
+from .wiki_files import regenerate_index_derived_sections
 
 load_dotenv()
 
@@ -154,6 +155,16 @@ def backfill_flow() -> dict:
         )
         wiki_repo.stage(view_paths)
 
+        # Regenerate index.md's derived-page sections (Concepts,
+        # Techniques, Instructors, Terminology) from current disk
+        # state. Per-source ingest only maintains the ``## Sources``
+        # section incrementally; the others get rebuilt at end of
+        # backfill since the wipe at start of run invalidated whatever
+        # was there.
+        index_path = config.wiki_repo_path / "index.md"
+        if regenerate_index_derived_sections(index_path):
+            wiki_repo.stage([index_path])
+
         if wiki_repo.has_changes():
             wiki_repo.stage_all()
             wiki_repo.commit("backfill: alias map, views, and residual updates")
@@ -255,12 +266,15 @@ def incremental_flow() -> dict:
         # Regenerate views only if this run actually ingested at least
         # one source — otherwise the existing view files are still
         # accurate and we'd just touch their regenerated_at timestamps
-        # for no reason.
+        # for no reason. Same goes for the index.md derived sections.
         if ingested > 0:
             view_paths = regenerate_views(
                 config.wiki_repo_path, curator_version=config.curator_version
             )
             wiki_repo.stage(view_paths)
+            index_path = config.wiki_repo_path / "index.md"
+            if regenerate_index_derived_sections(index_path):
+                wiki_repo.stage([index_path])
 
         if wiki_repo.has_changes():
             wiki_repo.stage_all()

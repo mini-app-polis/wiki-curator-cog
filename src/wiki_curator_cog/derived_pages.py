@@ -273,6 +273,53 @@ def _looks_like_acronym(name: str) -> bool:
     return 3 <= len(s) <= 5 and s.isupper() and s.isalpha()
 
 
+# Vowels for the loose-acronym shape detector below. ``y`` counts as a
+# vowel so 4-letter names like ``Ardy`` aren't false-positive rejected.
+_VOWELS: frozenset[str] = frozenset("aeiouy")
+
+
+def _looks_like_loose_acronym(name: str) -> bool:
+    """Catch acronym-shaped names that the case-sensitive check misses.
+
+    The upstream LLM occasionally case-folds organizational acronyms
+    (``ASDC`` → ``Asdc``, ``WSDC`` → ``Wsdc``) so the strict
+    ``isupper()`` check in ``_looks_like_acronym`` doesn't fire. This
+    looser variant rejects 3-5 letter alphabetic tokens that have an
+    acronym-typical vowel profile:
+
+      * Zero vowels at all (``Dcsx``, ``Wsdc``) — guaranteed acronym.
+      * One vowel only at position 0 with no repeated letters
+        (``Asdc``: a + s,d,c). Real human names with a single leading
+        vowel tend to have a repeated consonant (``Anna``, ``Ella``,
+        ``Adam``+initial-only) or are too short to gate on here.
+
+    Real WCS-corpus 4-letter names that must still pass:
+
+      * ``Kate`` — 2 vowels (a, e).
+      * ``Ardy`` — 2 vowels (a, y).
+      * ``Jess`` — 1 vowel mid-word + repeated consonant.
+      * ``Hugh`` — 1 vowel mid-word + repeated consonant.
+      * ``Joel`` — 2 vowels (o, e).
+    """
+    s = name.strip()
+    if not (3 <= len(s) <= 5 and s.isalpha()):
+        return False
+    lowered = s.lower()
+    vowel_positions = [i for i, c in enumerate(lowered) if c in _VOWELS]
+
+    if not vowel_positions:
+        return True
+
+    if len(vowel_positions) == 1 and vowel_positions[0] == 0:
+        # One vowel at the very start, no repeated characters →
+        # acronym shape. Repeated characters suggest a real name like
+        # ``Anna``/``Ella``.
+        if len(set(lowered)) == len(lowered):
+            return True
+
+    return False
+
+
 def _passes_instructor_filter(name: str, ref_type: str) -> bool:
     """Heuristic: a real instructor reference is an individual person.
 
@@ -302,8 +349,12 @@ def _passes_instructor_filter(name: str, ref_type: str) -> bool:
     if not tokens:
         return False
 
-    # Acronyms — usually orgs, not people.
+    # Acronyms — usually orgs, not people. Strict (all-caps) catches
+    # ``WSDC`` / ``NDC``; loose catches ``Asdc``/``Wsdc`` where the LLM
+    # case-folded the acronym back to title-case.
     if _looks_like_acronym(name.strip()):
+        return False
+    if _looks_like_loose_acronym(name.strip()):
         return False
 
     # Dance style names (whole-token match).
@@ -353,9 +404,20 @@ class Contribution:
     citation token to detect "is this an existing contribution from
     the same source?" for idempotency.
 
-    ``kind`` is the contribution flavor — most are ``by-teacher`` but
-    some are special (``referenced-by`` for instructor pages, etc.) and
-    the page-specific upsert dispatches on it.
+    ``kind`` is the contribution flavor:
+
+      * ``by-teacher`` (default) — content lands under
+        ``## By teacher`` → ``### <Teacher>`` on a concept or
+        technique page. Updates ``sources`` and ``teachers`` lists.
+      * ``referenced-by`` — bullet under ``## Referenced by`` on an
+        instructor page (the named person was mentioned in a source's
+        ``references`` field, not as a teaching authority). Updates
+        ``references_count`` and ``references_count_sources``.
+      * ``as-author`` — bullet under ``## Sources`` on an instructor
+        page (the named person IS a teaching authority on this source,
+        i.e. appears in the source's ``instructors`` field). Updates
+        ``sources``, ``sources_count``, ``concepts_taught``,
+        ``techniques_taught``.
 
     ``raw_slug`` is the slug that the contribution's source term would
     have produced WITHOUT vocab canonicalization — e.g., ``anchor-steps``
@@ -363,6 +425,12 @@ class Contribution:
     page's ``aliases:`` frontmatter so the variant is discoverable from
     the canonical page. ``None`` when the contribution doesn't go
     through vocab canonicalization (instructor pages).
+
+    ``concepts_taught`` / ``techniques_taught`` carry the slugs of the
+    concept/technique pages this same source contributed to under this
+    instructor's name. Only populated on ``as-author`` contributions;
+    apply_contributions merges them into the instructor page's
+    frontmatter lists.
     """
 
     page_type: PageType
@@ -371,10 +439,12 @@ class Contribution:
     paragraph_md: str
     source_slug: str
     source_bucket: str
-    kind: Literal["by-teacher", "referenced-by"] = "by-teacher"
+    kind: Literal["by-teacher", "referenced-by", "as-author"] = "by-teacher"
     raw_slug: str | None = None
     # Optional payloads for richer page sections:
     common_mistakes: list[tuple[str, str]] = field(default_factory=list)
+    concepts_taught: list[str] = field(default_factory=list)
+    techniques_taught: list[str] = field(default_factory=list)
 
 
 # ── Planning (pure, no IO) ──────────────────────────────────────────────
@@ -398,16 +468,27 @@ def _source_citation(source_bucket: str, source_slug: str) -> str:
     return f"([[sources/{source_bucket}/{source_slug}]])"
 
 
+# Rendered into ``## By teacher`` paragraphs when the upstream LLM
+# extracted a concept/technique name but no ``detail`` / ``description``
+# prose to go with it. Better than the old ``(Sugar Push). [citation]``
+# stub because the absence of elaboration is now explicit on the page,
+# and the bullet still counts toward the source-count synthesis.
+_EMPTY_DETAIL_PLACEHOLDER: str = "_Referenced without elaboration in source._"
+
+
 def _format_teacher_paragraph(detail: str, source_bucket: str, source_slug: str) -> str:
     """Render one teacher's contribution paragraph for a derived page.
 
     Shape: ``<detail prose> <citation>``. Citation goes at the end so
-    the prose reads naturally.
+    the prose reads naturally. Empty / whitespace-only detail renders
+    the placeholder rather than echoing the term name in parentheses,
+    so concept and technique pages don't accumulate ``(Sugar Push).``-
+    style stub bullets.
     """
     detail = detail.strip()
     citation = _source_citation(source_bucket, source_slug)
     if not detail:
-        return citation
+        return f"{_EMPTY_DETAIL_PLACEHOLDER} {citation}"
     # Ensure detail ends in proper sentence punctuation before citation.
     if detail[-1] not in ".!?":
         detail = detail + "."
@@ -422,6 +503,9 @@ def plan_contributions(
     source_bucket: str,
     concept_aliases: AliasMap | None = None,
     technique_aliases: AliasMap | None = None,
+    session_date: Any | None = None,
+    session_type: str | None = None,
+    title: str | None = None,
 ) -> list[Contribution]:
     """Walk notes_json deterministically and return all the contributions.
 
@@ -445,6 +529,19 @@ def plan_contributions(
       * When ``None`` (legacy callers / tests), behavior reduces to the
         original ``slugify`` flow with no plural collapse and no alias
         lookup. Production callers always pass both.
+
+    Instructor-as-author (per CLAUDE.md "Instructor pages"):
+
+      * For each canonical instructor on the source, a Contribution
+        with ``kind="as-author"`` is emitted targeting that instructor's
+        page. The bullet that lands under ``## Sources`` describes this
+        source. The contribution also carries the concept/technique
+        slugs this same source contributed under that instructor's name
+        so the instructor page's ``concepts_taught`` /
+        ``techniques_taught`` lists stay in sync.
+      * ``session_date`` / ``session_type`` / ``title`` are used to
+        render the source bullet. When omitted, the bullet falls back
+        to just the source slug + a link.
 
     Skipped here (handled elsewhere or deferred):
     - ``student_observations`` — never enters the wiki, per spec.
@@ -503,11 +600,7 @@ def plan_contributions(
         slug, raw_slug = _concept_slug(name)
         if not slug:
             continue
-        para = _format_teacher_paragraph(
-            detail or f"({name})",
-            source_bucket,
-            source_slug,
-        )
+        para = _format_teacher_paragraph(detail, source_bucket, source_slug)
         for teacher in canonical_instructors or [None]:  # type: ignore[list-item]
             contributions.append(
                 Contribution(
@@ -534,11 +627,7 @@ def plan_contributions(
         slug, raw_slug = _technique_slug(name)
         if not slug:
             continue
-        para = _format_teacher_paragraph(
-            description or f"({name})",
-            source_bucket,
-            source_slug,
-        )
+        para = _format_teacher_paragraph(description, source_bucket, source_slug)
         for teacher in canonical_instructors or [None]:  # type: ignore[list-item]
             contributions.append(
                 Contribution(
@@ -625,7 +714,104 @@ def plan_contributions(
             )
         )
 
+    # ── canonical_instructors → instructor pages (as-author) ────────
+    # For each teaching authority on this source, emit a contribution
+    # to their instructor page's ``## Sources`` section. The bullet
+    # describes the source (date + slug + session-type + title) and
+    # the contribution carries the concept/technique slugs this same
+    # source contributed under this instructor's name — those become
+    # ``concepts_taught`` / ``techniques_taught`` on the instructor page.
+    if canonical_instructors:
+        # Compute per-instructor concept/technique attributions from the
+        # by-teacher contributions we already planned above. Each
+        # instructor is attributed to the slugs they teach on this source.
+        per_author_concepts: dict[str, list[str]] = {
+            ci: [] for ci in canonical_instructors
+        }
+        per_author_techniques: dict[str, list[str]] = {
+            ci: [] for ci in canonical_instructors
+        }
+        for c in contributions:
+            if c.kind != "by-teacher" or c.teacher is None:
+                continue
+            if c.teacher not in per_author_concepts:
+                continue
+            if (
+                c.page_type == "concept"
+                and c.page_slug not in per_author_concepts[c.teacher]
+            ):
+                per_author_concepts[c.teacher].append(c.page_slug)
+            elif (
+                c.page_type == "technique"
+                and c.page_slug not in per_author_techniques[c.teacher]
+            ):
+                per_author_techniques[c.teacher].append(c.page_slug)
+
+        bullet = _format_author_source_bullet(
+            source_bucket=source_bucket,
+            source_slug=source_slug,
+            session_date=session_date,
+            session_type=session_type,
+            title=title,
+        )
+        for instructor in canonical_instructors:
+            contributions.append(
+                Contribution(
+                    page_type="instructor",
+                    page_slug=instructor,
+                    teacher=None,
+                    paragraph_md=bullet,
+                    source_slug=source_slug,
+                    source_bucket=source_bucket,
+                    kind="as-author",
+                    concepts_taught=per_author_concepts[instructor],
+                    techniques_taught=per_author_techniques[instructor],
+                )
+            )
+
     return contributions
+
+
+def _format_author_source_bullet(
+    *,
+    source_bucket: str,
+    source_slug: str,
+    session_date: Any | None,
+    session_type: str | None,
+    title: str | None,
+) -> str:
+    """Render the ``## Sources`` bullet for an instructor-as-author entry.
+
+    Shape: ``- **YYYY-MM-DD** — [[sources/<bucket>/<slug>|<title>]] · <session-type>``
+
+    Falls back gracefully when fields are missing — the wikilink is the
+    only required part, since that's what makes the bullet useful as
+    navigation.
+    """
+    # Date prefix
+    if session_date is not None:
+        date_str = str(session_date)
+    else:
+        date_str = ""
+
+    # Wikilink with display text
+    display = title.strip() if title and title.strip() else source_slug
+    link = f"[[sources/{source_bucket}/{source_slug}|{display}]]"
+
+    # Session-type label, lightly humanized
+    type_label = ""
+    if session_type:
+        type_label = session_type.replace("_", " ").strip()
+
+    parts: list[str] = []
+    if date_str:
+        parts.append(f"**{date_str}**")
+        parts.append("—")
+    parts.append(link)
+    if type_label:
+        parts.append(f"· {type_label}")
+
+    return "- " + " ".join(parts)
 
 
 # ── Application (writes to disk) ────────────────────────────────────────
@@ -756,6 +942,51 @@ def _upsert_teacher_paragraph(
     page.set_section("By teacher", new_by_teacher)
 
 
+def _upsert_source_bullet(
+    page: md.Page,
+    *,
+    section_name: str,
+    bullet_md: str,
+    source_bucket: str,
+    source_slug: str,
+) -> None:
+    """Append or replace a bullet under ``## <section_name>`` keyed by source.
+
+    Used for instructor-page ``## Sources`` and ``## Referenced by``
+    sections — both are flat bullet lists where each line cites one
+    source page. Idempotent: re-applying the same source replaces the
+    existing bullet rather than duplicating.
+    """
+    section = page.ensure_section(section_name)
+    citation_link = f"sources/{source_bucket}/{source_slug}"
+    bullet = bullet_md if bullet_md.startswith("- ") else f"- {bullet_md}"
+
+    new_lines: list[str] = []
+    replaced = False
+    seen_bullet_block = False
+    for line in section:
+        stripped = line.strip()
+        is_our_bullet = stripped.startswith("- ") and citation_link in stripped
+        if is_our_bullet and not replaced:
+            new_lines.append(bullet)
+            replaced = True
+            seen_bullet_block = True
+            continue
+        if stripped.startswith("- "):
+            seen_bullet_block = True
+        new_lines.append(line)
+
+    if not replaced:
+        if seen_bullet_block:
+            new_lines.append(bullet)
+        else:
+            if new_lines and new_lines[-1].strip():
+                new_lines.append("")
+            new_lines.append(bullet)
+
+    page.set_section(section_name, new_lines)
+
+
 def _upsert_referenced_by(
     page: md.Page,
     *,
@@ -863,6 +1094,27 @@ def apply_contributions(
                 page.frontmatter["references_count"] = len(
                     page.frontmatter.get("references_count_sources", [])
                 )
+            elif c.kind == "as-author":
+                # Instructor page, this person is a teaching authority
+                # on the source. Lands as a bullet under ``## Sources``
+                # and updates the page's authorship-facing frontmatter.
+                _upsert_source_bullet(
+                    page,
+                    section_name="Sources",
+                    bullet_md=c.paragraph_md,
+                    source_bucket=c.source_bucket,
+                    source_slug=c.source_slug,
+                )
+                md.add_unique(page.frontmatter, "sources", c.source_slug)
+                # sources_count mirrors the distinct count of source
+                # slugs (CLAUDE.md frontmatter spec).
+                page.frontmatter["sources_count"] = len(
+                    page.frontmatter.get("sources", [])
+                )
+                for concept_slug in c.concepts_taught:
+                    md.add_unique(page.frontmatter, "concepts_taught", concept_slug)
+                for technique_slug in c.techniques_taught:
+                    md.add_unique(page.frontmatter, "techniques_taught", technique_slug)
             else:
                 # by-teacher (default)
                 if c.teacher is not None:
@@ -984,17 +1236,47 @@ def _render_across_sources(per_teacher: list[tuple[str, int]]) -> list[str]:
 
 
 def _synthesize_page(page: md.Page, page_type: PageType) -> None:
-    """Populate ## Overview (if blank) and ## Across sources for concept/technique pages.
+    """Synthesize derived sections + auto-promote status. Mutates ``page``.
 
-    Mutates ``page`` in place. No-op if the page has fewer than
-    ``_MIN_SOURCES_FOR_SYNTHESIS`` distinct sources or isn't a
-    synthesizable page type.
+    Three behaviors, all gated on the page's current source count:
+
+      * Status promotion (all derived page types): once the page has
+        ``_MIN_SOURCES_FOR_SYNTHESIS`` (=3) distinct sources, promote
+        ``status: stub`` → ``status: draft``. Never auto-promote to
+        ``mature`` — that requires editorial review per CLAUDE.md.
+      * ``## Overview`` (concept/technique only): populated with a
+        neutral one-sentence gloss when the existing section is blank
+        or absent. Human/LLM prose in this section is preserved across
+        re-renders via ``_placeholder_only``.
+      * ``## Across sources`` (concept/technique only): per-teacher
+        source-count bullets, always re-rendered from current page
+        state.
+
+    Below the synthesis threshold the page keeps its existing status
+    and the Overview / Across-sources sections are left untouched.
     """
-    if page_type not in {"concept", "technique"}:
+    if page_type not in {"concept", "technique", "instructor"}:
         return
+
     sources = page.frontmatter.get("sources") or []
-    if not isinstance(sources, list) or len(sources) < _MIN_SOURCES_FOR_SYNTHESIS:
+    if not isinstance(sources, list):
         return
+    if len(sources) < _MIN_SOURCES_FOR_SYNTHESIS:
+        return
+
+    # Status promotion — applies to all three derived page types once
+    # the source threshold is crossed. We only promote *up* from stub;
+    # human-curated draft/mature designations are preserved.
+    if page.frontmatter.get("status") == "stub":
+        page.frontmatter["status"] = "draft"
+
+    # The rest of the synthesis is concept/technique specific —
+    # instructor pages don't render Overview/Across-sources from
+    # per-teacher attribution. Their ``## Background`` and ``##
+    # Teaching themes`` sections are editorial work, not derived.
+    if page_type == "instructor":
+        return
+
     by_teacher = page.get_section("By teacher") or []
     per_teacher = _count_sources_per_teacher(by_teacher)
     if not per_teacher:

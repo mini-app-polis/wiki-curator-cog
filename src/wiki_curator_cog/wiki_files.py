@@ -4,7 +4,10 @@ The wiki repo carries two cross-cutting files that the curator touches
 on every ingest:
 
   - ``index.md`` — the catalog of all pages. The curator inserts (or
-    replaces) one line per source under the ``## Sources`` section.
+    replaces) one line per source under the ``## Sources`` section,
+    and at end of backfill regenerates the ``## Concepts`` /
+    ``## Techniques`` / ``## Instructors`` / ``## Terminology``
+    sections from current disk state.
   - ``log.md`` — an append-only chronological record. The curator
     appends one ``## [YYYY-MM-DD] ingest | <slug>`` entry per source.
 
@@ -24,6 +27,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 from pathlib import Path
+
+import yaml
 
 # ── index.md helpers ────────────────────────────────────────────────────
 
@@ -284,6 +289,214 @@ def remove_source_from_index(
     if removed:
         index_path.write_text(_join_sections(chunks))
     return removed
+
+
+# ── index.md derived-page section regeneration ─────────────────────────
+#
+# The ``## Concepts``, ``## Techniques``, ``## Instructors``, and
+# ``## Terminology`` sections of index.md are owned by the curator and
+# fully regenerated from disk state at end of backfill (and at end of
+# incremental flows when anything in those directories changed).
+#
+# Unlike the source index — which is upserted incrementally per-ingest
+# so the section is always coherent mid-backfill — the derived sections
+# are rebuilt as one operation because the curator wipes the four
+# derived directories before backfill and would otherwise accumulate
+# entries for pages that no longer exist.
+
+
+# Page types that get their own index section, in the order they
+# appear in index.md.
+_DERIVED_SECTION_ORDER: tuple[tuple[str, str], ...] = (
+    # (heading, subdirectory)
+    ("Concepts", "concepts"),
+    ("Techniques", "techniques"),
+    ("Instructors", "instructors"),
+    ("Terminology", "terminology"),
+)
+
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+
+
+def _read_page_frontmatter(path: Path) -> dict:
+    """Parse just the YAML frontmatter block from a derived page.
+
+    Returns an empty dict for files without a frontmatter block or with
+    malformed YAML — the caller treats those as "no metadata" and
+    falls back to the bare wikilink form.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return {}
+    m = _FRONTMATTER_RE.match(text)
+    if m is None:
+        return {}
+    try:
+        parsed = yaml.safe_load(m.group(1))
+    except yaml.YAMLError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return parsed
+
+
+def _format_derived_index_line(*, subdir: str, slug: str, fm: dict) -> str:
+    """One bullet for a derived page in the index.
+
+    Shape: ``- [[<subdir>/<slug>]] — <summary>``
+    where ``<summary>`` is derived from frontmatter where possible:
+
+      - For concept/technique pages: ``Taught by X, Y (N sources)``
+        when ``teachers`` and ``sources`` are present.
+      - For instructor pages: ``N sources · N referenced``.
+      - For terminology pages: ``Reconciles: <term1>, <term2>``.
+      - Always tags the page's ``status:`` at the end if non-default.
+
+    Pages with no useful frontmatter render as bare wikilinks.
+    """
+    summary_parts: list[str] = []
+    if subdir in {"concepts", "techniques"}:
+        teachers = fm.get("teachers") or []
+        sources = fm.get("sources") or []
+        if isinstance(teachers, list) and teachers:
+            pretty_teachers = ", ".join(
+                " ".join(part.capitalize() for part in t.split("-")) for t in teachers
+            )
+            count = len(sources) if isinstance(sources, list) else 0
+            noun = "source" if count == 1 else "sources"
+            summary_parts.append(f"Taught by {pretty_teachers} ({count} {noun})")
+    elif subdir == "instructors":
+        sources_count = fm.get("sources_count") or 0
+        references_count = fm.get("references_count") or 0
+        if sources_count or references_count:
+            summary_parts.append(
+                f"{sources_count} source{'' if sources_count == 1 else 's'} · "
+                f"{references_count} referenced"
+            )
+    elif subdir == "terminology":
+        terms = fm.get("terms") or []
+        if isinstance(terms, list) and terms:
+            summary_parts.append("Reconciles: " + ", ".join(terms))
+
+    status = fm.get("status")
+    if status and status != "stub":
+        summary_parts.append(f"[status: {status}]")
+
+    summary = " · ".join(summary_parts)
+    line = f"- [[{subdir}/{slug}]]"
+    if summary:
+        line += f" — {summary}"
+    return line
+
+
+def _list_derived_pages(wiki_repo_path: Path, subdir: str) -> list[Path]:
+    """Return derived-page markdown files in ``<wiki>/<subdir>/`` sorted by slug.
+
+    Filters out ``_aliases.yaml`` and any other non-markdown files.
+    Returns an empty list if the directory doesn't exist.
+    """
+    directory = wiki_repo_path / subdir
+    if not directory.is_dir():
+        return []
+    return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix == ".md")
+
+
+def _render_derived_section(wiki_repo_path: Path, subdir: str) -> list[str]:
+    """Build the body lines for one derived section of index.md.
+
+    Returns the body BELOW the heading (i.e. starts with a blank line,
+    then bullets, then a blank line) so callers can drop it into the
+    chunk structure used by ``_join_sections``. Empty directories
+    render a single placeholder line so the section heading still has
+    content under it.
+    """
+    pages = _list_derived_pages(wiki_repo_path, subdir)
+    if not pages:
+        placeholder = f"_No {subdir.rstrip('s')} pages yet._"
+        return ["", placeholder, ""]
+
+    lines: list[str] = [""]
+    for page_path in pages:
+        slug = page_path.stem
+        fm = _read_page_frontmatter(page_path)
+        lines.append(_format_derived_index_line(subdir=subdir, slug=slug, fm=fm))
+    lines.append("")
+    return lines
+
+
+def regenerate_index_derived_sections(index_path: Path) -> bool:
+    """Rewrite the four derived-page sections of index.md from disk state.
+
+    Operates on the wiki repo containing ``index_path``. Looks at the
+    ``concepts/``, ``techniques/``, ``instructors/``, ``terminology/``
+    sibling directories and rebuilds the matching ``## <Heading>``
+    sections of index.md from current page frontmatter.
+
+    Sections that don't exist in index.md yet are appended at the end
+    in the canonical order (Concepts → Techniques → Instructors →
+    Terminology). The ``## Sources`` section and any other sections
+    (preamble, ``## Views``, etc.) are left untouched.
+
+    Returns True if index.md was rewritten, False if no derived
+    directory has any markdown content (rare; only on a completely
+    empty wiki). Safe to call repeatedly — output is fully deterministic
+    from disk state.
+    """
+    if not index_path.exists():
+        return False
+    wiki_repo_path = index_path.parent
+
+    # Decide ahead of time which sections we need to render — short-circuit
+    # only if every derived directory is empty.
+    has_any_pages = any(
+        _list_derived_pages(wiki_repo_path, subdir)
+        for _, subdir in _DERIVED_SECTION_ORDER
+    )
+
+    text = index_path.read_text()
+    chunks = _split_at_sections(text)
+
+    # Build a heading → body map for the new derived sections.
+    rendered: dict[str, list[str]] = {}
+    for heading, subdir in _DERIVED_SECTION_ORDER:
+        rendered[heading] = _render_derived_section(wiki_repo_path, subdir)
+
+    # Replace any existing matches in place; track which we still need
+    # to append.
+    handled: set[str] = set()
+    for i, (heading, _body) in enumerate(chunks):
+        if heading in rendered:
+            chunks[i] = (heading, rendered[heading])
+            handled.add(heading)
+
+    # Append missing sections in canonical order, before any unrelated
+    # tail sections (Views, Sources). We insert before the first
+    # not-yet-handled, not-in-rendered section — usually Views or
+    # Sources. If we can't find one, append at the very end.
+    missing = [h for h, _ in _DERIVED_SECTION_ORDER if h not in handled]
+    if missing:
+        # Find the insertion point: first chunk whose heading is not in
+        # ``rendered`` AND not None (preamble). That's typically the
+        # Views section per the skeleton.
+        insert_at = len(chunks)
+        for i, (heading, _body) in enumerate(chunks):
+            if heading is None:
+                continue
+            if heading not in rendered:
+                insert_at = i
+                break
+
+        # ``missing`` is already in canonical order.
+        new_chunks: list[tuple[str | None, list[str]]] = []
+        new_chunks.extend(chunks[:insert_at])
+        for heading in missing:
+            new_chunks.append((heading, rendered[heading]))
+        new_chunks.extend(chunks[insert_at:])
+        chunks = new_chunks
+
+    index_path.write_text(_join_sections(chunks))
+    return has_any_pages
 
 
 # ── log.md helpers ──────────────────────────────────────────────────────
