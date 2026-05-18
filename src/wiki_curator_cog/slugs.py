@@ -176,6 +176,149 @@ def _session_type_slug(session_type: str) -> str:
     return slugify(session_type.replace("_", "-"))
 
 
+# ── Vocabulary canonicalization (concept / technique slugs) ─────────────
+#
+# Concept and technique pages use a two-stage canonicalization that
+# mirrors what the instructor alias map does for people:
+#
+#   1. ``slugify`` puts the raw term into the wiki's slug form
+#      (lowercase, hyphenated, ASCII-only).
+#   2. ``_depluralize_slug`` collapses trailing-``s``/``-es``/``-ies``
+#      so ``anchor-step`` and ``anchor-steps`` map to one canonical.
+#   3. The vocab alias map (``concepts/_aliases.yaml`` /
+#      ``techniques/_aliases.yaml``) collapses everything else —
+#      synonyms, abbreviations, reframings.
+#
+# Stages 1–2 are mechanical and apply silently. Stage 3 is the
+# judgment-call layer Kaiano controls by editing the alias map; the
+# curator never auto-adds entries here (unlike the instructor map,
+# where auto-add is safe because identity is established upstream).
+#
+# Per CLAUDE.md "Vocabulary handling" rule 6 ("When in doubt, prefer a
+# terminology page over a silent merge"), the alias maps default to
+# empty and silent merges only happen for the case/plural variants
+# stages 1–2 catch.
+
+# Plural endings handled by ``_depluralize_slug``. Order matters:
+# longest suffix first so ``-ies`` is tried before ``-s``.
+#
+# We deliberately don't handle irregulars (``feet`` ↔ ``foot``,
+# ``children`` ↔ ``child``). WCS vocabulary doesn't surface them often
+# enough to justify the false-positive risk on unrelated words.
+_PLURAL_RULES: tuple[tuple[str, str], ...] = (
+    # ``-ies`` → ``-y``: ``policies`` → ``policy``. Skip when the stem
+    # before -ies is only 1 char (``dies`` → ``dy`` is wrong; ``ties``
+    # is also borderline but rare in this corpus).
+    ("ies", "y"),
+    # ``-es`` after sibilants: ``boxes`` → ``box``, ``pushes`` →
+    # ``push``, ``wishes`` → ``wish``. We strip the ``-es`` (not
+    # ``-s``) because the ``e`` is just a phonetic insert for the
+    # sibilant ending.
+    ("ches", "ch"),
+    ("shes", "sh"),
+    ("sses", "ss"),
+    ("xes", "x"),
+    ("zes", "z"),
+    # Plain ``-s`` plurals. The most common case; also the trickiest
+    # because it false-positives on words that just end in ``s``
+    # (``bus``, ``focus``, ``axis``). We mitigate by refusing to strip
+    # when the resulting stem would be ≤2 chars OR would end in
+    # ``s``/``ss`` (so ``stress`` doesn't become ``stres``, ``bus``
+    # stays ``bus``, ``mass`` stays ``mass``).
+    ("s", ""),
+)
+
+# Minimum length of the stem AFTER stripping a ``-s``. Below this we
+# refuse to depluralize, since the word is too short to safely assume
+# we're looking at a plural.
+_MIN_DEPLURALIZED_STEM: int = 3
+
+
+def _depluralize_slug(slug: str) -> str:
+    """Collapse trailing plural suffixes in a slug. Safe for non-plurals.
+
+    Operates on the slug's last token (after the final hyphen) so that
+    compound slugs like ``anchor-steps`` collapse to ``anchor-step``
+    rather than crashing into the hyphen boundary. The earlier tokens
+    are preserved verbatim.
+
+    Returns the input unchanged when no rule applies or when applying a
+    rule would produce a stem below ``_MIN_DEPLURALIZED_STEM``. The
+    function is total — every string maps to some string.
+    """
+    if not slug:
+        return slug
+
+    # Operate on the last hyphen-separated token only. The lead is the
+    # rest of the slug; if there's no hyphen, the lead is empty and
+    # ``last`` is the whole slug.
+    last_hyphen = slug.rfind("-")
+    if last_hyphen == -1:
+        lead, last = "", slug
+    else:
+        lead, last = slug[: last_hyphen + 1], slug[last_hyphen + 1 :]
+
+    for suffix, replacement in _PLURAL_RULES:
+        if not last.endswith(suffix):
+            continue
+        stem = last[: len(last) - len(suffix)] + replacement
+        # Refuse if the resulting stem is too short — short words ending
+        # in -s are usually not plurals (``bus``, ``gas``, ``yes``).
+        if len(stem) < _MIN_DEPLURALIZED_STEM:
+            continue
+        # For the plain ``-s`` rule, also refuse if the underlying word
+        # ended in ``-ss`` (``stress``, ``mass``, ``loss``) so we don't
+        # convert it to a non-plural sibling.
+        if suffix == "s" and stem.endswith("s"):
+            continue
+        return lead + stem
+
+    return slug
+
+
+def canonicalize_concept_slug(text: str, *, aliases) -> str:  # type: ignore[no-untyped-def]
+    """Turn a raw concept/vocabulary string into its canonical wiki slug.
+
+    Pipeline:
+
+      1. ``slugify`` to ASCII lowercase-hyphenated form.
+      2. ``_depluralize_slug`` to collapse trailing plural suffixes.
+      3. Alias-map lookup against ``aliases`` (typically the loaded
+         ``concepts/_aliases.yaml``). Returns the canonical slug if the
+         depluralized form is mapped, else the depluralized form
+         itself.
+
+    The alias map's ``to_slug`` accepts a raw string and normalizes
+    internally, so we can pass the slug form directly. Tried against
+    BOTH the depluralized and the original slug — covers the case
+    where someone manually mapped ``anchor-steps: anchor-step`` and
+    expects it to win over the silent depluralization.
+
+    Returns an empty string when the input slugifies to empty; callers
+    should treat that as "skip this contribution".
+    """
+    raw = slugify(text)
+    if not raw:
+        return ""
+    stemmed = _depluralize_slug(raw)
+    # Try raw first so a manual alias for the plural form beats the
+    # depluralization rule. Then try the stemmed form.
+    mapped = aliases.to_slug(raw)
+    if mapped is None:
+        mapped = aliases.to_slug(stemmed)
+    return mapped if mapped is not None else stemmed
+
+
+def canonicalize_technique_slug(text: str, *, aliases) -> str:  # type: ignore[no-untyped-def]
+    """Like ``canonicalize_concept_slug`` but for techniques.
+
+    Behaviorally identical — separated by name so callers express
+    which alias map they intend to consult. Keeps the call sites
+    self-documenting and lets us specialize later if the rules diverge.
+    """
+    return canonicalize_concept_slug(text, aliases=aliases)
+
+
 def build_source_slug(
     *,
     session_date: dt.date | None,

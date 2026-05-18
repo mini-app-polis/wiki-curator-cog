@@ -25,6 +25,7 @@ from .api_client import WikiCuratorApiClient
 from .boot import ensure_wiki_clone, mask_url
 from .config import assert_wiki_clone_ready, load_config
 from .curator import IngestMode, ingest_one_source
+from .derived_pages import wipe_derived_pages
 from .git_ops import WikiRepo
 from .inventory import build_inventory
 from .state import load_state, save_state
@@ -71,8 +72,32 @@ def backfill_flow() -> dict:
 
         api = WikiCuratorApiClient()
         wiki_repo = WikiRepo(config)
+
+        # Wipe and rebuild: every backfill regenerates the derived layer
+        # (concepts/, techniques/, instructors/, terminology/) from
+        # scratch so behavior changes to the curator — vocab collapse
+        # rules, filter heuristics, page-shape decisions — produce a
+        # clean result without stale variant pages from prior runs.
+        # The alias maps (``_aliases.yaml`` files) are preserved so
+        # Kaiano's manual curation survives. Source pages, the index,
+        # the log, and views are NOT touched here — sources are the
+        # authoritative input, the index/log are append-only history,
+        # and views regenerate themselves at end of backfill.
+        wiped = wipe_derived_pages(config.wiki_repo_path)
+        if wiped:
+            logger.info("backfill.wiped_derived_pages count=%d", len(wiped))
+            wiki_repo.stage_removal(wiped)
+
+        # Inventory is built AFTER the wipe so the curator doesn't
+        # think the just-deleted pages still exist. Source pages remain
+        # on disk and continue to drive the idempotency check via
+        # ``curator_version`` equality.
         inventory = build_inventory(config.wiki_repo_path)
         aliases = AliasMap.load(config.wiki_repo_path)
+        concept_aliases = AliasMap.load(config.wiki_repo_path, relative_dir="concepts")
+        technique_aliases = AliasMap.load(
+            config.wiki_repo_path, relative_dir="techniques"
+        )
 
         total = 0
         ingested = 0
@@ -89,6 +114,8 @@ def backfill_flow() -> dict:
                     wiki_repo_path=config.wiki_repo_path,
                     api=api,
                     curator_version=config.curator_version,
+                    concept_aliases=concept_aliases,
+                    technique_aliases=technique_aliases,
                 )
             except NotImplementedError:
                 # Skeleton stub — re-raise so the flow fails loudly while
@@ -113,6 +140,8 @@ def backfill_flow() -> dict:
                 wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
 
         # Save aliases once at end of backfill (may have grown).
+        # Vocab maps are never auto-mutated by the curator, so they
+        # don't need a corresponding save() call.
         aliases.save()
 
         # Regenerate the four required views once at end of backfill,
@@ -179,6 +208,10 @@ def incremental_flow() -> dict:
         wiki_repo = WikiRepo(config)
         inventory = build_inventory(config.wiki_repo_path)
         aliases = AliasMap.load(config.wiki_repo_path)
+        concept_aliases = AliasMap.load(config.wiki_repo_path, relative_dir="concepts")
+        technique_aliases = AliasMap.load(
+            config.wiki_repo_path, relative_dir="techniques"
+        )
 
         total = 0
         ingested = 0
@@ -197,6 +230,8 @@ def incremental_flow() -> dict:
                     wiki_repo_path=config.wiki_repo_path,
                     api=api,
                     curator_version=config.curator_version,
+                    concept_aliases=concept_aliases,
+                    technique_aliases=technique_aliases,
                 )
             except NotImplementedError:
                 raise

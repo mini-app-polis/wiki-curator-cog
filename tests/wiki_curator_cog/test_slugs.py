@@ -12,10 +12,13 @@ from wiki_curator_cog.slugs import (
     BUCKETED_INSTRUCTORS,
     EXTERNAL_BUCKET,
     UnknownNameError,
+    _depluralize_slug,
     bucket_for_instructors,
     build_source_slug,
+    canonicalize_concept_slug,
     canonicalize_name,
     canonicalize_names,
+    canonicalize_technique_slug,
     slugify,
 )
 
@@ -232,3 +235,140 @@ def test_build_source_slug_no_instructors() -> None:
         created_at=_ts("2025-09-15T12:00:00"),
     )
     assert slug == "2025-09-15-unknown-other"
+
+
+# ── _depluralize_slug ───────────────────────────────────────────────────
+
+
+def test_depluralize_strips_trailing_s() -> None:
+    assert _depluralize_slug("anchor-steps") == "anchor-step"
+    assert _depluralize_slug("whips") == "whip"
+    assert _depluralize_slug("variations") == "variation"
+
+
+def test_depluralize_handles_ies_to_y() -> None:
+    assert _depluralize_slug("policies") == "policy"
+
+
+def test_depluralize_handles_sibilant_es() -> None:
+    assert _depluralize_slug("boxes") == "box"
+    assert _depluralize_slug("pushes") == "push"
+    assert _depluralize_slug("wishes") == "wish"
+
+
+def test_depluralize_preserves_double_s_endings() -> None:
+    # ``stress``, ``mass``, ``loss`` are not plurals; depluralizing
+    # would corrupt them.
+    assert _depluralize_slug("stress") == "stress"
+    assert _depluralize_slug("compress") == "compress"
+
+
+def test_depluralize_refuses_short_stems() -> None:
+    # Too-short stems suggest the trailing ``s`` is part of the word,
+    # not a plural marker.
+    assert _depluralize_slug("bus") == "bus"
+    assert _depluralize_slug("yes") == "yes"
+
+
+def test_depluralize_operates_on_last_token_only() -> None:
+    # The hyphen-separated lead must be preserved verbatim — only the
+    # final token gets the plural collapse applied.
+    assert _depluralize_slug("sugar-pushes") == "sugar-push"
+    assert _depluralize_slug("anchor-step-variations") == "anchor-step-variation"
+
+
+def test_depluralize_idempotent_on_singular() -> None:
+    # Already-singular forms must round-trip unchanged.
+    assert _depluralize_slug("anchor-step") == "anchor-step"
+    assert _depluralize_slug("whip") == "whip"
+
+
+def test_depluralize_handles_empty_input() -> None:
+    assert _depluralize_slug("") == ""
+
+
+# ── canonicalize_concept_slug / canonicalize_technique_slug ─────────────
+
+
+def test_canonicalize_concept_slug_applies_plural_collapse(
+    wiki_repo_path: Path,
+) -> None:
+    # No alias map entries — the depluralizer carries the merge.
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "_aliases.yaml").write_text("")
+    aliases = AliasMap.load(wiki_repo_path, relative_dir="concepts")
+
+    assert canonicalize_concept_slug("Anchor step", aliases=aliases) == "anchor-step"
+    assert canonicalize_concept_slug("Anchor steps", aliases=aliases) == "anchor-step"
+    assert canonicalize_concept_slug("ANCHOR STEPS", aliases=aliases) == "anchor-step"
+
+
+def test_canonicalize_concept_slug_applies_alias_map(wiki_repo_path: Path) -> None:
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "_aliases.yaml").write_text(
+        "anchor: anchor-step\nanchoring-action: anchor-step\n"
+    )
+    aliases = AliasMap.load(wiki_repo_path, relative_dir="concepts")
+
+    assert canonicalize_concept_slug("Anchor", aliases=aliases) == "anchor-step"
+    assert (
+        canonicalize_concept_slug("anchoring action", aliases=aliases) == "anchor-step"
+    )
+    # Unmapped + depluralized: still works.
+    assert canonicalize_concept_slug("Frame", aliases=aliases) == "frame"
+
+
+def test_canonicalize_concept_slug_alias_wins_over_depluralization(
+    wiki_repo_path: Path,
+) -> None:
+    # A manual alias entry for the plural form should beat the silent
+    # depluralization rule.
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "_aliases.yaml").write_text(
+        "anchor-steps: settle\n"  # contrived to make the test direction obvious
+    )
+    aliases = AliasMap.load(wiki_repo_path, relative_dir="concepts")
+
+    assert canonicalize_concept_slug("Anchor steps", aliases=aliases) == "settle"
+
+
+def test_canonicalize_concept_slug_returns_empty_for_empty_input(
+    wiki_repo_path: Path,
+) -> None:
+    aliases = AliasMap.load(wiki_repo_path, relative_dir="concepts")
+    assert canonicalize_concept_slug("", aliases=aliases) == ""
+    assert canonicalize_concept_slug("   ", aliases=aliases) == ""
+
+
+def test_canonicalize_technique_slug_behaves_like_concept_slug(
+    wiki_repo_path: Path,
+) -> None:
+    (wiki_repo_path / "techniques").mkdir(exist_ok=True)
+    (wiki_repo_path / "techniques" / "_aliases.yaml").write_text(
+        "basic-whip: whip\nwhip-basic: whip\n"
+    )
+    aliases = AliasMap.load(wiki_repo_path, relative_dir="techniques")
+
+    assert canonicalize_technique_slug("Basic whip", aliases=aliases) == "whip"
+    assert canonicalize_technique_slug("whip basic", aliases=aliases) == "whip"
+    assert canonicalize_technique_slug("Whips", aliases=aliases) == "whip"
+
+
+# ── AliasMap relative_dir parameter ─────────────────────────────────────
+
+
+def test_aliasmap_load_supports_relative_dir(wiki_repo_path: Path) -> None:
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "techniques").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "_aliases.yaml").write_text("foo: bar\n")
+    (wiki_repo_path / "techniques" / "_aliases.yaml").write_text("baz: qux\n")
+
+    concepts = AliasMap.load(wiki_repo_path, relative_dir="concepts")
+    techniques = AliasMap.load(wiki_repo_path, relative_dir="techniques")
+    # Default (no kwarg) still loads instructors/.
+    instructors = AliasMap.load(wiki_repo_path)
+
+    assert concepts.to_slug("foo") == "bar"
+    assert techniques.to_slug("baz") == "qux"
+    # Independent maps — concepts entry doesn't leak into instructors.
+    assert instructors.to_slug("foo") is None

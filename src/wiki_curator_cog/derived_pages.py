@@ -36,7 +36,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from . import markdown_utils as md
-from .slugs import slugify
+from .aliases import AliasMap
+from .slugs import canonicalize_concept_slug, canonicalize_technique_slug, slugify
 
 PageType = Literal["concept", "technique", "instructor", "terminology"]
 
@@ -355,6 +356,13 @@ class Contribution:
     ``kind`` is the contribution flavor — most are ``by-teacher`` but
     some are special (``referenced-by`` for instructor pages, etc.) and
     the page-specific upsert dispatches on it.
+
+    ``raw_slug`` is the slug that the contribution's source term would
+    have produced WITHOUT vocab canonicalization — e.g., ``anchor-steps``
+    when ``page_slug`` is ``anchor-step``. Recorded on the canonical
+    page's ``aliases:`` frontmatter so the variant is discoverable from
+    the canonical page. ``None`` when the contribution doesn't go
+    through vocab canonicalization (instructor pages).
     """
 
     page_type: PageType
@@ -364,6 +372,7 @@ class Contribution:
     source_slug: str
     source_bucket: str
     kind: Literal["by-teacher", "referenced-by"] = "by-teacher"
+    raw_slug: str | None = None
     # Optional payloads for richer page sections:
     common_mistakes: list[tuple[str, str]] = field(default_factory=list)
 
@@ -411,6 +420,8 @@ def plan_contributions(
     canonical_instructors: list[str],
     source_slug: str,
     source_bucket: str,
+    concept_aliases: AliasMap | None = None,
+    technique_aliases: AliasMap | None = None,
 ) -> list[Contribution]:
     """Walk notes_json deterministically and return all the contributions.
 
@@ -422,6 +433,19 @@ def plan_contributions(
     source, unless the data itself attributes a specific claim to a
     specific person (e.g. ``quotes[].speaker``). Defaults to all.
 
+    Vocab canonicalization (per CLAUDE.md "Vocabulary handling"):
+
+      * ``concept_aliases`` and ``technique_aliases`` are the loaded
+        ``concepts/_aliases.yaml`` and ``techniques/_aliases.yaml`` maps.
+        When provided, raw concept/term/pattern names route through
+        ``canonicalize_concept_slug`` / ``canonicalize_technique_slug``
+        before becoming a slug. The original slug form is recorded on
+        the resulting Contribution's ``raw_slug`` so the canonical
+        page's ``aliases:`` frontmatter can pick it up.
+      * When ``None`` (legacy callers / tests), behavior reduces to the
+        original ``slugify`` flow with no plural collapse and no alias
+        lookup. Production callers always pass both.
+
     Skipped here (handled elsewhere or deferred):
     - ``student_observations`` — never enters the wiki, per spec.
     - ``action_items`` — never enters the wiki, per spec.
@@ -431,6 +455,35 @@ def plan_contributions(
       concept page; deferred until we have enough to make it useful.
     """
     contributions: list[Contribution] = []
+
+    def _concept_slug(name: str) -> tuple[str, str | None]:
+        """Return ``(canonical_slug, raw_slug_if_distinct)``.
+
+        ``raw_slug_if_distinct`` is the slugify-only form when it
+        differs from the canonical (e.g. plural variant or aliased
+        synonym), so the canonical page can record it as an alias.
+        ``None`` when raw and canonical match.
+        """
+        raw = slugify(name)
+        if not raw:
+            return "", None
+        if concept_aliases is None:
+            return raw, None
+        canonical = canonicalize_concept_slug(name, aliases=concept_aliases)
+        if not canonical:
+            return "", None
+        return canonical, (raw if raw != canonical else None)
+
+    def _technique_slug(name: str) -> tuple[str, str | None]:
+        raw = slugify(name)
+        if not raw:
+            return "", None
+        if technique_aliases is None:
+            return raw, None
+        canonical = canonicalize_technique_slug(name, aliases=technique_aliases)
+        if not canonical:
+            return "", None
+        return canonical, (raw if raw != canonical else None)
 
     # ── key_concepts → concept pages ────────────────────────────────
     for item in _as_list(notes_json.get("key_concepts")):
@@ -447,7 +500,7 @@ def plan_contributions(
             # create a derived page for it. The full prose still
             # appears on the source page's ## Key concepts section.
             continue
-        slug = slugify(name)
+        slug, raw_slug = _concept_slug(name)
         if not slug:
             continue
         para = _format_teacher_paragraph(
@@ -464,6 +517,7 @@ def plan_contributions(
                     paragraph_md=para,
                     source_slug=source_slug,
                     source_bucket=source_bucket,
+                    raw_slug=raw_slug,
                 )
             )
 
@@ -477,7 +531,7 @@ def plan_contributions(
             description = ""
         if not name:
             continue
-        slug = slugify(name)
+        slug, raw_slug = _technique_slug(name)
         if not slug:
             continue
         para = _format_teacher_paragraph(
@@ -494,14 +548,17 @@ def plan_contributions(
                     paragraph_md=para,
                     source_slug=source_slug,
                     source_bucket=source_bucket,
+                    raw_slug=raw_slug,
                 )
             )
 
     # ── vocabulary_terms → concept pages (term as concept name) ─────
-    # Per CLAUDE.md vocabulary rules: case/plural variants merge
-    # silently (slugify handles that), ambiguous synonym groups escalate
-    # to terminology pages. Escalation is deferred to the LLM pass; for
-    # now each term lands as its own concept page.
+    # Per CLAUDE.md vocabulary rules: case-insensitive and plural
+    # variants merge silently (handled by ``_concept_slug`` →
+    # ``canonicalize_concept_slug``); manual entries in
+    # ``concepts/_aliases.yaml`` collapse synonyms; everything else
+    # stays its own page. Cross-instructor subtle-difference escalation
+    # (terminology pages) is a separate pass — see ``reconcile``.
     for item in _as_list(notes_json.get("vocabulary_terms")):
         if isinstance(item, dict):
             term = _as_str(item.get("term"))
@@ -513,7 +570,7 @@ def plan_contributions(
             continue
         if not _passes_concept_filter(term):
             continue
-        slug = slugify(term)
+        slug, raw_slug = _concept_slug(term)
         if not slug:
             continue
         para = _format_teacher_paragraph(
@@ -530,6 +587,7 @@ def plan_contributions(
                     paragraph_md=para,
                     source_slug=source_slug,
                     source_bucket=source_bucket,
+                    raw_slug=raw_slug,
                 )
             )
 
@@ -821,6 +879,13 @@ def apply_contributions(
                         # is the instructor-page reverse index.
                         pass
                 md.add_unique(page.frontmatter, "sources", c.source_slug)
+                # Record the variant form that was collapsed into this
+                # canonical slug (singular/plural or alias-map merge) on
+                # the canonical page's ``aliases:`` frontmatter. The
+                # canonical page becomes the discoverable home for any
+                # variant naming someone might search for.
+                if c.raw_slug and c.raw_slug != c.page_slug:
+                    md.add_unique(page.frontmatter, "aliases", c.raw_slug)
 
         # Structural synthesis pass — populates ## Overview (if blank)
         # and re-renders ## Across sources from the now-up-to-date page.
@@ -950,6 +1015,70 @@ def _synthesize_page(page: md.Page, page_type: PageType) -> None:
 
     # ## Across sources — always re-written from data.
     page.set_section("Across sources", _render_across_sources(per_teacher))
+
+
+# ── Backfill wipe ───────────────────────────────────────────────────────
+
+
+# Files in derived-page directories that are NOT derived pages and must
+# be preserved across a wipe-and-rebuild backfill. The alias maps are
+# authored by Kaiano (concept/technique vocab judgment); anything else
+# checked in here was added intentionally and shouldn't be silently
+# blown away.
+_DERIVED_DIR_PRESERVE_NAMES: frozenset[str] = frozenset(
+    {
+        "_aliases.yaml",
+    }
+)
+
+# Directories under the wiki root that hold derived (curator-owned)
+# pages. ``instructors`` is included so a re-backfill rebuilds
+# instructor pages from current source state — but their ``_aliases.yaml``
+# is preserved per the rule above.
+_DERIVED_PAGE_DIRS: tuple[str, ...] = (
+    "concepts",
+    "techniques",
+    "instructors",
+    "terminology",
+)
+
+
+def wipe_derived_pages(wiki_repo_path: Path) -> list[Path]:
+    """Delete all derived pages so a backfill rebuilds them from scratch.
+
+    Removes every ``*.md`` under the four derived-page directories
+    (``concepts/``, ``techniques/``, ``instructors/``, ``terminology/``)
+    except the preserved ``_aliases.yaml`` files. Returns the absolute
+    paths of files deleted so the caller can stage the removal in git.
+
+    Safe to call on a fresh checkout (directories may not exist yet);
+    missing directories are silently ignored. Safe to call repeatedly;
+    subsequent calls find nothing to delete.
+
+    The wiki is a derived artifact per CLAUDE.md ("It is not
+    authoritative ... can be regenerated from scratch if needed"), so
+    this is the canonical way to reset state before a full backfill
+    that picks up vocab-collapse changes or any other behavior change
+    that should reshape the derived layer.
+    """
+    removed: list[Path] = []
+    for sub in _DERIVED_PAGE_DIRS:
+        directory = wiki_repo_path / sub
+        if not directory.is_dir():
+            continue
+        for child in directory.iterdir():
+            if child.name in _DERIVED_DIR_PRESERVE_NAMES:
+                continue
+            if not child.is_file():
+                continue
+            if child.suffix != ".md":
+                # Be conservative — only blow away markdown. Anything
+                # else (a stray .yaml that isn't an alias map, a
+                # README, an image) is preserved.
+                continue
+            child.unlink()
+            removed.append(child)
+    return removed
 
 
 def derived_slugs_by_type(contributions: list[Contribution]) -> dict[str, list[str]]:

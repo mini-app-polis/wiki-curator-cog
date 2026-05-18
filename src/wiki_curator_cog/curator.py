@@ -200,6 +200,8 @@ def ingest_one_source(
     wiki_repo_path: Path,
     api: WikiCuratorApiClient | None = None,
     curator_version: str,
+    concept_aliases: AliasMap | None = None,
+    technique_aliases: AliasMap | None = None,
 ) -> IngestResult:
     """Ingest a single upstream note into the wiki.
 
@@ -290,6 +292,8 @@ def ingest_one_source(
         canonical_instructors=canonical_instructors,
         source_slug=final_slug,
         source_bucket=bucket,
+        concept_aliases=concept_aliases,
+        technique_aliases=technique_aliases,
     )
     contributed_to = derived_slugs_by_type(contributions)
 

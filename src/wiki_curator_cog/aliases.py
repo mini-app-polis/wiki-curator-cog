@@ -1,12 +1,21 @@
-"""Instructor/student name canonicalization.
+"""Name and vocabulary canonicalization.
 
-Upstream filename parser stores names case-sensitive and unmodified
-("Kaiano", "Kate", "Sarah", etc.). The curator maintains an alias map in
-the wiki repo at instructors/_aliases.yaml that collapses variants to
-canonical slugs.
+Three alias maps share this implementation:
 
-This module loads, mutates, and saves that file. The curator calls
-to_slug() during ingest to translate upstream names into wiki slugs.
+  - ``instructors/_aliases.yaml`` — upstream instructor/student names
+    (``Kate``, ``Kate B``, ``Kate Benson``) → canonical instructor slugs.
+  - ``concepts/_aliases.yaml`` — concept variant slugs (``anchor``,
+    ``anchor-step``, ``anchoring-action``) → canonical concept slugs.
+  - ``techniques/_aliases.yaml`` — technique variant slugs (``whip``,
+    ``basic-whip``) → canonical technique slugs.
+
+The instructor map is populated automatically as new names appear (the
+upstream parser is the authority on identity). The concept/technique
+maps are populated manually by Kaiano — vocabulary collapse is a
+judgment call per CLAUDE.md "Vocabulary handling".
+
+The map file format is identical across all three: a flat YAML mapping
+of normalized variant → canonical slug.
 """
 
 from __future__ import annotations
@@ -45,9 +54,20 @@ class AliasMap:
         self._source_path = source_path
 
     @classmethod
-    def load(cls, wiki_repo_path: Path) -> AliasMap:
-        """Load the alias map from instructors/_aliases.yaml in the wiki repo."""
-        path = wiki_repo_path / "instructors" / ALIAS_FILE_NAME
+    def load(
+        cls,
+        wiki_repo_path: Path,
+        *,
+        relative_dir: str = "instructors",
+    ) -> AliasMap:
+        """Load an alias map from ``<wiki_repo_path>/<relative_dir>/_aliases.yaml``.
+
+        Defaults to ``instructors/_aliases.yaml`` for backward
+        compatibility with the original single-map design. Pass
+        ``relative_dir="concepts"`` or ``"techniques"`` to load the
+        vocabulary maps.
+        """
+        path = wiki_repo_path / relative_dir / ALIAS_FILE_NAME
         if not path.exists():
             return cls({}, source_path=path)
         raw = yaml.safe_load(path.read_text()) or {}

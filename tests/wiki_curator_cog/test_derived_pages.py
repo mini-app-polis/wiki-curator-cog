@@ -7,11 +7,13 @@ from pathlib import Path
 import yaml
 
 from wiki_curator_cog import markdown_utils as md
+from wiki_curator_cog.aliases import AliasMap
 from wiki_curator_cog.derived_pages import (
     Contribution,
     apply_contributions,
     derived_slugs_by_type,
     plan_contributions,
+    wipe_derived_pages,
 )
 
 # ── plan_contributions ──────────────────────────────────────────────────
@@ -487,6 +489,250 @@ def test_apply_referenced_by_creates_instructor_stub(wiki_repo_path: Path) -> No
 
 
 # ── markdown_utils sanity ───────────────────────────────────────────────
+
+
+# ── vocab canonicalization ──────────────────────────────────────────────
+
+
+def _make_alias_map(wiki_repo_path: Path, *, relative_dir: str, body: str) -> AliasMap:
+    """Helper: write a vocab _aliases.yaml file and return the loaded map."""
+    target_dir = wiki_repo_path / relative_dir
+    target_dir.mkdir(exist_ok=True)
+    (target_dir / "_aliases.yaml").write_text(body)
+    return AliasMap.load(wiki_repo_path, relative_dir=relative_dir)
+
+
+def test_plan_concept_canonicalizes_via_plural_collapse(
+    wiki_repo_path: Path,
+) -> None:
+    concept_aliases = _make_alias_map(wiki_repo_path, relative_dir="concepts", body="")
+    technique_aliases = _make_alias_map(
+        wiki_repo_path, relative_dir="techniques", body=""
+    )
+
+    notes_json = {
+        "key_concepts": [
+            {"concept": "Anchor step", "detail": "Singular form."},
+            {"concept": "Anchor steps", "detail": "Plural form."},
+        ],
+    }
+    contribs = plan_contributions(
+        notes_json=notes_json,
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-anchor",
+        source_bucket="kate",
+        concept_aliases=concept_aliases,
+        technique_aliases=technique_aliases,
+    )
+
+    # Both contributions land on the same canonical slug.
+    assert {c.page_slug for c in contribs} == {"anchor-step"}
+    # The plural form is recorded as ``raw_slug`` so apply_contributions
+    # can surface it on the canonical page's ``aliases:`` frontmatter.
+    raw_slugs = [c.raw_slug for c in contribs]
+    assert "anchor-steps" in raw_slugs
+    # The singular form contributed without needing a raw_slug.
+    assert None in raw_slugs
+
+
+def test_plan_concept_canonicalizes_via_alias_map(wiki_repo_path: Path) -> None:
+    concept_aliases = _make_alias_map(
+        wiki_repo_path,
+        relative_dir="concepts",
+        body="anchor: anchor-step\nanchoring-action: anchor-step\n",
+    )
+    technique_aliases = _make_alias_map(
+        wiki_repo_path, relative_dir="techniques", body=""
+    )
+
+    notes_json = {
+        "vocabulary_terms": [
+            {"term": "Anchor", "definition": "The grounding action."},
+            {"term": "Anchoring action", "definition": "Same idea, different name."},
+        ],
+    }
+    contribs = plan_contributions(
+        notes_json=notes_json,
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-anchor",
+        source_bucket="kate",
+        concept_aliases=concept_aliases,
+        technique_aliases=technique_aliases,
+    )
+
+    assert {c.page_slug for c in contribs} == {"anchor-step"}
+    raw_slugs = {c.raw_slug for c in contribs}
+    assert raw_slugs == {"anchor", "anchoring-action"}
+
+
+def test_plan_technique_canonicalizes_via_alias_map(wiki_repo_path: Path) -> None:
+    concept_aliases = _make_alias_map(wiki_repo_path, relative_dir="concepts", body="")
+    technique_aliases = _make_alias_map(
+        wiki_repo_path,
+        relative_dir="techniques",
+        body="basic-whip: whip\nwhip-basic: whip\n",
+    )
+
+    notes_json = {
+        "patterns_and_sequences": [
+            {"name": "Basic whip", "description": "Original framing."},
+            {"name": "Whip basic", "description": "Same thing, reordered."},
+            {"name": "Whip", "description": "Just whip."},
+        ],
+    }
+    contribs = plan_contributions(
+        notes_json=notes_json,
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-whip",
+        source_bucket="kate",
+        concept_aliases=concept_aliases,
+        technique_aliases=technique_aliases,
+    )
+
+    assert {c.page_slug for c in contribs} == {"whip"}
+    raw_slugs = {c.raw_slug for c in contribs}
+    # ``whip`` mapped to itself contributes None; the other two record
+    # their distinct raw forms.
+    assert raw_slugs == {"basic-whip", "whip-basic", None}
+
+
+def test_plan_without_alias_maps_falls_back_to_legacy_slugify() -> None:
+    # Tests / legacy callers that don't pass alias maps preserve the
+    # pre-vocab-collapse behavior: no plural merge, no canonicalization.
+    notes_json = {
+        "key_concepts": [
+            {"concept": "Anchor step", "detail": "x"},
+            {"concept": "Anchor steps", "detail": "y"},
+        ],
+    }
+    contribs = plan_contributions(
+        notes_json=notes_json,
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    # Without alias maps, the two forms produce two distinct slugs.
+    assert {c.page_slug for c in contribs} == {"anchor-step", "anchor-steps"}
+    # And raw_slug stays None on every contribution.
+    assert all(c.raw_slug is None for c in contribs)
+
+
+def test_apply_contributions_records_alias_on_canonical_page(
+    wiki_repo_path: Path,
+) -> None:
+    contribs = [
+        Contribution(
+            page_type="concept",
+            page_slug="anchor-step",
+            teacher="kate",
+            paragraph_md="An anchor framing. ([[sources/kate/s1]])",
+            source_slug="s1",
+            source_bucket="kate",
+            raw_slug="anchor-steps",
+        ),
+        Contribution(
+            page_type="concept",
+            page_slug="anchor-step",
+            teacher="kate",
+            paragraph_md="Another framing. ([[sources/kate/s2]])",
+            source_slug="s2",
+            source_bucket="kate",
+            raw_slug="anchor",  # collapsed via alias map
+        ),
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    page_path = wiki_repo_path / "concepts" / "anchor-step.md"
+    fm = _frontmatter(page_path)
+    assert set(fm.get("aliases", [])) == {"anchor-steps", "anchor"}
+    # Sources still accumulate normally.
+    assert set(fm.get("sources", [])) == {"s1", "s2"}
+
+
+def test_apply_contributions_skips_alias_when_raw_matches_canonical(
+    wiki_repo_path: Path,
+) -> None:
+    # When the raw slug already equals the canonical, no alias entry —
+    # the page is the canonical FOR that exact term, no variant to record.
+    contribs = [
+        Contribution(
+            page_type="concept",
+            page_slug="anchor-step",
+            teacher="kate",
+            paragraph_md="Framing. ([[sources/kate/s1]])",
+            source_slug="s1",
+            source_bucket="kate",
+            raw_slug=None,
+        ),
+    ]
+    apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
+
+    fm = _frontmatter(wiki_repo_path / "concepts" / "anchor-step.md")
+    assert fm.get("aliases", []) == []
+
+
+# ── wipe_derived_pages ──────────────────────────────────────────────────
+
+
+def test_wipe_derived_pages_deletes_md_files_but_preserves_alias_maps(
+    wiki_repo_path: Path,
+) -> None:
+    # Seed each derived directory with a page + an alias map.
+    for sub in ("concepts", "techniques", "instructors", "terminology"):
+        (wiki_repo_path / sub).mkdir(exist_ok=True)
+        (wiki_repo_path / sub / "example.md").write_text("# example\n")
+        (wiki_repo_path / sub / "_aliases.yaml").write_text("# alias map\n")
+
+    removed = wipe_derived_pages(wiki_repo_path)
+    assert len(removed) == 4
+    assert all(p.suffix == ".md" for p in removed)
+
+    for sub in ("concepts", "techniques", "instructors", "terminology"):
+        assert not (wiki_repo_path / sub / "example.md").exists()
+        # Alias maps survive.
+        assert (wiki_repo_path / sub / "_aliases.yaml").exists()
+
+
+def test_wipe_derived_pages_is_safe_on_empty_directories(
+    wiki_repo_path: Path,
+) -> None:
+    # No derived pages anywhere — wipe should just return [].
+    removed = wipe_derived_pages(wiki_repo_path)
+    assert removed == []
+
+
+def test_wipe_derived_pages_does_not_touch_sources_or_index(
+    wiki_repo_path: Path,
+) -> None:
+    # Source pages and root-level files must be left alone.
+    (wiki_repo_path / "sources" / "kaiano" / "example.md").parent.mkdir(
+        parents=True, exist_ok=True
+    )
+    (wiki_repo_path / "sources" / "kaiano" / "example.md").write_text("source")
+    (wiki_repo_path / "index.md").write_text("# index")
+    (wiki_repo_path / "log.md").write_text("# log")
+
+    # Plus one derived page so the wipe has something to do.
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "x.md").write_text("derived")
+
+    removed = wipe_derived_pages(wiki_repo_path)
+    assert len(removed) == 1
+    assert (wiki_repo_path / "sources" / "kaiano" / "example.md").exists()
+    assert (wiki_repo_path / "index.md").exists()
+    assert (wiki_repo_path / "log.md").exists()
+
+
+def test_wipe_derived_pages_preserves_non_md_files(wiki_repo_path: Path) -> None:
+    # A stray non-md file in a derived directory (e.g. an image, a README)
+    # must NOT be deleted — only .md files are derived output.
+    (wiki_repo_path / "concepts").mkdir(exist_ok=True)
+    (wiki_repo_path / "concepts" / "diagram.png").write_bytes(b"\x89PNG\r\n")
+    (wiki_repo_path / "concepts" / "x.md").write_text("derived")
+
+    removed = wipe_derived_pages(wiki_repo_path)
+    assert removed == [wiki_repo_path / "concepts" / "x.md"]
+    assert (wiki_repo_path / "concepts" / "diagram.png").exists()
 
 
 def test_markdown_utils_round_trip_preserves_structure() -> None:
