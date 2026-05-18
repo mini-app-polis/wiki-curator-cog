@@ -19,7 +19,14 @@ nixPkgs = ["...", "git"]
 # matching distribution"). Hardcoding the version in the install command
 # sidesteps that machinery entirely so the build works on any service
 # regardless of dashboard env-var state.
+#
+# UV_PROJECT_ENVIRONMENT=/opt/venv is set inline because `uv sync` does
+# NOT honor an activated venv (VIRTUAL_ENV); it installs into the path
+# pointed to by UV_PROJECT_ENVIRONMENT, defaulting to `.venv/` in the
+# project root. Without this, deps land in `.venv/` while the container's
+# CMD `python -m wiki_curator_cog.main` runs from /opt/venv/bin/python
+# and fails with `ModuleNotFoundError: No module named 'wiki_curator_cog'`.
 cmds = [
-  "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install uv==0.7.0 && uv sync --no-dev --frozen",
+  "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install uv==0.7.0 && UV_PROJECT_ENVIRONMENT=/opt/venv uv sync --no-dev --frozen",
 ]
 cacheDirectories = ["/root/.cache/uv"]
