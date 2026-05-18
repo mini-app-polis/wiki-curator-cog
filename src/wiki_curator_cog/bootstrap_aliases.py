@@ -54,10 +54,12 @@ _INSTRUCTORS_DIR_NAME: str = "instructors"
 _REVIEW_FILE_NAME: str = "_aliases.review.md"
 
 # Levenshtein distance threshold for two same-base-name slugs to be
-# considered the same person via fuzzy match. 2 catches typical
-# misspellings (Schwimmer / Schremmer / Schumer) without bridging
-# obviously-different surnames.
-_FUZZY_DISTANCE_THRESHOLD: int = 2
+# considered the same person via fuzzy match. 3 is needed to catch the
+# Schwimmer/Schremmer/Schumer cluster (Schwimmer↔Schumer is distance 3,
+# not 2 as one might guess). Distinct surnames sharing a first name —
+# the case the threshold has to protect against — are reliably much
+# farther apart (e.g. brandi-gill ↔ brandi-shanks is distance 6).
+_FUZZY_DISTANCE_THRESHOLD: int = 3
 
 
 @_dc.dataclass(frozen=True)

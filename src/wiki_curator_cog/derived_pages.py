@@ -261,9 +261,15 @@ _NON_PERSON_PLACE_TOKENS: frozenset[str] = frozenset(
 
 
 def _looks_like_acronym(name: str) -> bool:
-    """All-uppercase 2-5 char token with no whitespace — likely an org acronym."""
+    """All-uppercase 3-5 char token with no whitespace — likely an org acronym.
+
+    Two-letter all-caps strings (``PJ``, ``AJ``, ``TJ``, ``BJ``) are
+    overwhelmingly personal initials/nicknames in the WCS corpus rather
+    than organization acronyms, so they fall through to the name-shape
+    check instead of being rejected here.
+    """
     s = name.strip()
-    return 2 <= len(s) <= 5 and s.isupper() and s.isalpha()
+    return 3 <= len(s) <= 5 and s.isupper() and s.isalpha()
 
 
 def _passes_instructor_filter(name: str, ref_type: str) -> bool:
