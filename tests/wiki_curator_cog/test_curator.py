@@ -230,6 +230,45 @@ def test_ingest_interactive_raises_on_unknown_name(populated_wiki: Path) -> None
 
 
 def test_ingest_idempotent_at_same_curator_version(populated_wiki: Path) -> None:
+    """Incremental and interactive modes honor the version-equality skip."""
+    note = _make_note()
+    inventory = build_inventory(populated_wiki)
+    aliases = AliasMap.load(populated_wiki)
+
+    first = ingest_one_source(
+        note=note,
+        mode=IngestMode.AUTOMATED,
+        inventory=inventory,
+        aliases=aliases,
+        wiki_repo_path=populated_wiki,
+        curator_version="1.0.0",
+    )
+    assert first.skipped is False
+
+    second = ingest_one_source(
+        note=note,
+        mode=IngestMode.AUTOMATED,
+        inventory=inventory,
+        aliases=aliases,
+        wiki_repo_path=populated_wiki,
+        curator_version="1.0.0",
+    )
+    assert second.skipped is True
+    assert "already ingested" in (second.skip_reason or "")
+
+
+def test_ingest_backfill_mode_forces_re_ingest_at_same_version(
+    populated_wiki: Path,
+) -> None:
+    """Backfill mode is a from-scratch rebuild — it must NOT honor the
+    version-equality skip, even though sources may already exist at
+    the current curator_version. Otherwise the wipe_derived_pages
+    step at start of backfill would leave the derived layer
+    permanently empty (sources skip → no contributions emitted →
+    nothing rebuilds the wiped concept/technique/instructor pages).
+
+    The 2026-05-18 backfill at 1.2.3 reproduced this exact failure
+    mode before the fix landed."""
     note = _make_note()
     inventory = build_inventory(populated_wiki)
     aliases = AliasMap.load(populated_wiki)
@@ -244,6 +283,8 @@ def test_ingest_idempotent_at_same_curator_version(populated_wiki: Path) -> None
     )
     assert first.skipped is False
 
+    # Second ingest at the SAME version — automated mode would skip,
+    # backfill mode must NOT.
     second = ingest_one_source(
         note=note,
         mode=IngestMode.BACKFILL,
@@ -252,8 +293,10 @@ def test_ingest_idempotent_at_same_curator_version(populated_wiki: Path) -> None
         wiki_repo_path=populated_wiki,
         curator_version="1.0.0",
     )
-    assert second.skipped is True
-    assert "already ingested" in (second.skip_reason or "")
+    assert second.skipped is False, (
+        "Backfill mode must re-ingest sources even when curator_version "
+        "matches; otherwise wipe-and-rebuild leaves derived/ empty."
+    )
 
 
 def test_ingest_reprocesses_on_bumped_curator_version(populated_wiki: Path) -> None:

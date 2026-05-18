@@ -224,8 +224,20 @@ def ingest_one_source(
     # deploy — triggers a re-render. This is more correct than the
     # monotonic-int comparison: rolling back from v2 to v1 SHOULD
     # re-render everything against v1's behavior.
+    #
+    # Backfill mode is exempt: it wipes the derived layer at start of
+    # run, so skipping a source whose source page already matches the
+    # version would leave that source's derived contributions
+    # permanently missing. Backfill is the "rebuild from scratch" mode
+    # by design (CLAUDE.md "Backfill mode") — force re-ingest every
+    # source regardless of version match. Incremental and interactive
+    # modes still honor the skip.
     existing = inventory.existing_record(note.id)
-    if existing is not None and existing.curator_version == curator_version:
+    if (
+        mode != IngestMode.BACKFILL
+        and existing is not None
+        and existing.curator_version == curator_version
+    ):
         result.skipped = True
         result.skip_reason = (
             f"already ingested at curator_version={existing.curator_version}"
