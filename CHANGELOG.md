@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.1.0...v1.2.0) (2026-05-18)
+
+
+### Features
+
+* populate instructor pages, regenerate index, tighten filters ([ad72055](https://github.com/mini-app-polis/wiki-curator-cog/commit/ad72055f13cd7b127026793bfcf06f89b689406b))
+
 # [1.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.8...v1.1.0) (2026-05-18)
 
 
