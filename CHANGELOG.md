@@ -1,3 +1,10 @@
+## [1.2.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.4...v1.2.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* always regenerate Overview, Across sources, and status ([20d69e3](https://github.com/mini-app-polis/wiki-curator-cog/commit/20d69e33429f49e809eaf577559c2dbcbfbcb927))
+
 ## [1.2.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.3...v1.2.4) (2026-05-18)
 
 
