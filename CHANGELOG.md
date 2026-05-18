@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.5...v1.0.6) (2026-05-18)
+
+
+### Bug Fixes
+
+* build ([1856506](https://github.com/mini-app-polis/wiki-curator-cog/commit/18565069db0176d134268494e5a030f30b8ab642))
+
 ## [1.0.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.4...v1.0.5) (2026-05-18)
 
 

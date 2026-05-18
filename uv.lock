@@ -3370,7 +3370,7 @@ wheels = [
 
 [[package]]
 name = "wiki-curator-cog"
-version = "1.0.5"
+version = "1.0.6"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
