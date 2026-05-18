@@ -1,16 +1,25 @@
-[variables]
-# Pin uv to a version that understands the `revision = 3` lockfile
-# format that current uv writes. Nixpacks v1.41's hardcoded default
-# (0.4.30) is too old and exits 127 trying to parse the lockfile,
-# which appears as a confusing "second build always fails" symptom
-# after semantic-release regenerates uv.lock with newer uv. This
-# fixes it at the repo level so any service (not just one with the
-# right dashboard env var) can build cleanly.
-NIXPACKS_UV_VERSION = "0.7.0"
-
 [phases.setup]
 # git is needed at runtime to clone wcs-wiki on boot. The "..." spread
 # preserves Nixpacks' auto-detected Python packages — without it, the
 # install phase fails with `python: command not found` (exit 127)
 # because we'd be replacing the default setup pkg list, not extending it.
 nixPkgs = ["...", "git"]
+
+[phases.install]
+# Pin uv to a version that understands the `revision = 3` uv.lock format
+# semantic-release regenerates on every release. Nixpacks v1.41's hardcoded
+# default (uv 0.4.30) is too old and bails on that revision.
+#
+# We hardcode the version here rather than going through the supported
+# NIXPACKS_UV_VERSION variable because Railway materializes every nixpacks
+# `[variables]` key as a build ARG on the generated Dockerfile, and if the
+# service has the same env-var name defined but empty (or unset), Railway
+# passes `--build-arg NIXPACKS_UV_VERSION=`, which overrides the toml
+# default with an empty string and yields `pip install uv==` (exit 1, "No
+# matching distribution"). Hardcoding the version in the install command
+# sidesteps that machinery entirely so the build works on any service
+# regardless of dashboard env-var state.
+cmds = [
+  "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install uv==0.7.0 && uv sync --no-dev --frozen",
+]
+cacheDirectories = ["/root/.cache/uv"]
