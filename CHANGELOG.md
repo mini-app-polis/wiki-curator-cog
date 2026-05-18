@@ -1,3 +1,10 @@
+## [1.2.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.3...v1.2.4) (2026-05-18)
+
+
+### Bug Fixes
+
+* backfill mode bypasses curator_version skip ([43adf27](https://github.com/mini-app-polis/wiki-curator-cog/commit/43adf279e8a04e6bbf1f02a30efe79823381268d))
+
 ## [1.2.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.2...v1.2.3) (2026-05-18)
 
 
