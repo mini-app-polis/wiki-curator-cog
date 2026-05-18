@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.8...v1.1.0) (2026-05-18)
+
+
+### Features
+
+* collapse concept/technique vocab variants via alias maps and plural stemming ([6ea65ea](https://github.com/mini-app-polis/wiki-curator-cog/commit/6ea65ea1be35bc7e6a187c2f2946456aac5eedfc))
+
 ## [1.0.8](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.7...v1.0.8) (2026-05-18)
 
 
