@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.1...v1.2.2) (2026-05-18)
+
+
+### Bug Fixes
+
+* apply instructor alias map to references[] codepath ([6414e9c](https://github.com/mini-app-polis/wiki-curator-cog/commit/6414e9c257c1fc195f0b5aa6f07a3e1c2c0f35bc))
+
 ## [1.2.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.0...v1.2.1) (2026-05-18)
 
 
