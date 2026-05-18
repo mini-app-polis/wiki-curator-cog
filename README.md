@@ -5,7 +5,7 @@
 
 Prefect pipeline cog that maintains the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base.
 
-Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only) and writes/updates markdown files in a local clone of `wcs-wiki`, then pushes to GitHub. The curator operates according to the schema defined in `wcs-wiki/CLAUDE.md` — that file is the operating manual; this repo is the runtime.
+Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), deterministically routes their content onto concept / technique / instructor / terminology pages in a local clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`.
 
 | Mode (`mode=…`) | What it does                                                              | Source                         | Sink                |
 | --------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------- |
@@ -24,13 +24,16 @@ See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for 
 Drive transcript drop
         │
         ▼
-transcription-cog ──► api-kaianolevine-com (structured notes)
-                              │
-                              ▼ (HTTP API, read-only)
-                      wiki-curator-cog
-                              │
-                              ▼
-                        wcs-wiki repo
+transcription-cog ──► raw transcripts
+        │
+        ▼
+notes-ingest-cog (LLM extraction) ──► api-kaianolevine-com (structured notes)
+                                            │
+                                            ▼ (HTTP API, read-only)
+                                    wiki-curator-cog
+                                            │
+                                            ▼
+                                      wcs-wiki repo
 ```
 
 The curator never accesses the database directly. All upstream data is fetched via Clerk M2M-authenticated HTTP calls to `api-kaianolevine-com`.
@@ -92,8 +95,12 @@ Pipeline-evaluation findings (a fourth signal) are emitted to `pipeline_evaluati
 
 **The curator does not invent content.** Every wiki claim traces to an upstream source. The schema in `wcs-wiki/CLAUDE.md` is the operating manual; this cog implements it.
 
-**Idempotency.** Ingesting the same `note_id` at the same `WIKI_CURATOR_VERSION` is a no-op. Bumping the curator version triggers reprocessing for affected source pages.
+**Deterministic by design.** No LLM calls at runtime. Given the same upstream notes_json and the same alias maps, the same input produces the same output. The only LLM step in the pipeline is upstream in `notes-ingest-cog`.
 
-**Single-instance concurrency.** Two concurrent runs against the same wiki repo would race on git and inventory. Configure a Prefect concurrency slot of 1.
+**Idempotency.** In incremental mode, ingesting the same `note_id` at the same curator version is a no-op. Backfill mode bypasses this — it wipes the derived layer (concepts, techniques, instructors, terminology) at start of run and rebuilds from scratch so behavior changes to the curator produce a clean result.
 
-**Read-only against upstream.** The curator only calls `GET` endpoints for note content. The only `POST` is to `/v1/evaluations` for findings.
+**Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
+
+**Single-instance concurrency.** Two concurrent runs against the same wiki repo would race on git operations and inventory consistency. Configure a Prefect concurrency slot of 1.
+
+**Read-only against upstream.** The curator only calls `GET` endpoints for note content. The only `POST` is to `/v1/evaluations` for pipeline-evaluation findings.
