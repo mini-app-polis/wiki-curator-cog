@@ -9,5 +9,8 @@
 NIXPACKS_UV_VERSION = "0.7.0"
 
 [phases.setup]
-# git is needed at runtime to clone wcs-wiki on boot.
-nixPkgs = ["git"]
+# git is needed at runtime to clone wcs-wiki on boot. The "..." spread
+# preserves Nixpacks' auto-detected Python packages — without it, the
+# install phase fails with `python: command not found` (exit 127)
+# because we'd be replacing the default setup pkg list, not extending it.
+nixPkgs = ["...", "git"]
