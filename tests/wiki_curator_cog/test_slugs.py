@@ -270,6 +270,35 @@ def test_depluralize_refuses_short_stems() -> None:
     assert _depluralize_slug("yes") == "yes"
 
 
+def test_depluralize_refuses_vowel_terminal_stems() -> None:
+    """Real English plural -s overwhelmingly lands on consonant stems.
+    Words ending in -us, -is, -os are almost always singulars whose
+    -s is part of the noun (focus, axis, rhinos as a singular adj
+    rare; mostly nouns we shouldn't strip). The vowel-end guard
+    catches these without an enumerated false-friend list."""
+    # -us false friends.
+    assert _depluralize_slug("focus") == "focus"
+    assert _depluralize_slug("bonus") == "bonus"
+    assert _depluralize_slug("campus") == "campus"
+    assert _depluralize_slug("virus") == "virus"
+    # -is false friends.
+    assert _depluralize_slug("axis") == "axis"
+    assert _depluralize_slug("basis") == "basis"
+    assert _depluralize_slug("thesis") == "thesis"
+    assert _depluralize_slug("tennis") == "tennis"
+    # -os false friends.
+    assert _depluralize_slug("rhinos") == "rhinos"
+    # Compound slugs where the last token is a false friend.
+    assert (
+        _depluralize_slug("basic-whip-with-rotation-focus")
+        == "basic-whip-with-rotation-focus"
+    )
+    # The guard doesn't block legitimate consonant-end plurals.
+    assert _depluralize_slug("cats") == "cat"
+    assert _depluralize_slug("pushes") == "push"
+    assert _depluralize_slug("variations") == "variation"
+
+
 def test_depluralize_operates_on_last_token_only() -> None:
     # The hyphen-separated lead must be preserved verbatim — only the
     # final token gets the plural collapse applied.

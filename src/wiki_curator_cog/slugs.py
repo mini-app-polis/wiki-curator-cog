@@ -221,10 +221,10 @@ _PLURAL_RULES: tuple[tuple[str, str], ...] = (
     ("zes", "z"),
     # Plain ``-s`` plurals. The most common case; also the trickiest
     # because it false-positives on words that just end in ``s``
-    # (``bus``, ``focus``, ``axis``). We mitigate by refusing to strip
-    # when the resulting stem would be ≤2 chars OR would end in
-    # ``s``/``ss`` (so ``stress`` doesn't become ``stres``, ``bus``
-    # stays ``bus``, ``mass`` stays ``mass``).
+    # (``bus``, ``focus``, ``axis``, ``thesis``). We mitigate by
+    # refusing to strip when the resulting stem would be ≤2 chars,
+    # would end in ``s``/``ss``, or would end in a vowel — see
+    # ``_STEM_BLOCKED_TRAILING_CHARS`` for the rationale.
     ("s", ""),
 )
 
@@ -232,6 +232,19 @@ _PLURAL_RULES: tuple[tuple[str, str], ...] = (
 # refuse to depluralize, since the word is too short to safely assume
 # we're looking at a plural.
 _MIN_DEPLURALIZED_STEM: int = 3
+
+# Trailing characters in the stripped stem that block a plain ``-s``
+# depluralization. Real English plurals overwhelmingly land on stems
+# ending in a consonant — words ending in ``-us`` (focus, bonus,
+# campus, virus, octopus), ``-is`` (axis, basis, crisis, thesis,
+# tennis), and ``-os`` (rhinos, scenarios) are almost always singular
+# nouns mis-stripped to non-words. Blocking these vowel-terminal stems
+# catches the most common false-friend class without manual
+# enumeration. ``a`` and ``e`` aren't blocked: nouns ending in those
+# vowels rarely take a plain ``-s`` plural with the vowel in the stem
+# in a way that survives slugification, and the corpus doesn't
+# present any.
+_STEM_BLOCKED_TRAILING_CHARS: frozenset[str] = frozenset("uio")
 
 
 def _depluralize_slug(slug: str) -> str:
@@ -268,9 +281,15 @@ def _depluralize_slug(slug: str) -> str:
             continue
         # For the plain ``-s`` rule, also refuse if the underlying word
         # ended in ``-ss`` (``stress``, ``mass``, ``loss``) so we don't
-        # convert it to a non-plural sibling.
-        if suffix == "s" and stem.endswith("s"):
-            continue
+        # convert it to a non-plural sibling, OR if the stem ends in
+        # a blocked vowel (catches the ``-us`` / ``-is`` / ``-os``
+        # false-friend class: ``focus`` → ``focu``, ``axis`` → ``axi``,
+        # ``rhinos`` → ``rhino``).
+        if suffix == "s":
+            if stem.endswith("s"):
+                continue
+            if stem and stem[-1] in _STEM_BLOCKED_TRAILING_CHARS:
+                continue
         return lead + stem
 
     return slug
