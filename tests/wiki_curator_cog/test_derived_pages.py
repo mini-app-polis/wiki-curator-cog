@@ -1076,12 +1076,83 @@ def test_apply_promotes_instructor_status_at_three_sources(
     assert fm["status"] == "draft"
 
 
-def test_apply_does_not_demote_human_curated_status(
+def test_apply_regenerates_overview_on_every_ingest(
     wiki_repo_path: Path,
 ) -> None:
-    """If a human has promoted a page past stub already, synthesis
-    must not push it back down."""
-    # Pre-populate the page at status=mature.
+    """The Overview sentence must reflect the current source count
+    and teacher list — not the count/list at the time of first
+    write.
+
+    The 2026-05-18 backfill produced concepts/anchor-step.md with
+    frontmatter showing 17 sources / 4 teachers but an Overview
+    reading 'Taught across 3 sources by Kaiano and Amy.' (state at
+    the moment the page first crossed the 3-source threshold). This
+    test pins the always-regenerate behavior so that regression
+    can't recur.
+    """
+    # Phase 1: page crosses threshold at 3 sources / 1 teacher.
+    initial = [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="kate",
+            paragraph_md=f"Framing #{i}. ([[sources/kate/s{i}]])",
+            source_slug=f"s{i}",
+            source_bucket="kate",
+        )
+        for i in range(1, 4)
+    ]
+    apply_contributions(initial, wiki_repo_path=wiki_repo_path)
+    page_path = wiki_repo_path / "concepts" / "settle.md"
+    text = page_path.read_text()
+    assert "Taught across 3 sources by Kate." in text
+
+    # Phase 2: more sources + a new teacher contributes.
+    additional = [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="kate",
+            paragraph_md=f"Framing #{i}. ([[sources/kate/s{i}]])",
+            source_slug=f"s{i}",
+            source_bucket="kate",
+        )
+        for i in range(4, 8)
+    ] + [
+        Contribution(
+            page_type="concept",
+            page_slug="settle",
+            teacher="robert",
+            paragraph_md="Robert framing. ([[sources/robert/r1]])",
+            source_slug="r1",
+            source_bucket="robert",
+        ),
+    ]
+    apply_contributions(additional, wiki_repo_path=wiki_repo_path)
+
+    # Overview must now reflect 8 sources across Kate and Robert.
+    text = page_path.read_text()
+    assert "Taught across 8 sources by Kate and Robert." in text
+    assert "Taught across 3 sources" not in text
+
+
+def test_apply_status_is_purely_derived_from_source_count(
+    wiki_repo_path: Path,
+) -> None:
+    """Status is always a function of source count, never preserved
+    across re-renders.
+
+    The wiki is derived from upstream notes_json; the only manual
+    editing surface in this codebase is the alias maps. So if a
+    pre-existing page on disk carries any status value, synthesis
+    normalizes it to the value the source count implies. A future
+    'mature' tier would have to come from a curator-side
+    configuration surface, not from page content surviving across
+    re-renders.
+    """
+    # Pre-populate the page with status=mature — should be normalized
+    # to draft, because 4 sources < the (theoretical) mature threshold
+    # and the curator never auto-sets mature.
     (wiki_repo_path / "concepts").mkdir(exist_ok=True)
     existing = """---
 type: concept
@@ -1097,7 +1168,7 @@ status: mature
 
 ## Overview
 
-Curated overview.
+Stale overview from a prior run.
 
 ## By teacher
 """
@@ -1116,7 +1187,7 @@ Curated overview.
     apply_contributions(contribs, wiki_repo_path=wiki_repo_path)
 
     fm = _frontmatter(wiki_repo_path / "concepts" / "settle.md")
-    assert fm["status"] == "mature"
+    assert fm["status"] == "draft"
 
 
 # ── empty-description placeholder ───────────────────────────────────────

@@ -1169,25 +1169,28 @@ def apply_contributions(
     return list(touched.keys())
 
 
-# ── Structural synthesis: ## Overview + ## Across sources ──────────────
-# Run after all contributions for a page are upserted. Populates two
-# sections from data already on the page (no LLM, no external lookup):
+# ── Structural synthesis: ## Overview + ## Across sources + status ─────
+# Run after all contributions for a page are upserted. Three outputs,
+# all purely derived from the page's current frontmatter + body:
 #
 #   ## Overview        — one neutral sentence summarizing how many
-#                        teachers + sources contribute to this concept,
-#                        only when the page has crossed the >=3-source
-#                        threshold. Skipped if a human or LLM has
-#                        already written an Overview, so prose
-#                        improvements are durable across re-renders.
+#                        teachers + sources contribute to this concept.
+#                        Rendered when the page has crossed the
+#                        >=3-source threshold.
 #
 #   ## Across sources  — per-teacher source counts, computed by
 #                        scanning ## By teacher's H3 subsections for
-#                        source citation tokens. Always re-written when
-#                        the page has >=3 sources, since this section
-#                        is wholly mechanical.
+#                        source citation tokens.
 #
-# These are layered on top of the existing By-teacher rendering; they
-# don't change attribution or claims, just structure the metadata.
+#   status (frontmatter) — ``stub`` below the threshold,
+#                          ``draft`` at or above it.
+#
+# All three regenerate from current data on every ingest. The wiki is
+# a purely-derived view of upstream notes_json; the only manual surface
+# in this codebase is the alias maps. Nothing preserves prior section
+# content across re-renders — preserving would just let stale outputs
+# (the "3 sources by Kaiano and Amy" Overview written when only 3
+# sources had contributed) survive subsequent ingests.
 
 _MIN_SOURCES_FOR_SYNTHESIS: int = 3
 
@@ -1195,11 +1198,6 @@ _MIN_SOURCES_FOR_SYNTHESIS: int = 3
 # "([[sources/kaiano/2025-09-15-kate-private-lesson]])". One match per
 # paragraph in a teacher's subsection means one source contribution.
 _CITATION_RE = re.compile(r"\(\[\[sources/[^/]+/([^\]]+)\]\]\)")
-
-
-def _placeholder_only(body_lines: list[str]) -> bool:
-    """Section body is empty or whitespace — safe to overwrite."""
-    return not any(line.strip() for line in body_lines)
 
 
 def _count_sources_per_teacher(by_teacher_body: list[str]) -> list[tuple[str, int]]:
@@ -1226,9 +1224,9 @@ def _render_overview(
     """One-sentence neutral gloss for the ## Overview section.
 
     Kept deliberately mechanical so it's obvious to a reader that this
-    is auto-generated metadata, not a synthesized definition. If the
-    curator later gains LLM synthesis, _placeholder_only() will let
-    this get replaced once with real prose and then preserved.
+    is auto-generated metadata, not a synthesized definition. The
+    sentence regenerates on every ingest from current frontmatter, so
+    the count and teacher list always match the rest of the page.
     """
     if teacher_count == 1:
         teachers_clause = f"by {teachers_in_order[0]}"
@@ -1256,24 +1254,28 @@ def _render_across_sources(per_teacher: list[tuple[str, int]]) -> list[str]:
 
 
 def _synthesize_page(page: md.Page, page_type: PageType) -> None:
-    """Synthesize derived sections + auto-promote status. Mutates ``page``.
+    """Synthesize derived sections + status. Mutates ``page``.
 
-    Three behaviors, all gated on the page's current source count:
+    Three outputs, all purely derived from the page's current
+    frontmatter and body. None preserve prior content across re-
+    renders — the wiki is a derived view, the only manual editing
+    surface is the alias maps.
 
-      * Status promotion (all derived page types): once the page has
-        ``_MIN_SOURCES_FOR_SYNTHESIS`` (=3) distinct sources, promote
-        ``status: stub`` → ``status: draft``. Never auto-promote to
-        ``mature`` — that requires editorial review per CLAUDE.md.
-      * ``## Overview`` (concept/technique only): populated with a
-        neutral one-sentence gloss when the existing section is blank
-        or absent. Human/LLM prose in this section is preserved across
-        re-renders via ``_placeholder_only``.
+      * Status (all derived page types): ``stub`` below the
+        ``_MIN_SOURCES_FOR_SYNTHESIS`` (=3) threshold, ``draft`` at
+        or above. ``mature`` is not auto-set; if and when a curator
+        configuration surface for maturity lands it would set the
+        value elsewhere and ``_synthesize_page`` would learn to
+        respect it. For now status is a pure function of source count.
+      * ``## Overview`` (concept/technique only): regenerated each
+        run when the page has >=3 sources. Skipped below threshold —
+        a single-source page doesn't have enough cross-source signal
+        to summarize.
       * ``## Across sources`` (concept/technique only): per-teacher
-        source-count bullets, always re-rendered from current page
-        state.
+        source-count bullets, regenerated each run when the page
+        has >=3 sources.
 
-    Below the synthesis threshold the page keeps its existing status
-    and the Overview / Across-sources sections are left untouched.
+    No-op on page types that don't carry these conventions.
     """
     if page_type not in {"concept", "technique", "instructor"}:
         return
@@ -1281,19 +1283,19 @@ def _synthesize_page(page: md.Page, page_type: PageType) -> None:
     sources = page.frontmatter.get("sources") or []
     if not isinstance(sources, list):
         return
-    if len(sources) < _MIN_SOURCES_FOR_SYNTHESIS:
-        return
 
-    # Status promotion — applies to all three derived page types once
-    # the source threshold is crossed. We only promote *up* from stub;
-    # human-curated draft/mature designations are preserved.
-    if page.frontmatter.get("status") == "stub":
+    # Status is a pure function of source count.
+    if len(sources) >= _MIN_SOURCES_FOR_SYNTHESIS:
         page.frontmatter["status"] = "draft"
+    else:
+        page.frontmatter["status"] = "stub"
+        return  # Below threshold: Overview and Across-sources are skipped.
 
-    # The rest of the synthesis is concept/technique specific —
-    # instructor pages don't render Overview/Across-sources from
-    # per-teacher attribution. Their ``## Background`` and ``##
-    # Teaching themes`` sections are editorial work, not derived.
+    # The rest is concept/technique specific. Instructor pages don't
+    # render Overview/Across-sources from per-teacher attribution —
+    # their other sections (``## Background``, ``## Teaching
+    # themes``) are slated for an LLM synthesis pass that doesn't
+    # exist yet.
     if page_type == "instructor":
         return
 
@@ -1303,19 +1305,14 @@ def _synthesize_page(page: md.Page, page_type: PageType) -> None:
         return
     teachers_in_order = [h for h, _ in per_teacher]
 
-    # ## Overview — only if a human/LLM hasn't written one.
-    overview = page.get_section("Overview")
-    if overview is None or _placeholder_only(overview):
-        page.set_section(
-            "Overview",
-            _render_overview(
-                source_count=len(sources),
-                teacher_count=len(teachers_in_order),
-                teachers_in_order=teachers_in_order,
-            ),
-        )
-
-    # ## Across sources — always re-written from data.
+    page.set_section(
+        "Overview",
+        _render_overview(
+            source_count=len(sources),
+            teacher_count=len(teachers_in_order),
+            teachers_in_order=teachers_in_order,
+        ),
+    )
     page.set_section("Across sources", _render_across_sources(per_teacher))
 
 
