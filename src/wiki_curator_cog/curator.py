@@ -294,6 +294,13 @@ def ingest_one_source(
         source_bucket=bucket,
         concept_aliases=concept_aliases,
         technique_aliases=technique_aliases,
+        # The instructor alias map drives canonicalization for two
+        # codepaths in plan_contributions: name → canonical for the
+        # source's primary instructors (already applied upstream via
+        # ``canonicalize_names`` before this call) and for references —
+        # the latter is what makes Benji/Brandi/Rosenfall cluster
+        # collapses reach the referenced-by stub pages.
+        instructor_aliases=aliases,
         # Source metadata flows through to the instructor-page bullet
         # under ``## Sources`` for each canonical instructor on this
         # source. See derived_pages._format_author_source_bullet.

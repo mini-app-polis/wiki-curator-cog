@@ -503,6 +503,7 @@ def plan_contributions(
     source_bucket: str,
     concept_aliases: AliasMap | None = None,
     technique_aliases: AliasMap | None = None,
+    instructor_aliases: AliasMap | None = None,
     session_date: Any | None = None,
     session_type: str | None = None,
     title: str | None = None,
@@ -542,6 +543,16 @@ def plan_contributions(
       * ``session_date`` / ``session_type`` / ``title`` are used to
         render the source bullet. When omitted, the bullet falls back
         to just the source slug + a link.
+
+    Reference canonicalization:
+
+      * ``instructor_aliases`` (the loaded ``instructors/_aliases.yaml``)
+        is consulted when slugifying each ``references[].name``. Without
+        this, manual cluster collapses Kaiano set up for the primary-
+        authorship path (Benji Schwimmer mis-extractions → benji,
+        Brandi/Brandy variants → brandi-guild) don't apply to the
+        references codepath and the alias clusters reappear as separate
+        referenced-by stubs.
 
     Skipped here (handled elsewhere or deferred):
     - ``student_observations`` — never enters the wiki, per spec.
@@ -698,6 +709,15 @@ def plan_contributions(
         slug = slugify(name)
         if not slug:
             continue
+        # Apply the instructor alias map so manual cluster collapses
+        # (e.g., benji-schwimmer → benji) reach the references path
+        # as well as the primary instructors path. The map's
+        # ``to_slug`` re-normalizes the input via _normalize_key, so
+        # passing the slug form is equivalent to passing the raw name.
+        if instructor_aliases is not None:
+            mapped = instructor_aliases.to_slug(slug)
+            if mapped is not None:
+                slug = mapped
         citation = _source_citation(source_bucket, source_slug)
         type_tag = f" _({ref_type})_" if ref_type else ""
         context_part = f" — {context}" if context else ""

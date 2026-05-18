@@ -753,6 +753,68 @@ def test_wipe_derived_pages_does_not_touch_sources_or_index(
 # ── as-author instructor contributions ──────────────────────────────────
 
 
+def test_plan_references_use_instructor_alias_map(wiki_repo_path: Path) -> None:
+    """A reference to 'Benji Schwimmer' (or any aliased variant) should
+    land on the canonical instructor slug, not on a separate stub page.
+
+    The 2026-05-18 backfill landed referenced-by stubs at
+    benji-schwimmer.md, benji-schremmer.md, benji-schumer.md, and
+    benji.md despite ``instructors/_aliases.yaml`` mapping all four
+    variants to ``benji``. Reason: references → instructor pages bypassed
+    the alias map. This test pins the fixed behavior.
+    """
+    (wiki_repo_path / "instructors").mkdir(exist_ok=True)
+    (wiki_repo_path / "instructors" / "_aliases.yaml").write_text(
+        "benji: benji\n"
+        "benji-schwimmer: benji\n"
+        "benji-schremmer: benji\n"
+        "benji-schumer: benji\n"
+    )
+    instructor_aliases = AliasMap.load(wiki_repo_path)
+
+    contribs = plan_contributions(
+        notes_json={
+            "references": [
+                {"name": "Benji Schwimmer", "type": "instructor"},
+                {"name": "Benji Schremmer", "type": "instructor"},
+                {"name": "Benji", "type": "instructor"},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+        instructor_aliases=instructor_aliases,
+    )
+
+    ref = [
+        c for c in contribs if c.page_type == "instructor" and c.kind == "referenced-by"
+    ]
+    assert {c.page_slug for c in ref} == {"benji"}, (
+        "All three reference variants must canonicalize to the same slug"
+    )
+
+
+def test_plan_references_without_alias_map_preserve_raw_slugs() -> None:
+    """When no instructor_aliases is passed (legacy callers / tests),
+    references retain their raw slugify-only behavior — no implicit
+    canonicalization."""
+    contribs = plan_contributions(
+        notes_json={
+            "references": [
+                {"name": "Benji Schwimmer", "type": "instructor"},
+                {"name": "Benji", "type": "instructor"},
+            ],
+        },
+        canonical_instructors=["kate"],
+        source_slug="2025-09-15-x",
+        source_bucket="kate",
+    )
+    ref = [
+        c for c in contribs if c.page_type == "instructor" and c.kind == "referenced-by"
+    ]
+    assert {c.page_slug for c in ref} == {"benji-schwimmer", "benji"}
+
+
 def test_plan_emits_as_author_for_each_canonical_instructor() -> None:
     """Every source produces one as-author contribution per instructor.
 
