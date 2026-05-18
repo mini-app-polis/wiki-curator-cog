@@ -139,6 +139,29 @@ def ensure_wiki_clone(config: Config) -> Repo:
         cw.set_value("user", "name", config.wiki_git_author_name)
         cw.set_value("user", "email", config.wiki_git_author_email)
 
+        # ── Push reliability tuning ───────────────────────────────────
+        # Force HTTP/1.1 and bump the post buffer so large pushes (the
+        # backfill commits ~87 source updates plus ~700-1000 derived-
+        # page files in a single push) don't trip the libcurl HTTP/2
+        # stream-not-closed-cleanly error documented at
+        # https://github.com/git/git/blob/master/Documentation/config/http.txt
+        # and reproduced reliably in our 2026-05-18 backfill run.
+        #
+        # ``http.version = HTTP/1.1`` disables HTTP/2 multiplexing; the
+        # PROTOCOL_ERROR ("curl 92 HTTP/2 stream N was not closed
+        # cleanly") originates in libcurl's HTTP/2 frame handling under
+        # network pressure and is a well-known workaround. Pushes are
+        # one-shot (the curator never pulls or fetches over this
+        # codepath), so the multiplexing benefit is moot.
+        #
+        # ``http.postBuffer = 500MB`` lifts git's default 1MB chunking
+        # threshold above the typical full-corpus push size so the push
+        # body is sent in a single transfer rather than being split
+        # across multiple POSTs (which is what produces the stream
+        # errors in the first place).
+        cw.set_value("http", "version", "HTTP/1.1")
+        cw.set_value("http", "postBuffer", "524288000")  # 500 MB
+
     _checkout_or_create(repo, config.wiki_branch, config.wiki_repo_remote)
 
     return repo
