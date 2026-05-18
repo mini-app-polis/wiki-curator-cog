@@ -1,6 +1,6 @@
 [project]
 name = "wiki-curator-cog"
-version = "1.0.4"
+version = "1.0.5"
 description = "Prefect pipeline cog. Reads structured WCS notes from api-kaianolevine-com and maintains the wcs-wiki markdown knowledge base."
 readme = "README.md"
 requires-python = ">=3.11"

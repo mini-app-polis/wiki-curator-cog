@@ -1,3 +1,12 @@
+## [1.0.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.4...v1.0.5) (2026-05-18)
+
+
+### Bug Fixes
+
+* build ([06d794f](https://github.com/mini-app-polis/wiki-curator-cog/commit/06d794f010d236a87b524aa31f8090fca82f0f65))
+* pin NIXPACKS_UV_VERSION=0.7.0 so build understands revision=3 lockfile ([f5222b7](https://github.com/mini-app-polis/wiki-curator-cog/commit/f5222b7737b1d33078c0ce5675c49709e0ef565e))
+* tests ([b46b333](https://github.com/mini-app-polis/wiki-curator-cog/commit/b46b333296553a8e9e014204d6008572babd365b))
+
 ## [1.0.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.0.3...v1.0.4) (2026-05-17)
 
 
