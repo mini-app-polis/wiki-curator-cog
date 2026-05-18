@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.0...v1.2.1) (2026-05-18)
+
+
+### Bug Fixes
+
+* force HTTP/1.1 + retry push to absorb transient stream errors ([8e3efd9](https://github.com/mini-app-polis/wiki-curator-cog/commit/8e3efd959287f92805d4f1423b78f6fec4634dd4))
+
 # [1.2.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.1.0...v1.2.0) (2026-05-18)
 
 
