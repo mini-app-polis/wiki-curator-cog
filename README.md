@@ -5,7 +5,7 @@
 
 Prefect pipeline cog that maintains the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base.
 
-Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), deterministically routes their content onto concept / technique / instructor / terminology pages in a local clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`.
+Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), deterministically routes their content onto concept / technique / instructor / terminology pages in a local clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
 
 | Mode (`mode=…`) | What it does                                                              | Source                         | Sink                |
 | --------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------- |
