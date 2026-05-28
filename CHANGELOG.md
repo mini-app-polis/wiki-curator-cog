@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.6...v1.3.0) (2026-05-28)
+
+
+### Features
+
+* rewrite curator as stateless renderer over the entity substrate ([f8884c4](https://github.com/mini-app-polis/wiki-curator-cog/commit/f8884c40e5f803a8f4030bff29a45ee23b3834d5))
+
 ## [1.2.6](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.5...v1.2.6) (2026-05-18)
 
 
