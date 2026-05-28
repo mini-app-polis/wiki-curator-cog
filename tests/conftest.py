@@ -95,11 +95,7 @@ _install_mini_app_polis_stub()
 
 @pytest.fixture
 def wiki_repo_path(tmp_path: Path) -> Path:
-    """A throwaway directory shaped like the wcs-wiki repo skeleton.
-
-    Provides just enough structure for inventory.build_inventory() and
-    AliasMap.load() to function without raising.
-    """
+    """A throwaway directory shaped like the wcs-wiki repo skeleton."""
     (tmp_path / "CLAUDE.md").write_text("# CLAUDE.md\n")
     for sub in (
         "sources/kate",
@@ -108,12 +104,11 @@ def wiki_repo_path(tmp_path: Path) -> Path:
         "sources/external",
         "concepts",
         "techniques",
+        "drills",
         "instructors",
-        "terminology",
         "views",
     ):
         (tmp_path / sub).mkdir(parents=True, exist_ok=True)
-    (tmp_path / "instructors" / "_aliases.yaml").write_text("# alias map\n\n")
     return tmp_path
 
 

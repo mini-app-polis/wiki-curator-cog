@@ -1,27 +1,11 @@
 """Configuration for wiki-curator-cog.
 
 Environment variables are read once at startup via load_config() and
-exposed as an immutable Config dataclass. Auth env vars
-(KAIANO_API_CLERK_MACHINE_SECRET, GH_TOKEN) are read here but only
-exposed to the modules that need them — the api client reads the Clerk
-secret directly via KaianoApiClient.from_env(); GH_TOKEN is consumed
-by ``boot.ensure_wiki_clone`` to build the HTTPS clone URL.
-
-Deployment shape (Railway, ephemeral filesystem):
-
-  WIKI_REPO_URL    — HTTPS or SSH URL to the wcs-wiki repo
-                     (default: github.com/mini-app-polis/wcs-wiki)
-  WIKI_BRANCH      — branch to checkout and push to (default: main)
-  GH_TOKEN         — fine-grained PAT with contents:write on wcs-wiki,
-                     required when WIKI_REPO_URL is https://
-  WIKI_REPO_PATH   — where the local clone lives. Defaults to
-                     /tmp/wcs-wiki on Railway; can be overridden for
-                     local development.
+exposed as an immutable Config dataclass.
 """
 
 from __future__ import annotations
 
-import importlib.metadata
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,66 +29,20 @@ def _require(name: str) -> str:
     return v
 
 
-def _resolve_curator_version() -> str:
-    """Return the curator's release version.
-
-    Resolution order:
-      1. ``WIKI_CURATOR_VERSION`` env var (escape hatch for forcing a
-         re-process at a specific version string in local dev or tests).
-      2. ``importlib.metadata.version("wiki-curator-cog")`` — reads
-         ``pyproject.toml`` via the installed-package metadata.
-         semantic-release in CI bumps that version on every release,
-         so the curator version automatically tracks the deployment.
-      3. ``"dev"`` — when the package isn't installed (raw ``PYTHONPATH``
-         test runs, etc.).
-
-    Stored on every source page as ``curator_version`` frontmatter and
-    used by the inventory's idempotency check (equality, not >=).
-    """
-    if explicit := os.getenv("WIKI_CURATOR_VERSION"):
-        return explicit.strip()
-    try:
-        return importlib.metadata.version("wiki-curator-cog")
-    except importlib.metadata.PackageNotFoundError:
-        return "dev"
-
-
 @dataclass(frozen=True)
 class Config:
-    """Runtime configuration for the wiki curator.
+    """Runtime configuration for the wiki renderer."""
 
-    All values are loaded once at process start. Mutable state (last-run
-    timestamp, name aliases, wiki page inventory) lives elsewhere.
-
-    Secrets policy: ``gh_token`` is the only secret on this dataclass.
-    It is consumed exclusively by ``boot.ensure_wiki_clone`` and never
-    logged. Do not include it in repr — but the dataclass is frozen so
-    Python's default repr already includes it; callers that log Config
-    should redact before emitting.
-    """
-
-    # LLM
     llm_provider: LLMProvider
     llm_model: str
-
-    # Upstream API
     kaiano_api_base_url: str
-
-    # Wiki repo (local clone path the curator writes to)
     wiki_repo_path: Path
     wiki_repo_url: str
     wiki_repo_remote: str
     wiki_branch: str
     wiki_git_author_name: str
     wiki_git_author_email: str
-    gh_token: str  # may be empty for SSH-based remotes or local-only runs
-
-    # Curator behavior
-    curator_version: str  # auto-derived from package metadata (semver) or env override
-    backfill_page_size: int
-    state_path: Path  # incremental-mode state file (relative to repo or absolute)
-
-    # Observability
+    gh_token: str
     healthchecks_url: str
     sentry_dsn: str
     logging_level: str
@@ -119,18 +57,7 @@ class Config:
 
 
 def load_config() -> Config:
-    """Load and validate environment variables into a Config instance.
-
-    The WIKI_REPO_PATH existence check is deliberately deferred —
-    ``boot.ensure_wiki_clone`` runs first and populates the path. If
-    that helper isn't called (e.g., the operator is pointing at an
-    existing local clone), the curator will still raise when it tries
-    to load the inventory and finds nothing.
-
-    Raises:
-        RuntimeError: If a required environment variable is missing or
-        if HTTPS clone is configured without GH_TOKEN.
-    """
+    """Load and validate environment variables into a Config instance."""
     provider_raw = os.getenv("LLM_PROVIDER", "anthropic").lower().strip()
     if provider_raw not in ("anthropic", "openai"):
         raise RuntimeError(
@@ -148,22 +75,11 @@ def load_config() -> Config:
 
     is_https = wiki_repo_url.startswith(("http://", "https://"))
     if is_https and not gh_token and wiki_repo_url != "local-only":
-        # On Railway / any remote deployment, an HTTPS URL without a
-        # token means the cog can't push. Block early with a clear
-        # error rather than letting `git push` fail mid-backfill.
         raise RuntimeError(
             "WIKI_REPO_URL is HTTPS but GH_TOKEN is not set. "
             "Either provide a fine-grained PAT with contents:write on "
             f"{wiki_repo_url}, or switch to an SSH URL with a deploy key."
         )
-
-    state_path_raw = os.getenv("WIKI_STATE_PATH", ".wiki-curator-state.json")
-    state_path = Path(state_path_raw)
-    if not state_path.is_absolute():
-        # Relative paths resolve against the curator working directory,
-        # NOT against the wiki repo (state is curator-internal, never
-        # committed to the wiki).
-        state_path = Path.cwd() / state_path
 
     return Config(
         llm_provider=provider,
@@ -178,9 +94,6 @@ def load_config() -> Config:
             "WIKI_GIT_AUTHOR_EMAIL", "wiki-curator@kaianolevine.com"
         ),
         gh_token=gh_token,
-        curator_version=_resolve_curator_version(),
-        backfill_page_size=int(os.getenv("WIKI_BACKFILL_PAGE_SIZE", "100")),
-        state_path=state_path,
         healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),
         sentry_dsn=os.getenv("SENTRY_DSN_WIKI_CURATOR_COG", ""),
         logging_level=os.getenv("LOGGING_LEVEL", "INFO"),
@@ -188,11 +101,7 @@ def load_config() -> Config:
 
 
 def assert_wiki_clone_ready(config: Config) -> None:
-    """Sanity-check the local wiki clone after ``ensure_wiki_clone`` runs.
-
-    Verifies the path exists, looks like a wcs-wiki clone, and is on
-    the configured branch. Raises with an actionable message otherwise.
-    """
+    """Sanity-check the local wiki clone after ``ensure_wiki_clone`` runs."""
     if not config.wiki_repo_path.exists():
         raise RuntimeError(
             f"WIKI_REPO_PATH does not exist: {config.wiki_repo_path}. "

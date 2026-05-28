@@ -1,36 +1,24 @@
-"""Prefect flows for wiki-curator-cog.
+"""Prefect flow for wiki-curator-cog.
 
-Two production flows:
-
-  backfill_flow         — one-time, processes the entire upstream corpus
-                          in chronological order.
-  incremental_flow      — steady-state, processes notes created since
-                          the last successful run.
-
-Both delegate per-source work to wiki_curator_cog.curator.ingest_one_source.
+Single production flow: export_flow fetches the canonical entity graph,
+renders the full markdown bundle, and commits once per run.
 """
 
 from __future__ import annotations
 
 import datetime as dt
+from pathlib import Path
 
-import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
 from prefect import flow, get_run_logger
 from prefect.concurrency.sync import concurrency
 
-from .aliases import AliasMap
 from .api_client import WikiCuratorApiClient
 from .boot import ensure_wiki_clone, mask_url
 from .config import assert_wiki_clone_ready, load_config
-from .curator import IngestMode, ingest_one_source
-from .derived_pages import wipe_derived_pages
 from .git_ops import WikiRepo
-from .inventory import build_inventory
-from .state import load_state, save_state
-from .views import regenerate_views
-from .wiki_files import regenerate_index_derived_sections
+from .render import list_stale_derived_paths, render_bundle
 
 load_dotenv()
 
@@ -45,169 +33,25 @@ def _get_logger():
         return LOG
 
 
-@flow(name="wiki-curator-cog-backfill")
-def backfill_flow() -> dict:
-    """One-time backfill of the entire upstream corpus.
+def _write_bundle(wiki_repo_path: Path, bundle: dict[str, str]) -> list[Path]:
+    written: list[Path] = []
+    for rel_path, content in sorted(bundle.items()):
+        out = wiki_repo_path / rel_path
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(content)
+        written.append(out)
+    return written
 
-    Reads every WCS note from api-kaianolevine-com in chronological order
-    and ingests it into the wiki repo. Idempotent: re-running is safe;
-    notes already present at the current curator_version are skipped.
-    """
+
+@flow(name="wiki-curator-cog-export")
+def export_flow() -> dict:
+    """Fetch canonical export and re-render the full wiki bundle."""
     logger = _get_logger()
     config = load_config()
 
     with concurrency("wiki-curator-cog", occupy=1):
         logger.info(
-            "backfill.start curator_version=%s branch=%s repo=%s",
-            config.curator_version,
-            config.wiki_branch,
-            mask_url(config.wiki_repo_url),
-        )
-
-        # Ephemeral-environment safe: clone or refresh the local wiki
-        # clone before touching it. No-op on a developer machine with
-        # a pre-existing clone at WIKI_REPO_PATH; on Railway this
-        # performs the actual clone into /tmp/wcs-wiki.
-        ensure_wiki_clone(config)
-        assert_wiki_clone_ready(config)
-
-        api = WikiCuratorApiClient()
-        wiki_repo = WikiRepo(config)
-
-        # Wipe and rebuild: every backfill regenerates the derived layer
-        # (concepts/, techniques/, instructors/, terminology/) from
-        # scratch so behavior changes to the curator — vocab collapse
-        # rules, filter heuristics, page-shape decisions — produce a
-        # clean result without stale variant pages from prior runs.
-        # The alias maps (``_aliases.yaml`` files) are preserved so
-        # Kaiano's manual curation survives. Source pages, the index,
-        # the log, and views are NOT touched here — sources are the
-        # authoritative input, the index/log are append-only history,
-        # and views regenerate themselves at end of backfill.
-        wiped = wipe_derived_pages(config.wiki_repo_path)
-        if wiped:
-            logger.info("backfill.wiped_derived_pages count=%d", len(wiped))
-            wiki_repo.stage_removal(wiped)
-
-        # Inventory is built AFTER the wipe so the curator doesn't
-        # think the just-deleted pages still exist. Source pages remain
-        # on disk and continue to drive the idempotency check via
-        # ``curator_version`` equality.
-        inventory = build_inventory(config.wiki_repo_path)
-        aliases = AliasMap.load(config.wiki_repo_path)
-        concept_aliases = AliasMap.load(config.wiki_repo_path, relative_dir="concepts")
-        technique_aliases = AliasMap.load(
-            config.wiki_repo_path, relative_dir="techniques"
-        )
-
-        total = 0
-        ingested = 0
-        skipped = 0
-
-        for note in api.iter_all_notes(page_size=config.backfill_page_size):
-            total += 1
-            try:
-                result = ingest_one_source(
-                    note=note,
-                    mode=IngestMode.BACKFILL,
-                    inventory=inventory,
-                    aliases=aliases,
-                    wiki_repo_path=config.wiki_repo_path,
-                    api=api,
-                    curator_version=config.curator_version,
-                    concept_aliases=concept_aliases,
-                    technique_aliases=technique_aliases,
-                )
-            except NotImplementedError:
-                # Skeleton stub — re-raise so the flow fails loudly while
-                # the curator is still under construction.
-                raise
-            except Exception as exc:
-                sentry_sdk.capture_exception(exc)
-                logger.error("backfill.note_failed note_id=%s err=%s", note.id, exc)
-                continue
-
-            if result.skipped:
-                skipped += 1
-                continue
-            ingested += 1
-            if result.removed_paths:
-                # Stage deletions first so the per-source commit
-                # captures the move (old path deleted + new path
-                # added) as one atomic change.
-                wiki_repo.stage_removal(result.removed_paths)
-            if result.touched_paths:
-                wiki_repo.stage(result.touched_paths)
-                wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
-
-        # Save aliases once at end of backfill (may have grown).
-        # Vocab maps are never auto-mutated by the curator, so they
-        # don't need a corresponding save() call.
-        aliases.save()
-
-        # Regenerate the four required views once at end of backfill,
-        # per CLAUDE.md "Backfill mode" ("Skip view regeneration per
-        # source; regenerate all views once at the end"). The view
-        # pages are derived artifacts — they're always overwritten
-        # from current source state, so this is idempotent.
-        view_paths = regenerate_views(
-            config.wiki_repo_path, curator_version=config.curator_version
-        )
-        wiki_repo.stage(view_paths)
-
-        # Regenerate index.md's derived-page sections (Concepts,
-        # Techniques, Instructors, Terminology) from current disk
-        # state. Per-source ingest only maintains the ``## Sources``
-        # section incrementally; the others get rebuilt at end of
-        # backfill since the wipe at start of run invalidated whatever
-        # was there.
-        index_path = config.wiki_repo_path / "index.md"
-        if regenerate_index_derived_sections(index_path):
-            wiki_repo.stage([index_path])
-
-        if wiki_repo.has_changes():
-            wiki_repo.stage_all()
-            wiki_repo.commit("backfill: alias map, views, and residual updates")
-
-        wiki_repo.push()
-
-        save_state(
-            config,
-            last_run_at=dt.datetime.now(dt.UTC),
-            curator_version_at_last_run=config.curator_version,
-        )
-
-        summary = {
-            "total": total,
-            "ingested": ingested,
-            "skipped": skipped,
-            "curator_version": config.curator_version,
-        }
-        logger.info("backfill.complete %s", summary)
-        return summary
-
-
-@flow(name="wiki-curator-cog-incremental")
-def incremental_flow() -> dict:
-    """Process notes created since the last successful run.
-
-    Triggered downstream of transcription-cog completion (Phase 2). Uses
-    the API's `since` filter; the cutoff is the last-run timestamp from
-    local state.
-
-    Phase 1.5 work: the `since` filter must land on
-    GET /v1/wcs/notes/all before this flow is useful in production.
-    """
-    logger = _get_logger()
-    config = load_config()
-
-    with concurrency("wiki-curator-cog", occupy=1):
-        state = load_state(config)
-        since = state.last_run_at
-        logger.info(
-            "incremental.start since=%s curator_version=%s branch=%s repo=%s",
-            since,
-            config.curator_version,
+            "export.start branch=%s repo=%s",
             config.wiki_branch,
             mask_url(config.wiki_repo_url),
         )
@@ -217,82 +61,45 @@ def incremental_flow() -> dict:
 
         api = WikiCuratorApiClient()
         wiki_repo = WikiRepo(config)
-        inventory = build_inventory(config.wiki_repo_path)
-        aliases = AliasMap.load(config.wiki_repo_path)
-        concept_aliases = AliasMap.load(config.wiki_repo_path, relative_dir="concepts")
-        technique_aliases = AliasMap.load(
-            config.wiki_repo_path, relative_dir="techniques"
+
+        export = api.fetch_export()
+        log_path = config.wiki_repo_path / "log.md"
+        existing_log = log_path.read_text() if log_path.exists() else ""
+
+        rendered_at = dt.date.today()
+        bundle, stats = render_bundle(
+            export,
+            rendered_at=rendered_at,
+            existing_log=existing_log,
         )
 
-        total = 0
-        ingested = 0
-        skipped = 0
+        expected_paths = set(bundle.keys())
+        stale = list_stale_derived_paths(config.wiki_repo_path, expected_paths)
+        for path in stale:
+            path.unlink(missing_ok=True)
 
-        for note in api.iter_all_notes(
-            page_size=config.backfill_page_size, since=since
-        ):
-            total += 1
-            try:
-                result = ingest_one_source(
-                    note=note,
-                    mode=IngestMode.AUTOMATED,
-                    inventory=inventory,
-                    aliases=aliases,
-                    wiki_repo_path=config.wiki_repo_path,
-                    api=api,
-                    curator_version=config.curator_version,
-                    concept_aliases=concept_aliases,
-                    technique_aliases=technique_aliases,
-                )
-            except NotImplementedError:
-                raise
-            except Exception as exc:
-                sentry_sdk.capture_exception(exc)
-                logger.error("incremental.note_failed note_id=%s err=%s", note.id, exc)
-                continue
+        written = _write_bundle(config.wiki_repo_path, bundle)
 
-            if result.skipped:
-                skipped += 1
-                continue
-            ingested += 1
-            if result.removed_paths:
-                wiki_repo.stage_removal(result.removed_paths)
-            if result.touched_paths:
-                wiki_repo.stage(result.touched_paths)
-                wiki_repo.commit(f"ingest: {result.source_path.stem}")  # type: ignore[union-attr]
+        if stale:
+            wiki_repo.stage_removal(stale)
+        if written:
+            wiki_repo.stage(written)
 
-        aliases.save()
-
-        # Regenerate views only if this run actually ingested at least
-        # one source — otherwise the existing view files are still
-        # accurate and we'd just touch their regenerated_at timestamps
-        # for no reason. Same goes for the index.md derived sections.
-        if ingested > 0:
-            view_paths = regenerate_views(
-                config.wiki_repo_path, curator_version=config.curator_version
-            )
-            wiki_repo.stage(view_paths)
-            index_path = config.wiki_repo_path / "index.md"
-            if regenerate_index_derived_sections(index_path):
-                wiki_repo.stage([index_path])
-
+        commit_msg = (
+            f"render: {rendered_at.isoformat()} "
+            f"({stats.entity_count} entities, {stats.source_count} sources)"
+        )
         if wiki_repo.has_changes():
-            wiki_repo.stage_all()
-            wiki_repo.commit("incremental: alias map, views, and residual updates")
+            wiki_repo.commit(commit_msg)
 
         wiki_repo.push()
 
-        save_state(
-            config,
-            last_run_at=dt.datetime.now(dt.UTC),
-            curator_version_at_last_run=config.curator_version,
-        )
-
         summary = {
-            "total": total,
-            "ingested": ingested,
-            "skipped": skipped,
-            "curator_version": config.curator_version,
+            "entities": stats.entity_count,
+            "sources": stats.source_count,
+            "instructors": stats.instructor_count,
+            "paths_written": len(written),
+            "paths_removed": len(stale),
         }
-        logger.info("incremental.complete %s", summary)
+        logger.info("export.complete %s", summary)
         return summary
