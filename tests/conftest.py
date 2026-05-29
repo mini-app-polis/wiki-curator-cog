@@ -101,6 +101,7 @@ def wiki_repo_path(tmp_path: Path) -> Path:
         "sources",
         "concepts",
         "techniques",
+        "patterns",
         "drills",
         "instructors",
         "views",

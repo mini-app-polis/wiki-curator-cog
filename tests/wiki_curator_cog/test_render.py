@@ -105,6 +105,13 @@ def _make_export() -> WcsWikiExport:
         kind="technique",
         status="stub",
     )
+    pattern = WcsEntity(
+        id=_id("entity-pattern"),
+        slug="sugar-push",
+        canonical_name="Sugar Push",
+        kind="pattern",
+        status="draft",
+    )
     drill = WcsEntity(
         id=_id("entity-drill"),
         slug="balance-drill",
@@ -215,7 +222,7 @@ def _make_export() -> WcsWikiExport:
     ]
 
     return WcsWikiExport(
-        entities=[concept, technique, drill],
+        entities=[concept, technique, pattern, drill],
         instructors=[kaiano, kate, amy],
         sources=[source_kaiano, source_robert, source_coauth],
         attributions=attributions,
@@ -243,7 +250,35 @@ def test_entity_pages_land_in_correct_directories(
     bundle, _ = render_bundle(export, rendered_at=rendered_at, existing_log="")
     assert "concepts/anchor-step.md" in bundle
     assert "techniques/whisk.md" in bundle
+    assert "patterns/sugar-push.md" in bundle
     assert "drills/balance-drill.md" in bundle
+    assert "techniques/sugar-push.md" not in bundle
+
+
+def test_patterns_render_to_patterns_directory_not_techniques(
+    export: WcsWikiExport, rendered_at: dt.date
+) -> None:
+    bundle, stats = render_bundle(export, rendered_at=rendered_at, existing_log="")
+    pattern_entities = [e for e in export.entities if e.kind == "pattern"]
+    assert pattern_entities, "fixture must include at least one pattern entity"
+    for ent in pattern_entities:
+        expected_path = f"patterns/{ent.slug}.md"
+        assert expected_path in bundle, (
+            f"expected pattern entity {ent.slug} at {expected_path}, "
+            f"got {[p for p in bundle if ent.slug in p]}"
+        )
+    first_pattern = pattern_entities[0]
+    content = bundle[f"patterns/{first_pattern.slug}.md"]
+    assert "type: pattern" in content
+    assert "kind: pattern" in content
+
+
+def test_pattern_count_in_log_summary(
+    export: WcsWikiExport, rendered_at: dt.date
+) -> None:
+    bundle, stats = render_bundle(export, rendered_at=rendered_at, existing_log="")
+    assert stats.pattern_count >= 1
+    assert "patterns" in bundle["log.md"]
 
 
 def test_by_teacher_groups_and_resolves_instructors(

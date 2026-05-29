@@ -60,6 +60,7 @@ class RenderStats:
     entity_count: int = 0
     concept_count: int = 0
     technique_count: int = 0
+    pattern_count: int = 0
     drill_count: int = 0
     instructor_count: int = 0
     source_count: int = 0
@@ -113,6 +114,8 @@ def _entity_directory(kind: str) -> str:
         return "concepts"
     if kind == "drill":
         return "drills"
+    if kind == "pattern":
+        return "patterns"
     return "techniques"
 
 
@@ -121,6 +124,8 @@ def _entity_page_type(kind: str) -> str:
         return "concept"
     if kind == "drill":
         return "drill"
+    if kind == "pattern":
+        return "pattern"
     return "technique"
 
 
@@ -492,7 +497,7 @@ def render_entity_page(
             develops.append(" — ".join(parts))
         page.set_section("Develops", develops)
 
-    if entity.kind in ("technique", "pattern") and requirements:
+    if entity.kind == "technique" and requirements:
         requires: list[str] = []
         for req in requirements:
             parts = [f"**{req.skill_name}**"]
@@ -826,6 +831,7 @@ def render_view_page(
     source_lines: list[str] = []
     concept_slugs: set[str] = set()
     technique_slugs: set[str] = set()
+    pattern_slugs: set[str] = set()
     for source in matched:
         slug = indexes.source_slug_by_id[source.id]
         date_str = source.session_date.isoformat() if source.session_date else "—"
@@ -841,10 +847,10 @@ def render_view_page(
                 continue
             if entity.kind == "concept":
                 concept_slugs.add(entity.slug)
-            elif entity.kind in ("technique", "pattern", "drill"):
-                if entity.kind == "drill":
-                    continue
+            elif entity.kind == "technique":
                 technique_slugs.add(entity.slug)
+            elif entity.kind == "pattern":
+                pattern_slugs.add(entity.slug)
     page.set_section("Sources", source_lines)
 
     if concept_slugs:
@@ -856,6 +862,11 @@ def render_view_page(
         page.set_section(
             "Techniques touched",
             [f"- [[techniques/{slug}]]" for slug in sorted(technique_slugs)],
+        )
+    if pattern_slugs:
+        page.set_section(
+            "Patterns touched",
+            [f"- [[patterns/{slug}]]" for slug in sorted(pattern_slugs)],
         )
 
     return md.serialize(page)
@@ -892,7 +903,12 @@ def render_index(
     techniques = [
         (f"techniques/{e.slug}", e.canonical_name)
         for e in export.entities
-        if e.kind in ("technique", "pattern")
+        if e.kind == "technique"
+    ]
+    patterns = [
+        (f"patterns/{e.slug}", e.canonical_name)
+        for e in export.entities
+        if e.kind == "pattern"
     ]
     drills = [
         (f"drills/{e.slug}", e.canonical_name)
@@ -911,6 +927,7 @@ def render_index(
 
     section("Concepts", concepts)
     section("Techniques", techniques)
+    section("Patterns", patterns)
     section("Drills", drills)
     section("Instructors", instructors)
     section("Sources", sources)
@@ -923,7 +940,8 @@ def format_log_entry(stats: RenderStats, *, rendered_at: dt.date) -> str:
     summary = (
         f"Rendered {stats.entity_count} entities "
         f"({stats.concept_count} concepts, {stats.technique_count} techniques, "
-        f"{stats.drill_count} drills), {stats.instructor_count} instructors, "
+        f"{stats.pattern_count} patterns, {stats.drill_count} drills), "
+        f"{stats.instructor_count} instructors, "
         f"{stats.source_count} sources."
     )
     if stats.observations:
@@ -951,9 +969,8 @@ def render_bundle(
     stats = RenderStats(
         entity_count=len(export.entities),
         concept_count=sum(1 for e in export.entities if e.kind == "concept"),
-        technique_count=sum(
-            1 for e in export.entities if e.kind in ("technique", "pattern")
-        ),
+        technique_count=sum(1 for e in export.entities if e.kind == "technique"),
+        pattern_count=sum(1 for e in export.entities if e.kind == "pattern"),
         drill_count=sum(1 for e in export.entities if e.kind == "drill"),
         instructor_count=len(export.instructors),
         source_count=len(export.sources),
@@ -990,6 +1007,7 @@ def render_bundle(
 DERIVED_GLOBS: tuple[str, ...] = (
     "concepts/*.md",
     "techniques/*.md",
+    "patterns/*.md",
     "drills/*.md",
     "instructors/*.md",
     "sources/*.md",
