@@ -21,6 +21,7 @@ from wiki_curator_cog.models import (
 )
 from wiki_curator_cog.render import (
     build_indexes,
+    export_attributions_for_instructor,
     render_bundle,
     render_entity_page,
 )
@@ -41,6 +42,11 @@ def _make_export() -> WcsWikiExport:
         id=_id("instructor-kate"),
         slug="kate",
         canonical_name="Kate Smith",
+    )
+    amy = WcsInstructor(
+        id=_id("instructor-amy"),
+        slug="amy",
+        canonical_name="Amy",
     )
 
     source_kaiano = WcsSource(
@@ -68,6 +74,19 @@ def _make_export() -> WcsWikiExport:
         visibility="public",
         is_default_visible=True,
         created_at=dt.datetime(2025, 4, 2, 12, 0, tzinfo=dt.UTC),
+    )
+    source_coauth = WcsSource(
+        id=_id("source-coauth"),
+        transcript_id=_id("transcript-coauth"),
+        title="Kaiano + Amy lesson",
+        session_date=dt.date(2026, 5, 27),
+        session_type="group_class",
+        instructors_raw=["kaiano", "amy"],
+        students_raw=[],
+        organization="Swingesota",
+        visibility="public",
+        is_default_visible=True,
+        created_at=dt.datetime(2026, 5, 27, 19, 0, tzinfo=dt.UTC),
     )
 
     concept = WcsEntity(
@@ -124,6 +143,17 @@ def _make_export() -> WcsWikiExport:
             correction_text="Stay on the ball of the foot",
             raw_term="anchor step",
             position=2,
+        ),
+        WcsAttribution(
+            id=_id("attr-coauth"),
+            source_id=source_coauth.id,
+            entity_id=concept.id,
+            instructor_id=None,
+            attribution_kind="taught",
+            prose="Co-taught content example.",
+            raw_term="anchor step",
+            position=0,
+            origin="extraction",
         ),
     ]
 
@@ -186,8 +216,8 @@ def _make_export() -> WcsWikiExport:
 
     return WcsWikiExport(
         entities=[concept, technique, drill],
-        instructors=[kaiano, kate],
-        sources=[source_kaiano, source_robert],
+        instructors=[kaiano, kate, amy],
+        sources=[source_kaiano, source_robert, source_coauth],
         attributions=attributions,
         definitions=definitions,
         relations=relations,
@@ -267,14 +297,17 @@ def test_references_render_raw_name_no_instructor_page(
     assert "instructors/ben.md" not in bundle
 
 
-def test_source_pages_bucket_by_primary_instructor(
+def test_source_pages_land_in_flat_sources_directory(
     export: WcsWikiExport, rendered_at: dt.date
 ) -> None:
     bundle, _ = render_bundle(export, rendered_at=rendered_at, existing_log="")
-    kaiano_sources = [p for p in bundle if p.startswith("sources/kaiano/")]
-    external_sources = [p for p in bundle if p.startswith("sources/external/")]
-    assert len(kaiano_sources) == 1
-    assert len(external_sources) == 1
+    source_paths = [path for path in bundle if path.startswith("sources/")]
+    assert source_paths, "expected at least one source page"
+    for path in source_paths:
+        parts = path.split("/")
+        assert len(parts) == 2, f"expected flat sources/ layout, got {path}"
+        assert parts[0] == "sources"
+        assert parts[1].endswith(".md")
 
 
 def test_index_lists_all_rendered_pages(
@@ -287,7 +320,32 @@ def test_index_lists_all_rendered_pages(
     assert "[[drills/balance-drill]]" in index
     assert "[[instructors/kaiano]]" in index
     assert "[[views/kaianos-canon]]" in index
-    assert "sources/kaiano/" in index
+    assert "[[views/kate-as-student]]" in index
+    assert "[[views/full-model]]" in index
+    assert "sources/kaiano/" not in index
+
+
+def test_instructor_page_includes_coauth_attributions_with_null_instructor_id(
+    export: WcsWikiExport, rendered_at: dt.date
+) -> None:
+    """Co-taught sources produce attribution rows with instructor_id IS NULL.
+
+    Those rows must still appear on each named co-instructor's page.
+    """
+    indexes = build_indexes(export)
+    kaiano = next(i for i in export.instructors if i.slug == "kaiano")
+
+    kaiano_attrs = export_attributions_for_instructor(kaiano, indexes)
+    coauth_rows = [
+        a
+        for a in kaiano_attrs
+        if a.instructor_id is None
+        and "kaiano" in indexes.canonical_instructors_by_source.get(a.source_id, [])
+    ]
+    assert coauth_rows, (
+        "expected at least one co-taught row on Kaiano's page after "
+        "deriving from source.instructors_raw"
+    )
 
 
 def test_render_is_deterministic(export: WcsWikiExport, rendered_at: dt.date) -> None:

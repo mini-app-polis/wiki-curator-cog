@@ -98,10 +98,7 @@ def wiki_repo_path(tmp_path: Path) -> Path:
     """A throwaway directory shaped like the wcs-wiki repo skeleton."""
     (tmp_path / "CLAUDE.md").write_text("# CLAUDE.md\n")
     for sub in (
-        "sources/kate",
-        "sources/kaiano",
-        "sources/robert",
-        "sources/external",
+        "sources",
         "concepts",
         "techniques",
         "drills",

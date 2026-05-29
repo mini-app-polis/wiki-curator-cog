@@ -2,7 +2,7 @@
 
 Pure-ish module. Takes a canonical export and produces an in-memory map
 of {relative_path: file_text} for the entire wiki bundle per
-wcs-wiki/CLAUDE.md v1.0.
+wcs-wiki/CLAUDE.md v1.1.
 """
 
 from __future__ import annotations
@@ -29,8 +29,6 @@ from .models import (
     WcsWikiExport,
 )
 
-BUCKETED_INSTRUCTORS: tuple[str, ...] = ("kaiano", "kate", "robert")
-EXTERNAL_BUCKET: str = "external"
 _SLUG_MAX_LEN: int = 80
 
 _TAUGHT_KINDS: frozenset[str] = frozenset({"taught", "demonstrated", "drilled"})
@@ -45,7 +43,6 @@ class ExportIndexes:
     instructors_by_slug: dict[str, WcsInstructor]
     sources_by_id: dict[uuid.UUID, WcsSource]
     source_slug_by_id: dict[uuid.UUID, str]
-    source_bucket_by_id: dict[uuid.UUID, str]
     attributions_by_entity: dict[uuid.UUID, list[WcsAttribution]]
     attributions_by_source: dict[uuid.UUID, list[WcsAttribution]]
     definitions_by_entity: dict[uuid.UUID, list[WcsDefinition]]
@@ -79,22 +76,14 @@ class _ViewSpec:
 
 REQUIRED_VIEWS: tuple[_ViewSpec, ...] = (
     _ViewSpec(
-        slug="kaiano-teaching-kate",
-        filter_description=(
-            "sources where instructors contains kaiano AND students contains kate"
-        ),
-        instructors_includes=("kaiano",),
-        students_includes=("kate",),
-    ),
-    _ViewSpec(
         slug="kaianos-canon",
         filter_description="sources where instructors contains kaiano",
         instructors_includes=("kaiano",),
     ),
     _ViewSpec(
-        slug="roberts-canon",
-        filter_description="sources where instructors contains robert",
-        instructors_includes=("robert",),
+        slug="kate-as-student",
+        filter_description="sources where students contains kate",
+        students_includes=("kate",),
     ),
     _ViewSpec(
         slug="full-model",
@@ -139,10 +128,6 @@ def _entity_path(entity: WcsEntity) -> str:
     return f"{_entity_directory(entity.kind)}/{entity.slug}.md"
 
 
-def _source_wikilink(bucket: str, slug: str) -> str:
-    return f"sources/{bucket}/{slug}"
-
-
 def _resolve_raw_instructor(
     raw: str,
     instructors_by_slug: dict[str, WcsInstructor],
@@ -175,13 +160,6 @@ def _resolve_instructors_raw(
         canonical = _resolve_raw_instructor(str(raw), instructors_by_slug)
         resolved.append(canonical if canonical is not None else slugify(str(raw)))
     return resolved
-
-
-def _bucket_for_instructors(canonical_instructors: list[str]) -> str:
-    candidates = sorted(
-        slug for slug in canonical_instructors if slug in BUCKETED_INSTRUCTORS
-    )
-    return candidates[0] if candidates else EXTERNAL_BUCKET
 
 
 def _build_source_slug(source: WcsSource, canonical_instructors: list[str]) -> str:
@@ -225,14 +203,12 @@ def build_indexes(export: WcsWikiExport) -> ExportIndexes:
 
     canonical_instructors_by_source: dict[uuid.UUID, list[str]] = {}
     source_slug_by_id: dict[uuid.UUID, str] = {}
-    source_bucket_by_id: dict[uuid.UUID, str] = {}
     for source in export.sources:
         canonical = _resolve_instructors_raw(
             source.instructors_raw, instructors_by_slug
         )
         canonical_instructors_by_source[source.id] = canonical
         source_slug_by_id[source.id] = _build_source_slug(source, canonical)
-        source_bucket_by_id[source.id] = _bucket_for_instructors(canonical)
 
     attributions_by_entity: dict[uuid.UUID, list[WcsAttribution]] = defaultdict(list)
     attributions_by_source: dict[uuid.UUID, list[WcsAttribution]] = defaultdict(list)
@@ -292,7 +268,6 @@ def build_indexes(export: WcsWikiExport) -> ExportIndexes:
         instructors_by_slug=instructors_by_slug,
         sources_by_id=sources_by_id,
         source_slug_by_id=source_slug_by_id,
-        source_bucket_by_id=source_bucket_by_id,
         attributions_by_entity=dict(attributions_by_entity),
         attributions_by_source=dict(attributions_by_source),
         definitions_by_entity=dict(definitions_by_entity),
@@ -321,9 +296,8 @@ def _instructor_heading(
 
 
 def _source_link(source_id: uuid.UUID, indexes: ExportIndexes) -> str:
-    bucket = indexes.source_bucket_by_id[source_id]
     slug = indexes.source_slug_by_id[source_id]
-    return f"[[{_source_wikilink(bucket, slug)}]]"
+    return f"[[sources/{slug}]]"
 
 
 def _entity_link(entity: WcsEntity, *, label: str | None = None) -> str:
@@ -711,22 +685,49 @@ def _instructor_entities_by_kind(
 def export_attributions_for_instructor(
     instructor: WcsInstructor, indexes: ExportIndexes
 ) -> list[WcsAttribution]:
+    """Return all attributions where this instructor is credited.
+
+    An instructor is credited when EITHER (a) the row's instructor_id
+    matches them — typical for operator-added rows — OR (b) the row's
+    instructor_id is NULL and the parent source's instructors_raw
+    names them. The NULL case covers all extraction-origin rows
+    post-composer-fix; instructor identity for extraction content is
+    derived from the source, not stored on the row.
+    """
     result: list[WcsAttribution] = []
     for attrs in indexes.attributions_by_entity.values():
         for attr in attrs:
             if attr.instructor_id == instructor.id:
                 result.append(attr)
+                continue
+            if attr.instructor_id is None:
+                source = indexes.sources_by_id.get(attr.source_id)
+                if source is None:
+                    continue
+                canonical = indexes.canonical_instructors_by_source.get(source.id, [])
+                if instructor.slug in canonical:
+                    result.append(attr)
     return result
 
 
 def export_definitions_for_instructor(
     instructor: WcsInstructor, indexes: ExportIndexes
 ) -> list[WcsDefinition]:
+    """Return all definitions where this instructor is credited (same
+    rules as export_attributions_for_instructor)."""
     result: list[WcsDefinition] = []
     for defs in indexes.definitions_by_entity.values():
         for definition in defs:
             if definition.instructor_id == instructor.id:
                 result.append(definition)
+                continue
+            if definition.instructor_id is None:
+                source = indexes.sources_by_id.get(definition.source_id)
+                if source is None:
+                    continue
+                canonical = indexes.canonical_instructors_by_source.get(source.id, [])
+                if instructor.slug in canonical:
+                    result.append(definition)
     return result
 
 
@@ -777,11 +778,10 @@ def render_instructor_page(
     if source_ids:
         source_lines: list[str] = []
         for source_id in source_ids:
-            bucket = indexes.source_bucket_by_id[source_id]
             slug = indexes.source_slug_by_id[source_id]
             source = indexes.sources_by_id[source_id]
             title = source.title or slug
-            source_lines.append(f"- [[{_source_wikilink(bucket, slug)}|{title}]]")
+            source_lines.append(f"- [[sources/{slug}|{title}]]")
         page.set_section("Sources", source_lines)
 
     return md.serialize(page)
@@ -827,15 +827,13 @@ def render_view_page(
     concept_slugs: set[str] = set()
     technique_slugs: set[str] = set()
     for source in matched:
-        bucket = indexes.source_bucket_by_id[source.id]
         slug = indexes.source_slug_by_id[source.id]
         date_str = source.session_date.isoformat() if source.session_date else "—"
         title = source.title or slug
         who = ", ".join(source.instructors_raw) or "(unknown instructor)"
         students = f" → {', '.join(source.students_raw)}" if source.students_raw else ""
         source_lines.append(
-            f"- **{date_str}** — [[{_source_wikilink(bucket, slug)}|{title}]] · "
-            f"{who}{students}"
+            f"- **{date_str}** — [[sources/{slug}|{title}]] · {who}{students}"
         )
         for attr in indexes.attributions_by_source.get(source.id, []):
             entity = indexes.entities_by_id.get(attr.entity_id)
@@ -906,10 +904,9 @@ def render_index(
     ]
     sources = []
     for source in export.sources:
-        bucket = indexes.source_bucket_by_id[source.id]
         slug = indexes.source_slug_by_id[source.id]
         descriptor = source.title or slug
-        sources.append((f"sources/{bucket}/{slug}", descriptor))
+        sources.append((f"sources/{slug}", descriptor))
     views = [(f"views/{spec.slug}", spec.filter_description) for spec in REQUIRED_VIEWS]
 
     section("Concepts", concepts)
@@ -969,11 +966,10 @@ def render_bundle(
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")
 
     for source in sorted(export.sources, key=lambda s: indexes.source_slug_by_id[s.id]):
-        rel_path = (
-            f"sources/{indexes.source_bucket_by_id[source.id]}/"
-            f"{indexes.source_slug_by_id[source.id]}.md"
+        slug = indexes.source_slug_by_id[source.id]
+        bundle[f"sources/{slug}.md"] = render_source_page(
+            source, indexes, rendered_at=when
         )
-        bundle[rel_path] = render_source_page(source, indexes, rendered_at=when)
 
     for instructor in sorted(export.instructors, key=lambda i: i.slug):
         path = f"instructors/{instructor.slug}.md"
@@ -996,7 +992,7 @@ DERIVED_GLOBS: tuple[str, ...] = (
     "techniques/*.md",
     "drills/*.md",
     "instructors/*.md",
-    "sources/**/*.md",
+    "sources/*.md",
     "views/*.md",
 )
 
