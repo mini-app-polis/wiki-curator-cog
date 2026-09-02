@@ -65,9 +65,7 @@ def _install_mini_app_polis_stub() -> None:
 
     class _StubKaianoApiClient:
         @classmethod
-        def from_env(
-            cls, machine_name: str | None = None
-        ) -> _StubKaianoApiClient:  # noqa: ARG003 - matches the real signature
+        def from_env(cls, machine_name: str | None = None) -> _StubKaianoApiClient:  # noqa: ARG003 - matches the real signature
             return cls()
 
         def get(self, path: str, params: dict | None = None) -> dict:

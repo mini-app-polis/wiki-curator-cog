@@ -48,7 +48,7 @@ Required:
 
 ```
 KAIANO_API_BASE_URL=https://api.kaianolevine.com
-KAIANO_API_CLERK_MACHINE_SECRET=ak_…              # same Clerk machine as transcription-cog (wcs_admin scope)
+WIKI_CURATOR_COG_API_KEY=ak_…              # same Clerk machine as transcription-cog (wcs_admin scope)
 GH_TOKEN=github_pat_…                              # from step 1
 WIKI_REPO_URL=https://github.com/mini-app-polis/wcs-wiki.git
 WIKI_BRANCH=phase-1-backfill                       # backfill lands here; merge to main via PR when satisfied
