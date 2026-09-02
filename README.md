@@ -36,7 +36,7 @@ notes-ingest-cog (LLM extraction) ──► api-kaianolevine-com (structured not
                                       wcs-wiki repo
 ```
 
-The curator never accesses the database directly. All upstream data is fetched via Clerk M2M-authenticated HTTP calls to `api-kaianolevine-com`.
+The curator never accesses the database directly. All upstream data is fetched over HTTP from `api-kaianolevine-com`, authenticated with this cog's own named machine key.
 
 Pipeline-evaluation findings (quality signals, judgment-call records) are emitted to `pipeline_evaluations` via `POST /v1/evaluations` — same pattern as every other cog.
 
@@ -51,7 +51,8 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 - A `.env` file populated from `.env.example`
 - A local clone of `wcs-wiki`
 - An Anthropic API key
-- A Clerk M2M machine secret with `wcs_admin` scope
+- `WIKI_CURATOR_COG_API_KEY` — this cog's own named key. The API grants it the
+  `corpus-reader` and `pipeline-writer` roles; there is no fallback credential.
 
 ### Setup
 

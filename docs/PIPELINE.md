@@ -24,7 +24,7 @@ Drive transcript drop
 │   api-kaianolevine-com                       │
 │   wcs_transcripts + wcs_notes (Postgres)     │
 └──────────┬───────────────────────────────────┘
-           │ GET /v1/wcs/notes/all (read-only, Clerk M2M)
+           │ GET /v1/wcs/notes/all (read-only, named machine key)
            ▼
 ┌──────────────────────────┐
 │   wiki-curator-cog        │  (this repo)
@@ -52,8 +52,8 @@ This cog implements Layer 1.
 
 ## Auth
 
-- Curator authenticates to `api-kaianolevine-com` via Clerk M2M JWT (Project Keystone). Machine secret in Doppler.
-- `wcs_admin` scope required (curator reads all notes regardless of `is_default_visible` or `visibility`).
+- Curator authenticates to `api-kaianolevine-com` with its own named machine key, `WIKI_CURATOR_COG_API_KEY`, held in Doppler. The key is the identity claim — the API matches it against the machines it declares and learns the caller's name from the match. No Clerk, no token exchange, no fallback: unset or wrong is a 401 on every call.
+- Roles `corpus-reader` and `pipeline-writer`. `corpus-reader` carries `wcs.corpus.read`, which is what lets the curator read all notes regardless of `is_default_visible` or `visibility`; `pipeline-writer` covers posting findings.
 - GitHub fine-grained PAT scoped to `wcs-wiki` only; passed as `GH_TOKEN` in env. Used to clone and push.
 - No database credentials. The curator never touches the database directly.
 
