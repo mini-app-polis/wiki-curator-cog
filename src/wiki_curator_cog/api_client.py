@@ -4,11 +4,19 @@ Wraps KaianoApiClient from common-python-utils to provide typed methods
 for the bulk wiki export read endpoint and the pipeline_evaluations write
 endpoint on api-kaianolevine-com.
 
-Auth: Clerk M2M JWT via KaianoApiClient (Project Keystone). Machine secret
-is read from KAIANO_API_CLERK_MACHINE_SECRET at client construction time.
+Auth: this cog's own named API key, read from WIKI_CURATOR_COG_API_KEY by the
+shared client, which derives that variable from MACHINE_NAME below. The key
+identifies the cog, so the API's audit trail records which cog read the corpus
+rather than merely that a cog did.
 
-Scope required: wcs_admin (the renderer reads the full export regardless
-of per-source visibility).
+Falls back to the shared Clerk machine secret when the key is unset, which is
+the previous behaviour and the rollback path.
+
+Scopes required: ``wcs.notes.read`` for the export — the renderer reads the
+full corpus regardless of per-source visibility — and
+``pipeline.evaluations.write`` for reporting its own run. Note that reading
+everything is a read role, not an admin one: this cog has no business holding
+``wcs.grants.write``, which decides who may see what.
 """
 
 from __future__ import annotations
@@ -19,12 +27,17 @@ from mini_app_polis.api import KaianoApiClient
 
 from .models import WcsWikiExport
 
+#: This cog's name in api-kaianolevine-com's identity_registry.MACHINES. The
+#: shared client derives WIKI_CURATOR_COG_API_KEY from it, and the API derives
+#: the same variable from the same name.
+MACHINE_NAME = "wiki-curator-cog"
+
 
 class WikiCuratorApiClient:
     """Typed client for api-kaianolevine-com endpoints consumed by the renderer."""
 
     def __init__(self) -> None:
-        self._client = KaianoApiClient.from_env()
+        self._client = KaianoApiClient.from_env(MACHINE_NAME)
 
     def fetch_export(self) -> WcsWikiExport:
         """GET /v1/wcs/wiki/export — full canonical corpus in one call."""
