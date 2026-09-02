@@ -1,3 +1,16 @@
+# [1.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.3.0...v1.4.0) (2026-09-02)
+
+
+### Bug Fixes
+
+* **api-client:** drop the shared Clerk machine secret fallback ([036ff14](https://github.com/mini-app-polis/wiki-curator-cog/commit/036ff1454af1ac534b85248f796de5896d0ee526))
+* **deps:** pin common-python-utils v3.2.0 exactly ([2e6a024](https://github.com/mini-app-polis/wiki-curator-cog/commit/2e6a024e5e5ec227ed7194db36c4f2322b354da1))
+
+
+### Features
+
+* **api:** authenticate with this cog's own named API key ([8d3ea29](https://github.com/mini-app-polis/wiki-curator-cog/commit/8d3ea29e12fcaf833043c3ee8beb228a1db4d3ca))
+
 # [1.3.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.2.6...v1.3.0) (2026-05-28)
 
 
