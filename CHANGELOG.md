@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.4.0...v1.4.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **deps:** pin common-python-utils v4.0.0 ([c9f1f18](https://github.com/mini-app-polis/wiki-curator-cog/commit/c9f1f184a5755dd1d6535ed3a4f1138a57055d9b))
+
 # [1.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.3.0...v1.4.0) (2026-09-02)
 
 
