@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.4.1...v1.5.0) (2026-09-04)
+
+
+### Features
+
+* **deps:** automate dependency updates ([1d4e940](https://github.com/mini-app-polis/wiki-curator-cog/commit/1d4e940d9c274c29f893ad8b0d0036036405aa51))
+
 ## [1.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.4.0...v1.4.1) (2026-09-02)
 
 
