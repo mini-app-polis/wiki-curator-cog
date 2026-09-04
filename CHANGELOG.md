@@ -1,3 +1,11 @@
+## [1.5.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.0...v1.5.1) (2026-09-04)
+
+
+### Bug Fixes
+
+* **deps:** bump anthropic from 0.102.0 to 1.3.0 ([d61810b](https://github.com/mini-app-polis/wiki-curator-cog/commit/d61810b37d15df036375ec447f3c6f197d3fed04))
+* **deps:** bump the python-minor-and-patch group with 11 updates ([32ab703](https://github.com/mini-app-polis/wiki-curator-cog/commit/32ab7037460e4f46cb127cd6e226e6328ee50574))
+
 # [1.5.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.4.1...v1.5.0) (2026-09-04)
 
 
