@@ -1,3 +1,10 @@
+## [1.5.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.2...v1.5.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* **deps:** consume miniapppolis-common-utils from PyPI ([233220d](https://github.com/mini-app-polis/wiki-curator-cog/commit/233220d157a23948d46bb4fcf2e5a8b342c00bdf))
+
 ## [1.5.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.1...v1.5.2) (2026-09-05)
 
 
