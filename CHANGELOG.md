@@ -1,3 +1,10 @@
+## [1.5.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.1...v1.5.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* **git:** never three-way merge a lockfile ([ca91b4b](https://github.com/mini-app-polis/wiki-curator-cog/commit/ca91b4be1b03af1e76753725283c1c624d396349))
+
 ## [1.5.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.0...v1.5.1) (2026-09-04)
 
 
