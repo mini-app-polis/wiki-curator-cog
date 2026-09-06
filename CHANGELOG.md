@@ -1,3 +1,10 @@
+## [1.5.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.3...v1.5.4) (2026-09-06)
+
+
+### Bug Fixes
+
+* **release:** source the version from a committed file instead of pyproject.toml ([69001ad](https://github.com/mini-app-polis/wiki-curator-cog/commit/69001ad0d4f88d30554458b6a7f12b96e71e4775))
+
 ## [1.5.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.2...v1.5.3) (2026-09-05)
 
 
