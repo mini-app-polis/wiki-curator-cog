@@ -8,4 +8,4 @@ Install name:  wiki-curator-cog
 Import name:   wiki_curator_cog
 """
 
-__version__ = "0.1.0"
+from ._version import __version__ as __version__
