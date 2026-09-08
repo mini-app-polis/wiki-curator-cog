@@ -1,3 +1,10 @@
+## [1.5.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.4...v1.5.5) (2026-09-08)
+
+
+### Bug Fixes
+
+* **deps:** bump the python-minor-and-patch group with 2 updates ([666738d](https://github.com/mini-app-polis/wiki-curator-cog/commit/666738dcee2dbd5f3c90c0dd949337e1f6e7b751))
+
 ## [1.5.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.3...v1.5.4) (2026-09-06)
 
 
