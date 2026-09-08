@@ -26,6 +26,7 @@ import httpx
 import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
+from mini_app_polis.pipeline_status import make_failure_hook, post_run_finding
 from prefect import flow, serve
 
 from wiki_curator_cog.boot import mask_url
@@ -37,10 +38,44 @@ load_dotenv()
 LOG = log.get_logger()
 
 
-@flow(name="wiki-curator-cog")
+REPO = "wiki-curator-cog"
+"""Machine name this cog reports under; also names its API key variable."""
+
+_report_failure = make_failure_hook(REPO, repo=REPO)
+
+
+@flow(
+    name="wiki-curator-cog",
+    on_failure=[_report_failure],
+    on_crashed=[_report_failure],
+)
 def wiki_curator_router() -> Any:
-    """Single entrypoint flow that runs the export renderer."""
-    return export_flow()
+    """Single entrypoint flow that runs the export renderer.
+
+    Reports the run outcome as a notification. The findings this cog
+    posts through :mod:`wiki_curator_cog.api_client` are unaffected —
+    those are graded results and stay rows; this is only the record of
+    whether the export itself ran.
+    """
+    summary = export_flow()
+
+    changed = bool(summary.get("paths_written") or summary.get("paths_removed"))
+    post_run_finding(
+        REPO,
+        "SUCCESS",
+        text=(
+            f"Wiki export: {summary.get('paths_written', 0)} written, "
+            f"{summary.get('paths_removed', 0)} removed "
+            f"({summary.get('entities', 0)} entities, "
+            f"{summary.get('sources', 0)} sources)"
+        ),
+        repo=REPO,
+        # An export that rendered the same bundle as last time changed
+        # nothing and needs no announcement. One that wrote or removed a
+        # path moved the wiki, and that is worth a line.
+        notable=changed,
+    )
+    return summary
 
 
 def _ping_healthchecks(url: str) -> None:

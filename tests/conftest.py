@@ -43,13 +43,29 @@ def _install_mini_app_polis_stub() -> None:
         log.get_logger() -> logging.Logger
         from mini_app_polis.api import KaianoApiClient
         KaianoApiClient.from_env() -> stub instance
+        from mini_app_polis.pipeline_status import (
+            make_failure_hook, post_run_finding
+        )
 
     Tests that exercise the curator never call the API stub's methods;
     they pass a fake api directly to ingest_one_source. The stub
     exists purely so module imports succeed.
     """
+    try:
+        # Prefer the real package whenever it is installed. The previous
+        # guard only checked sys.modules, which at conftest-import time is
+        # always empty for this package — so the stub won every run, and
+        # these tests never touched the library they claim to depend on.
+        import mini_app_polis.api  # noqa: F401
+        import mini_app_polis.logger  # noqa: F401
+        import mini_app_polis.pipeline_status  # noqa: F401
+    except ImportError:
+        pass
+    else:
+        return
+
     if "mini_app_polis" in sys.modules:
-        return  # real package or earlier stub already present
+        return  # an earlier stub is already present
 
     pkg = types.ModuleType("mini_app_polis")
     pkg.__path__ = []  # mark as a package
@@ -82,12 +98,42 @@ def _install_mini_app_polis_stub() -> None:
 
     api_module.KaianoApiClient = _StubKaianoApiClient  # type: ignore[attr-defined]
 
+    status_module = types.ModuleType("mini_app_polis.pipeline_status")
+
+    class _StubDeliveryReport:
+        """Mirrors the real report's shape so call sites can read it."""
+
+        def __init__(self) -> None:
+            self.sent = 0
+            self.suppressed = 1
+            self.failed = 0
+            self.skipped = 0
+
+        @property
+        def ok(self) -> bool:
+            return True
+
+    def post_run_finding(*args: object, **kwargs: object) -> _StubDeliveryReport:  # noqa: ARG001 - matches the real signature
+        return _StubDeliveryReport()
+
+    def make_failure_hook(*args: object, **kwargs: object):  # noqa: ANN202, ARG001 - matches the real signature
+        def _hook(flow: object, flow_run: object, state: object) -> None:
+            return None
+
+        return _hook
+
+    status_module.post_run_finding = post_run_finding  # type: ignore[attr-defined]
+    status_module.make_failure_hook = make_failure_hook  # type: ignore[attr-defined]
+    status_module.DeliveryReport = _StubDeliveryReport  # type: ignore[attr-defined]
+
     pkg.logger = logger_module  # type: ignore[attr-defined]
     pkg.api = api_module  # type: ignore[attr-defined]
+    pkg.pipeline_status = status_module  # type: ignore[attr-defined]
 
     sys.modules["mini_app_polis"] = pkg
     sys.modules["mini_app_polis.logger"] = logger_module
     sys.modules["mini_app_polis.api"] = api_module
+    sys.modules["mini_app_polis.pipeline_status"] = status_module
 
 
 _install_mini_app_polis_stub()
