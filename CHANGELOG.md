@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.5...v1.6.0) (2026-09-08)
+
+
+### Features
+
+* utilizing common and notification at the cog level ([a5ade10](https://github.com/mini-app-polis/wiki-curator-cog/commit/a5ade103d65a92ee18a0577ca6ca5438281581ee))
+
 ## [1.5.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.5.4...v1.5.5) (2026-09-08)
 
 
