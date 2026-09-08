@@ -1,3 +1,10 @@
+## [1.6.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.1...v1.6.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* ci verification ([6a04b49](https://github.com/mini-app-polis/wiki-curator-cog/commit/6a04b499678f27964d6ed62eff9e2e50da444b4a))
+
 ## [1.6.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.0...v1.6.1) (2026-09-08)
 
 
