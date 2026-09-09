@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.2...v1.6.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **export:** report dangling references, slug collisions and unresolved instructors ([d0910e9](https://github.com/mini-app-polis/wiki-curator-cog/commit/d0910e93f00bb51c0c325ab66e5784ced972fb90))
+
 ## [1.6.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.1...v1.6.2) (2026-09-08)
 
 
