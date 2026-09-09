@@ -53,6 +53,14 @@ class ExportIndexes:
     references_by_source: dict[uuid.UUID, list[WcsReference]]
     relations_by_source: dict[uuid.UUID, list[WcsRelation]]
     canonical_instructors_by_source: dict[uuid.UUID, list[str]]
+    #: Raw instructor names no canonical instructor matched. These are
+    #: slugified and used anyway, which means the attributions credited
+    #: to them land on no instructor page at all.
+    unresolved_instructors: list[str] = field(default_factory=list)
+    #: (slug, description) for source slugs claimed by more than one
+    #: source. The later source wins the bundle key and the earlier one
+    #: is never written.
+    slug_collisions: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -65,6 +73,11 @@ class RenderStats:
     instructor_count: int = 0
     source_count: int = 0
     observations: list[str] = field(default_factory=list)
+    #: (reason, reference) for everything this render could not resolve.
+    #: observations go into log.md and are read by a person browsing the
+    #: wiki; these are for the run report and are read by nobody unless
+    #: something is wrong.
+    dropped: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -157,14 +170,28 @@ def _resolve_raw_instructor(
 def _resolve_instructors_raw(
     raw_names: Iterable[str],
     instructors_by_slug: dict[str, WcsInstructor],
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
+    """Canonical slugs for these raw names, and the ones that did not match.
+
+    An unmatched name is still slugified and used, because dropping it
+    would lose the attribution entirely. But the slug it produces matches
+    no instructor in the index, so every extraction-origin attribution
+    and definition credited to it appears on no instructor page — and the
+    entity and source pages render normally, which is exactly why nobody
+    notices. The second return value is what makes that sayable.
+    """
     resolved: list[str] = []
+    unresolved: list[str] = []
     for raw in raw_names:
         if not raw or not str(raw).strip():
             continue
         canonical = _resolve_raw_instructor(str(raw), instructors_by_slug)
-        resolved.append(canonical if canonical is not None else slugify(str(raw)))
-    return resolved
+        if canonical is None:
+            unresolved.append(str(raw).strip())
+            resolved.append(slugify(str(raw)))
+        else:
+            resolved.append(canonical)
+    return resolved, unresolved
 
 
 def _build_source_slug(source: WcsSource, canonical_instructors: list[str]) -> str:
@@ -208,12 +235,26 @@ def build_indexes(export: WcsWikiExport) -> ExportIndexes:
 
     canonical_instructors_by_source: dict[uuid.UUID, list[str]] = {}
     source_slug_by_id: dict[uuid.UUID, str] = {}
+    unresolved_instructors: list[str] = []
+    slug_collisions: list[tuple[str, str]] = []
+    slug_owner: dict[str, uuid.UUID] = {}
     for source in export.sources:
-        canonical = _resolve_instructors_raw(
+        canonical, unresolved = _resolve_instructors_raw(
             source.instructors_raw, instructors_by_slug
         )
+        unresolved_instructors.extend(unresolved)
         canonical_instructors_by_source[source.id] = canonical
-        source_slug_by_id[source.id] = _build_source_slug(source, canonical)
+        slug = _build_source_slug(source, canonical)
+        # The bundle is keyed by path, so a repeated slug is not a
+        # near-miss — the second render overwrites the first and one
+        # source has no page at all. index.md then lists the link twice,
+        # and source_count still counts both, because it is derived from
+        # len(export.sources) rather than from what was written.
+        if slug in slug_owner and slug_owner[slug] != source.id:
+            slug_collisions.append((slug, f"{slug_owner[slug]} and {source.id}"))
+        else:
+            slug_owner[slug] = source.id
+        source_slug_by_id[source.id] = slug
 
     attributions_by_entity: dict[uuid.UUID, list[WcsAttribution]] = defaultdict(list)
     attributions_by_source: dict[uuid.UUID, list[WcsAttribution]] = defaultdict(list)
@@ -283,6 +324,8 @@ def build_indexes(export: WcsWikiExport) -> ExportIndexes:
         references_by_source=dict(references_by_source),
         relations_by_source=dict(relations_by_source),
         canonical_instructors_by_source=canonical_instructors_by_source,
+        unresolved_instructors=unresolved_instructors,
+        slug_collisions=slug_collisions,
     )
 
 
@@ -955,6 +998,47 @@ def append_log_entry(existing_log: str, entry: str) -> str:
     return existing_log.rstrip() + entry
 
 
+def find_dangling_references(
+    export: WcsWikiExport, indexes: ExportIndexes
+) -> list[tuple[str, str]]:
+    """Every id in the export that resolves to nothing.
+
+    Computed from the data rather than observed during rendering. The
+    renderers skip an unresolvable reference quietly and correctly — a
+    page cannot link to an entity it does not have — but they do it in
+    seven places, several of which are ordinary filters rather than
+    drops, and one dangling entity can be skipped on three different
+    pages. Counting at the skip sites would both miss and double-count.
+    One pass answers the question directly.
+
+    Returns ``(reason, reference)`` pairs, so the caller can report them
+    without this module knowing anything about notifications.
+    """
+    dangling: list[tuple[str, str]] = []
+    entities = indexes.entities_by_id
+    sources = indexes.sources_by_id
+
+    for relation in export.relations:
+        if relation.from_entity_id not in entities:
+            dangling.append(("missing_entity", f"relation {relation.id} from"))
+        if relation.to_entity_id not in entities:
+            dangling.append(("missing_entity", f"relation {relation.id} to"))
+
+    for attr in export.attributions:
+        if attr.entity_id not in entities:
+            dangling.append(("missing_entity", f"attribution {attr.id}"))
+        if attr.source_id not in sources:
+            dangling.append(("missing_source", f"attribution {attr.id}"))
+
+    for definition in export.definitions:
+        if definition.entity_id not in entities:
+            dangling.append(("missing_entity", f"definition {definition.id}"))
+        if definition.source_id not in sources:
+            dangling.append(("missing_source", f"definition {definition.id}"))
+
+    return dangling
+
+
 def render_bundle(
     export: WcsWikiExport,
     *,
@@ -974,6 +1058,15 @@ def render_bundle(
         drill_count=sum(1 for e in export.entities if e.kind == "drill"),
         instructor_count=len(export.instructors),
         source_count=len(export.sources),
+    )
+
+    stats.dropped.extend(find_dangling_references(export, indexes))
+    stats.dropped.extend(
+        ("unresolved_instructor", name) for name in indexes.unresolved_instructors
+    )
+    stats.dropped.extend(
+        ("source_slug_collision", f"{slug} ({who})")
+        for slug, who in indexes.slug_collisions
     )
 
     for entity in sorted(export.entities, key=lambda e: e.slug):

@@ -44,7 +44,7 @@ def _install_mini_app_polis_stub() -> None:
         from mini_app_polis.api import KaianoApiClient
         KaianoApiClient.from_env() -> stub instance
         from mini_app_polis.pipeline_status import (
-            make_failure_hook, post_run_finding
+            RunReport, make_failure_hook
         )
 
     Tests that exercise the curator never call the API stub's methods;
@@ -113,6 +113,38 @@ def _install_mini_app_polis_stub() -> None:
         def ok(self) -> bool:
             return True
 
+    class _StubRunReport:
+        """Minimal RunReport so main can accumulate and send without the real package."""
+
+        def __init__(self, flow_name: str, *, repo: str, **_kwargs: object) -> None:
+            self.flow_name = flow_name
+            self.repo = repo
+            self.processed = 0
+            self.issues: dict[str, int] = {}
+            self.counters: dict[str, object] = {}
+            self._notable: bool | None = None
+
+        def ok(self, n: int = 1) -> None:
+            self.processed += n
+
+        def issue(
+            self, reason: str, item: str | None = None, **_kwargs: object
+        ) -> None:
+            self.issues[reason] = self.issues.get(reason, 0) + 1
+
+        def count(self, key: str, value: object) -> None:
+            self.counters[key] = value
+
+        @property
+        def severity(self) -> str:
+            return "WARN" if self.issues else "SUCCESS"
+
+        def send(
+            self, *, notable: bool = False, **_kwargs: object
+        ) -> _StubDeliveryReport:
+            self._notable = notable
+            return _StubDeliveryReport()
+
     def post_run_finding(*args: object, **kwargs: object) -> _StubDeliveryReport:  # noqa: ARG001 - matches the real signature
         return _StubDeliveryReport()
 
@@ -125,6 +157,7 @@ def _install_mini_app_polis_stub() -> None:
     status_module.post_run_finding = post_run_finding  # type: ignore[attr-defined]
     status_module.make_failure_hook = make_failure_hook  # type: ignore[attr-defined]
     status_module.DeliveryReport = _StubDeliveryReport  # type: ignore[attr-defined]
+    status_module.RunReport = _StubRunReport  # type: ignore[attr-defined]
 
     pkg.logger = logger_module  # type: ignore[attr-defined]
     pkg.api = api_module  # type: ignore[attr-defined]

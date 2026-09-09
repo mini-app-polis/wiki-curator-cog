@@ -100,6 +100,10 @@ def export_flow() -> dict:
             "instructors": stats.instructor_count,
             "paths_written": len(written),
             "paths_removed": len(stale),
+            # Pages actually in the bundle, which is not the same as
+            # len(export.sources) once two sources collide on a slug.
+            "source_pages": sum(1 for p in bundle if p.startswith("sources/")),
+            "dropped": list(stats.dropped),
         }
         logger.info("export.complete %s", summary)
         return summary

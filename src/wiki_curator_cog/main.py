@@ -26,7 +26,7 @@ import httpx
 import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
-from mini_app_polis.pipeline_status import make_failure_hook, post_run_finding
+from mini_app_polis.pipeline_status import RunReport, make_failure_hook
 from prefect import flow, serve
 
 from wiki_curator_cog.boot import mask_url
@@ -59,22 +59,28 @@ def wiki_curator_router() -> Any:
     """
     summary = export_flow()
 
+    # Severity was the literal string "SUCCESS", so no export could ever
+    # report a problem however bad the data was. It is derived now: any
+    # dangling reference, colliding slug or unresolved instructor makes
+    # the run WARN, which is what this module means by "results worth a
+    # human look".
+    report = RunReport(flow_name=REPO, repo=REPO)
+    report.ok(int(summary.get("paths_written", 0)))
+    for reason, ref in summary.get("dropped", []):
+        report.issue(str(reason), str(ref))
+    report.count("removed", summary.get("paths_removed", 0))
+    report.count("entities", summary.get("entities", 0))
+    report.count("sources", summary.get("sources", 0))
+    source_pages = summary.get("source_pages")
+    if source_pages is not None and source_pages != summary.get("sources"):
+        report.count("source_pages", source_pages)
+
     changed = bool(summary.get("paths_written") or summary.get("paths_removed"))
-    post_run_finding(
-        REPO,
-        "SUCCESS",
-        text=(
-            f"Wiki export: {summary.get('paths_written', 0)} written, "
-            f"{summary.get('paths_removed', 0)} removed "
-            f"({summary.get('entities', 0)} entities, "
-            f"{summary.get('sources', 0)} sources)"
-        ),
-        repo=REPO,
-        # An export that rendered the same bundle as last time changed
-        # nothing and needs no announcement. One that wrote or removed a
-        # path moved the wiki, and that is worth a line.
-        notable=changed,
-    )
+    # An export that rendered the same bundle as last time changed
+    # nothing and needs no announcement. One that wrote or removed a
+    # path moved the wiki, and that is worth a line. A WARN is sent
+    # either way — RunReport only suppresses SUCCESS.
+    report.send(notable=changed)
     return summary
 
 

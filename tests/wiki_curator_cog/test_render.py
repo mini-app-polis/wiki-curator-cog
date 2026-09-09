@@ -22,8 +22,10 @@ from wiki_curator_cog.models import (
 from wiki_curator_cog.render import (
     build_indexes,
     export_attributions_for_instructor,
+    find_dangling_references,
     render_bundle,
     render_entity_page,
+    slugify,
 )
 
 
@@ -400,3 +402,145 @@ def test_common_mistakes_and_drill_sections(
     assert "Rolling through the heel" in concept
     assert "## Develops" in drill
     assert "## Requires" in technique
+
+
+def _minimal_source(
+    name: str,
+    *,
+    title: str | None = None,
+    session_date: dt.date | None = None,
+    session_type: str = "group_class",
+    instructors_raw: list[str] | None = None,
+) -> WcsSource:
+    return WcsSource(
+        id=_id(f"source-{name}"),
+        transcript_id=_id(f"transcript-{name}"),
+        title=title,
+        session_date=session_date or dt.date(2025, 6, 1),
+        session_type=session_type,
+        instructors_raw=instructors_raw or ["Kaiano Levine"],
+        students_raw=[],
+        organization="",
+        visibility="public",
+        is_default_visible=True,
+        created_at=dt.datetime(2025, 6, 1, 12, 0, tzinfo=dt.UTC),
+    )
+
+
+def test_dangling_relation_is_found_by_the_scan() -> None:
+    """A relation pointing at an entity not in the export is reported once."""
+    concept = WcsEntity(
+        id=_id("entity-present"),
+        slug="anchor-step",
+        canonical_name="Anchor Step",
+        kind="concept",
+    )
+    missing_id = _id("entity-missing")
+    relation = WcsRelation(
+        id=_id("rel-dangling"),
+        from_entity_id=concept.id,
+        to_entity_id=missing_id,
+        relation_kind="prerequisite-of",
+    )
+    export = WcsWikiExport(entities=[concept], relations=[relation])
+    indexes = build_indexes(export)
+
+    dangling = find_dangling_references(export, indexes)
+
+    assert dangling == [("missing_entity", f"relation {relation.id} to")]
+
+
+def test_one_dangling_entity_is_not_counted_per_page() -> None:
+    """The scan is over the data, so three pages skipping it is still one drop."""
+    concept = WcsEntity(
+        id=_id("entity-present"),
+        slug="anchor-step",
+        canonical_name="Anchor Step",
+        kind="concept",
+    )
+    technique = WcsEntity(
+        id=_id("entity-technique"),
+        slug="whisk",
+        canonical_name="Whisk",
+        kind="technique",
+    )
+    missing_id = _id("entity-ghost")
+    # One relation that both endpoints would skip when rendering Related —
+    # plus a source page that would also skip it. Still one scan hit.
+    relation = WcsRelation(
+        id=_id("rel-ghost"),
+        from_entity_id=concept.id,
+        to_entity_id=missing_id,
+        relation_kind="related-to",
+        source_id=None,
+    )
+    export = WcsWikiExport(
+        entities=[concept, technique],
+        relations=[relation],
+    )
+    _, stats = render_bundle(export, rendered_at=dt.date(2025, 5, 28))
+
+    missing_drops = [
+        d
+        for d in stats.dropped
+        if d[0] == "missing_entity" and str(relation.id) in d[1]
+    ]
+    assert len(missing_drops) == 1
+
+
+def test_colliding_source_slugs_are_reported() -> None:
+    """Two untitled sources, same date, same instructor, same session type."""
+    kaiano = WcsInstructor(
+        id=_id("instructor-kaiano"),
+        slug="kaiano",
+        canonical_name="Kaiano Levine",
+        aliases=["Kaiano"],
+    )
+    a = _minimal_source("a", title=None, instructors_raw=["Kaiano Levine"])
+    b = _minimal_source("b", title=None, instructors_raw=["Kaiano Levine"])
+    export = WcsWikiExport(instructors=[kaiano], sources=[a, b])
+
+    indexes = build_indexes(export)
+
+    assert len(indexes.slug_collisions) == 1
+    slug, who = indexes.slug_collisions[0]
+    assert slug == "2025-06-01-kaiano-group-class"
+    assert str(a.id) in who and str(b.id) in who
+
+
+def test_source_pages_differs_from_source_count_on_a_collision() -> None:
+    kaiano = WcsInstructor(
+        id=_id("instructor-kaiano"),
+        slug="kaiano",
+        canonical_name="Kaiano Levine",
+        aliases=["Kaiano"],
+    )
+    a = _minimal_source("a", title=None, instructors_raw=["Kaiano Levine"])
+    b = _minimal_source("b", title=None, instructors_raw=["Kaiano Levine"])
+    export = WcsWikiExport(instructors=[kaiano], sources=[a, b])
+
+    bundle, stats = render_bundle(export, rendered_at=dt.date(2025, 5, 28))
+    source_pages = sum(1 for p in bundle if p.startswith("sources/"))
+
+    assert stats.source_count == 2
+    assert source_pages == 1
+    assert any(reason == "source_slug_collision" for reason, _ in stats.dropped)
+
+
+def test_unresolved_instructor_is_reported_but_still_slugified() -> None:
+    """Dropping the name would lose the attribution; reporting it is the fix."""
+    source = _minimal_source(
+        "unknown-teacher",
+        title="Mystery lesson",
+        instructors_raw=["Nobody Famous"],
+    )
+    export = WcsWikiExport(sources=[source])
+
+    indexes = build_indexes(export)
+    _, stats = render_bundle(export, rendered_at=dt.date(2025, 5, 28))
+
+    assert indexes.unresolved_instructors == ["Nobody Famous"]
+    assert indexes.canonical_instructors_by_source[source.id] == [
+        slugify("Nobody Famous")
+    ]
+    assert ("unresolved_instructor", "Nobody Famous") in stats.dropped
