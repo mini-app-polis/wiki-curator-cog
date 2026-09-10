@@ -1,3 +1,11 @@
+## [1.6.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.3...v1.6.4) (2026-09-10)
+
+
+### Bug Fixes
+
+* **deps:** bump the python-minor-and-patch group with 2 updates ([325bac5](https://github.com/mini-app-polis/wiki-curator-cog/commit/325bac5a666741805a3b71fa1c8ec6bbe66cabcc))
+* **deps:** upgrade cryptography, httplib2, h2 and pyasn1 past known advisories ([d2b1227](https://github.com/mini-app-polis/wiki-curator-cog/commit/d2b1227d66601c5233db5e5ff879983e0aa85fd3))
+
 ## [1.6.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.2...v1.6.3) (2026-09-09)
 
 
