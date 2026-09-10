@@ -46,6 +46,9 @@ def _install_mini_app_polis_stub() -> None:
         from mini_app_polis.pipeline_status import (
             RunReport, make_failure_hook
         )
+        from mini_app_polis.environment import (
+            Effect, current_environment, effect_enabled, env_var
+        )
 
     Tests that exercise the curator never call the API stub's methods;
     they pass a fake api directly to ingest_one_source. The stub
@@ -57,6 +60,7 @@ def _install_mini_app_polis_stub() -> None:
         # always empty for this package — so the stub won every run, and
         # these tests never touched the library they claim to depend on.
         import mini_app_polis.api  # noqa: F401
+        import mini_app_polis.environment  # noqa: F401
         import mini_app_polis.logger  # noqa: F401
         import mini_app_polis.pipeline_status  # noqa: F401
     except ImportError:
@@ -159,14 +163,43 @@ def _install_mini_app_polis_stub() -> None:
     status_module.DeliveryReport = _StubDeliveryReport  # type: ignore[attr-defined]
     status_module.RunReport = _StubRunReport  # type: ignore[attr-defined]
 
+    env_module = types.ModuleType("mini_app_polis.environment")
+
+    class _StubEnvironment:
+        PRODUCTION = type("E", (), {"value": "production"})()
+        DEVELOPMENT = type("E", (), {"value": "development"})()
+        LOCAL = type("E", (), {"value": "local"})()
+
+    class _StubEffect:
+        HEALTHCHECKS = type(
+            "E", (), {"name": "HEALTHCHECKS", "value": "healthchecks"}
+        )()
+
+    def _current_environment():
+        return _StubEnvironment.PRODUCTION
+
+    def _effect_enabled(_effect: object) -> bool:
+        return True
+
+    def _env_var(name: str) -> str:
+        return (os.environ.get(name) or "").strip()
+
+    env_module.Environment = _StubEnvironment  # type: ignore[attr-defined]
+    env_module.Effect = _StubEffect  # type: ignore[attr-defined]
+    env_module.current_environment = _current_environment  # type: ignore[attr-defined]
+    env_module.effect_enabled = _effect_enabled  # type: ignore[attr-defined]
+    env_module.env_var = _env_var  # type: ignore[attr-defined]
+
     pkg.logger = logger_module  # type: ignore[attr-defined]
     pkg.api = api_module  # type: ignore[attr-defined]
     pkg.pipeline_status = status_module  # type: ignore[attr-defined]
+    pkg.environment = env_module  # type: ignore[attr-defined]
 
     sys.modules["mini_app_polis"] = pkg
     sys.modules["mini_app_polis.logger"] = logger_module
     sys.modules["mini_app_polis.api"] = api_module
     sys.modules["mini_app_polis.pipeline_status"] = status_module
+    sys.modules["mini_app_polis.environment"] = env_module
 
 
 _install_mini_app_polis_stub()

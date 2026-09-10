@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from mini_app_polis.environment import env_var
+
 LLMProvider = Literal["anthropic", "openai"]
 
 _DEFAULT_MODELS: dict[str, str] = {
@@ -26,6 +28,17 @@ def _require(name: str) -> str:
     v = os.getenv(name)
     if not v:
         raise RuntimeError(f"Missing required environment variable: {name}")
+    return v
+
+
+def _require_api_base_url() -> str:
+    """Production reads ``KAIANO_API_BASE_URL``; everywhere else the ``_DEV`` form."""
+    v = env_var("KAIANO_API_BASE_URL")
+    if not v:
+        raise RuntimeError(
+            "Missing required environment variable: KAIANO_API_BASE_URL "
+            "(or KAIANO_API_BASE_URL_DEV outside production)"
+        )
     return v
 
 
@@ -84,7 +97,7 @@ def load_config() -> Config:
     return Config(
         llm_provider=provider,
         llm_model=model,
-        kaiano_api_base_url=_require("KAIANO_API_BASE_URL"),
+        kaiano_api_base_url=_require_api_base_url(),
         wiki_repo_path=wiki_repo_path,
         wiki_repo_url=wiki_repo_url,
         wiki_repo_remote=os.getenv("WIKI_REPO_REMOTE", "origin"),

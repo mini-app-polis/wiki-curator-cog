@@ -26,6 +26,7 @@ import httpx
 import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
+from mini_app_polis.environment import Effect, current_environment, effect_enabled
 from mini_app_polis.pipeline_status import RunReport, make_failure_hook
 from prefect import flow, serve
 
@@ -85,6 +86,13 @@ def wiki_curator_router() -> Any:
 
 
 def _ping_healthchecks(url: str) -> None:
+    # One URL is one check across both environments. A dev container
+    # pinging it holds the production check green while production is
+    # dead — the one failure the check exists to catch. Gated before the
+    # URL is read.
+    if not effect_enabled(Effect.HEALTHCHECKS):
+        LOG.info("healthchecks.ping_suppressed reason=not_production")
+        return
     if not url:
         return
     try:
@@ -98,12 +106,13 @@ def _init_observability(config) -> None:  # noqa: ANN001
         sentry_sdk.init(
             dsn=config.sentry_dsn,
             traces_sample_rate=0.0,
-            environment=os.getenv("RAILWAY_ENVIRONMENT", "production"),
+            environment=current_environment().value,
             release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown"),
         )
     _ping_healthchecks(config.healthchecks_url)
     LOG.info(
-        "wiki-curator-cog.boot version=%s api=%s wiki=%s branch=%s repo=%s",
+        "wiki-curator-cog.boot env=%s version=%s api=%s wiki=%s branch=%s repo=%s",
+        current_environment().value,
         os.getenv("RELEASE_VERSION", "dev"),
         config.kaiano_api_base_url,
         config.wiki_repo_path,
