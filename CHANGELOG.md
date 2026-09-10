@@ -1,3 +1,15 @@
+# [1.7.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.4...v1.7.0) (2026-09-10)
+
+
+### Bug Fixes
+
+* moving to common 5.7.1 ([d2b5f4c](https://github.com/mini-app-polis/wiki-curator-cog/commit/d2b5f4c806af160f9a20c6c80a80bcb4806216ab))
+
+
+### Features
+
+* **environment:** gate the Healthchecks ping outside production ([f9c5a46](https://github.com/mini-app-polis/wiki-curator-cog/commit/f9c5a46e8d8ad6681260d5c74e5d771a92fc5c7f))
+
 ## [1.6.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.3...v1.6.4) (2026-09-10)
 
 
