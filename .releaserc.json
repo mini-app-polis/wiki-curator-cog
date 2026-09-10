@@ -10,7 +10,7 @@
     }],
     ["@semantic-release/git", {
       "assets": ["CHANGELOG.md", "src/wiki_curator_cog/_version.py"],
-      "message": "chore(release): ${nextRelease.version} [skip ci]"
+      "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
     }],
     "@semantic-release/github"
   ]
