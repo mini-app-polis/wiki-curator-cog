@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
 
 concurrency:
@@ -10,6 +10,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Delegates to the fleet's shared security workflow: gitleaks over full
+  # history, the dependency audit against the resolved set, and semgrep.
+  security:
+    uses: mini-app-polis/.github/.github/workflows/security.yml@v2
+    with:
+      language: python
+      package-manager: uv
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +39,7 @@ jobs:
 
   release:
     name: Release
-    needs: test
+    needs: [test, security]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
