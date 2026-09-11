@@ -58,6 +58,9 @@ def wiki_curator_router() -> Any:
     those are graded results and stay rows; this is only the record of
     whether the export itself ran.
     """
+    # Opened before the export, not after, so the duration on the report
+    # is the export's and not the microsecond it takes to fill this in.
+    report = RunReport(flow_name=REPO, repo=REPO)
     summary = export_flow()
 
     # Severity was the literal string "SUCCESS", so no export could ever
@@ -65,7 +68,6 @@ def wiki_curator_router() -> Any:
     # dangling reference, colliding slug or unresolved instructor makes
     # the run WARN, which is what this module means by "results worth a
     # human look".
-    report = RunReport(flow_name=REPO, repo=REPO)
     report.ok(int(summary.get("paths_written", 0)))
     for reason, ref in summary.get("dropped", []):
         report.issue(str(reason), str(ref))
@@ -76,13 +78,29 @@ def wiki_curator_router() -> Any:
     if source_pages is not None and source_pages != summary.get("sources"):
         report.count("source_pages", source_pages)
 
-    changed = bool(summary.get("paths_written") or summary.get("paths_removed"))
-    # An export that rendered the same bundle as last time changed
-    # nothing and needs no announcement. One that wrote or removed a
-    # path moved the wiki, and that is worth a line. A WARN is sent
-    # either way — RunReport only suppresses SUCCESS.
-    report.send(notable=changed)
+    # Which pages moved, not only how many. Falls back to unnamed
+    # outcomes when the export reports counts without paths, so an older
+    # summary shape still says that the wiki changed.
+    _record_pages(report.created, summary, "written_paths", "paths_written")
+    _record_pages(report.removed, summary, "removed_paths", "paths_removed")
+
+    # No explicit notability. An export that rendered the same bundle as
+    # last time produced no outcome and stays quiet; one that wrote or
+    # removed a path has one, and that is what makes it worth sending.
+    # A WARN is sent either way — RunReport only suppresses SUCCESS.
+    report.send()
     return summary
+
+
+def _record_pages(record: Any, summary: dict, paths_key: str, count_key: str) -> None:
+    """Record one page outcome per path, or an unnamed one per count."""
+    paths = summary.get(paths_key)
+    if paths:
+        for path in paths:
+            record("wiki page", str(path))
+        return
+    for _ in range(int(summary.get(count_key, 0) or 0)):
+        record("wiki page")
 
 
 def _ping_healthchecks(url: str) -> None:

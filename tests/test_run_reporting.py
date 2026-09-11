@@ -26,6 +26,8 @@ def _summary(
         "instructors": 2,
         "paths_written": written,
         "paths_removed": removed,
+        "written_paths": [f"entities/e{i}.md" for i in range(written)],
+        "removed_paths": [f"sources/s{i}.md" for i in range(removed)],
         "source_pages": sources if source_pages is None else source_pages,
         "dropped": [] if dropped is None else dropped,
     }
@@ -42,10 +44,13 @@ def test_export_that_changed_the_wiki_is_notable() -> None:
     assert result["paths_written"] == 4
     send.assert_called_once()
     report = send.call_args.args[0]
-    assert send.call_args.kwargs["notable"] is True
     assert report.repo == "wiki-curator-cog"
     assert report.severity == "SUCCESS"
     assert report.processed == 4
+    # Notability is no longer hand-set: four pages moved, so the run has
+    # four outcomes, and the library sends a SUCCESS that has any.
+    assert len(report.outcomes) == 4
+    assert "+ wiki page: entities/e0.md" in report.text()
 
 
 def test_export_that_changed_nothing_is_not_notable() -> None:
@@ -56,7 +61,9 @@ def test_export_that_changed_nothing_is_not_notable() -> None:
     ):
         main.wiki_curator_router.fn()
 
-    assert send.call_args.kwargs["notable"] is False
+    report = send.call_args.args[0]
+    assert report.outcomes == []
+    assert not send.call_args.kwargs.get("notable")
 
 
 def test_removals_alone_count_as_a_change() -> None:
@@ -66,7 +73,34 @@ def test_removals_alone_count_as_a_change() -> None:
     ):
         main.wiki_curator_router.fn()
 
-    assert send.call_args.kwargs["notable"] is True
+    report = send.call_args.args[0]
+    assert len(report.outcomes) == 2
+    assert "- wiki page: sources/s0.md" in report.text()
+
+
+def test_a_summary_without_paths_still_says_the_wiki_changed() -> None:
+    """An older export shape reports counts and no paths."""
+    summary = _summary(written=3)
+    del summary["written_paths"]
+    with (
+        patch.object(main, "export_flow", return_value=summary),
+        patch.object(main.RunReport, "send", autospec=True) as send,
+    ):
+        main.wiki_curator_router.fn()
+
+    report = send.call_args.args[0]
+    assert len(report.outcomes) == 3
+    assert "+ wiki page x3" in report.text()
+
+
+def test_the_report_says_how_long_the_export_took() -> None:
+    with (
+        patch.object(main, "export_flow", return_value=_summary(written=1)),
+        patch.object(main.RunReport, "send", autospec=True) as send,
+    ):
+        main.wiki_curator_router.fn()
+
+    assert send.call_args.args[0].text().startswith("Run complete in ")
 
 
 def test_a_clean_export_still_reports_success() -> None:
