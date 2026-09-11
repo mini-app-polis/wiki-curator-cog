@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.7.1...v1.8.0) (2026-09-11)
+
+
+### Features
+
+* verb status and duration added ([d6da876](https://github.com/mini-app-polis/wiki-curator-cog/commit/d6da8762bb99e6c0492785c51b4a78da2fdb5895))
+
 ## [1.7.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.7.0...v1.7.1) (2026-09-11)
 
 
