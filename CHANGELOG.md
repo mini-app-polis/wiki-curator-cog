@@ -1,3 +1,11 @@
+## [1.7.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.7.0...v1.7.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* stop serving prefect deployments outside production ([ef57175](https://github.com/mini-app-polis/wiki-curator-cog/commit/ef57175041173355d9fc1d3ab657bb160ffe6056))
+* test setup ([46ee696](https://github.com/mini-app-polis/wiki-curator-cog/commit/46ee696a21be9d645b09c33ea11c13dc552bf477))
+
 # [1.7.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.6.4...v1.7.0) (2026-09-10)
 
 
