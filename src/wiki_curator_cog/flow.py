@@ -100,6 +100,11 @@ def export_flow() -> dict:
             "instructors": stats.instructor_count,
             "paths_written": len(written),
             "paths_removed": len(stale),
+            # The paths themselves, not only how many. The run report
+            # names what moved; a count is not something anyone can go
+            # and look at.
+            "written_paths": [str(p) for p in written],
+            "removed_paths": [str(p) for p in stale],
             # Pages actually in the bundle, which is not the same as
             # len(export.sources) once two sources collide on a slug.
             "source_pages": sum(1 for p in bundle if p.startswith("sources/")),
