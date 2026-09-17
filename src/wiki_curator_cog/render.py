@@ -37,6 +37,8 @@ _MISTAKE_KINDS: frozenset[str] = frozenset({"mistake", "correction"})
 
 @dataclass
 class ExportIndexes:
+    """Lookup tables built once from an export and reused by every renderer."""
+
     entities_by_id: dict[uuid.UUID, WcsEntity]
     entities_by_slug: dict[str, WcsEntity]
     instructors_by_id: dict[uuid.UUID, WcsInstructor]
@@ -65,6 +67,8 @@ class ExportIndexes:
 
 @dataclass
 class RenderStats:
+    """What one render produced, and what it could not resolve."""
+
     entity_count: int = 0
     concept_count: int = 0
     technique_count: int = 0
@@ -107,6 +111,7 @@ REQUIRED_VIEWS: tuple[_ViewSpec, ...] = (
 
 
 def slugify(text: str) -> str:
+    """Convert text to a URL-safe slug, truncated at a word boundary."""
     s = text.strip().lower()
     s = re.sub(r"[\s_]+", "-", s)
     s = re.sub(r"[^a-z0-9\-]", "", s)
@@ -227,6 +232,7 @@ def _source_matches_view(source: WcsSource, spec: _ViewSpec) -> bool:
 
 
 def build_indexes(export: WcsWikiExport) -> ExportIndexes:
+    """Build the lookup tables every renderer reads, from one export."""
     entities_by_id = {e.id: e for e in export.entities}
     entities_by_slug = {e.slug: e for e in export.entities}
     instructors_by_id = {i.id: i for i in export.instructors}
@@ -485,6 +491,7 @@ def render_entity_page(
     *,
     rendered_at: dt.date,
 ) -> str:
+    """Render one entity's Markdown page."""
     attributions = indexes.attributions_by_entity.get(entity.id, [])
     definitions = indexes.definitions_by_entity.get(entity.id, [])
     relations = indexes.relations_by_entity.get(entity.id, [])
@@ -575,6 +582,7 @@ def render_source_page(
     *,
     rendered_at: dt.date,
 ) -> str:
+    """Render one source's Markdown page."""
     canonical = indexes.canonical_instructors_by_source[source.id]
 
     page = md.Page(
@@ -785,6 +793,7 @@ def render_instructor_page(
     *,
     rendered_at: dt.date,
 ) -> str:
+    """Render one instructor's Markdown page."""
     entities_by_kind = _instructor_entities_by_kind(instructor, indexes)
     concepts = [e.slug for e in entities_by_kind.get("concept", [])]
     techniques = [e.slug for e in entities_by_kind.get("technique", [])]
@@ -842,6 +851,7 @@ def render_view_page(
     *,
     rendered_at: dt.date,
 ) -> str:
+    """Render one curated view page from the sources matching its spec."""
     matched = [
         source
         for source in sorted(
@@ -921,6 +931,7 @@ def render_index(
     *,
     rendered_at: dt.date,
 ) -> str:
+    """Render the wiki's top-level index page."""
     lines = [
         "# WCS Wiki Index",
         "",
@@ -980,6 +991,7 @@ def render_index(
 
 
 def format_log_entry(stats: RenderStats, *, rendered_at: dt.date) -> str:
+    """Format one dated render-log entry from a render's stats."""
     summary = (
         f"Rendered {stats.entity_count} entities "
         f"({stats.concept_count} concepts, {stats.technique_count} techniques, "
@@ -993,6 +1005,7 @@ def format_log_entry(stats: RenderStats, *, rendered_at: dt.date) -> str:
 
 
 def append_log_entry(existing_log: str, entry: str) -> str:
+    """Append an entry to the render log, starting it if the log is empty."""
     if not existing_log.strip():
         return "# Render log\n" + entry
     return existing_log.rstrip() + entry

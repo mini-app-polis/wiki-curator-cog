@@ -183,6 +183,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the requested subcommand and return the process exit code.
+
+    With no mode argument the cog serves the Prefect deployment forever;
+    ``export`` renders once and exits.
+    """
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     if args.mode is None:
         return _serve_forever()

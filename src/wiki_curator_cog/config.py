@@ -62,10 +62,12 @@ class Config:
 
     @property
     def default_models(self) -> dict[str, str]:
+        """The default model name for each LLM role, as a mapping."""
         return _DEFAULT_MODELS
 
     @property
     def wiki_repo_is_https(self) -> bool:
+        """Whether the wiki remote is an HTTP(S) URL rather than an SSH one."""
         return self.wiki_repo_url.startswith(("http://", "https://"))
 
 
