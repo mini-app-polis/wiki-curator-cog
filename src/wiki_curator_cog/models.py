@@ -19,6 +19,8 @@ WcsEntityKind = Literal["concept", "technique", "pattern", "drill"]
 
 
 class WcsEntity(BaseModel):
+    """One wiki entity — a concept, technique, pattern or drill."""
+
     id: uuid.UUID
     slug: str
     canonical_name: str
@@ -32,6 +34,8 @@ class WcsEntity(BaseModel):
 
 
 class WcsInstructor(BaseModel):
+    """One instructor, with the prose sections their page is built from."""
+
     id: uuid.UUID
     slug: str
     canonical_name: str
@@ -44,6 +48,8 @@ class WcsInstructor(BaseModel):
 
 
 class WcsSource(BaseModel):
+    """One transcribed session the wiki draws from."""
+
     id: uuid.UUID
     transcript_id: uuid.UUID
     title: str | None = None
@@ -60,6 +66,13 @@ class WcsSource(BaseModel):
 
 
 class WcsAttribution(BaseModel):
+    """Something an instructor did with an entity in one source.
+
+    Covers the taught, demonstrated and drilled kinds as well as mistakes
+    and corrections; which fields are populated depends on
+    ``attribution_kind``.
+    """
+
     id: uuid.UUID
     source_id: uuid.UUID
     entity_id: uuid.UUID
@@ -78,6 +91,8 @@ class WcsAttribution(BaseModel):
 
 
 class WcsDefinition(BaseModel):
+    """A term as it was defined in one source."""
+
     id: uuid.UUID
     entity_id: uuid.UUID
     source_id: uuid.UUID
@@ -91,6 +106,8 @@ class WcsDefinition(BaseModel):
 
 
 class WcsRelation(BaseModel):
+    """A directed link from one entity to another."""
+
     id: uuid.UUID
     from_entity_id: uuid.UUID
     to_entity_id: uuid.UUID
@@ -103,6 +120,8 @@ class WcsRelation(BaseModel):
 
 
 class WcsDrillPurpose(BaseModel):
+    """The skill a drill is meant to build."""
+
     id: uuid.UUID
     drill_entity_id: uuid.UUID
     source_id: uuid.UUID | None = None
@@ -116,6 +135,8 @@ class WcsDrillPurpose(BaseModel):
 
 
 class WcsTechniqueRequirement(BaseModel):
+    """A skill a technique depends on."""
+
     id: uuid.UUID
     technique_entity_id: uuid.UUID
     source_id: uuid.UUID | None = None
@@ -128,6 +149,8 @@ class WcsTechniqueRequirement(BaseModel):
 
 
 class WcsReference(BaseModel):
+    """A name referenced in a source, with the context it appeared in."""
+
     id: uuid.UUID
     source_id: uuid.UUID
     referenced_name: str = ""

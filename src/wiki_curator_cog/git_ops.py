@@ -55,13 +55,20 @@ class WikiRepo:
 
     @property
     def path(self) -> Path:
+        """The working tree this wrapper operates on."""
         return self._config.wiki_repo_path
 
     @property
     def branch(self) -> str:
+        """The branch the curator commits and pushes to."""
         return self._config.wiki_branch
 
     def current_branch_name(self) -> str:
+        """The name of the branch currently checked out.
+
+        Read from the repository rather than from config, so a caller can
+        tell whether the checkout matches :attr:`branch`.
+        """
         return self._repo.active_branch.name
 
     def has_changes(self) -> bool:
