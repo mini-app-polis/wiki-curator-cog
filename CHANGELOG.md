@@ -1,3 +1,11 @@
+## [1.8.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.8.1...v1.8.2) (2026-09-21)
+
+
+### Bug Fixes
+
+* **deps:** bump anyio to 4.15.1 for CVE-2026-63374, CVE-2026-64847 ([f9664c0](https://github.com/mini-app-polis/wiki-curator-cog/commit/f9664c055b5e602ae13b7f9ea1ce482adb250852))
+* **deps:** bump the python-minor-and-patch group with 4 updates ([5338167](https://github.com/mini-app-polis/wiki-curator-cog/commit/53381674c717c1df8230ed1e6322017727c7cc81))
+
 ## [1.8.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.8.0...v1.8.1) (2026-09-17)
 
 
