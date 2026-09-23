@@ -24,7 +24,7 @@ Drive transcript drop
 │   api-kaianolevine-com                       │
 │   wcs_transcripts + wcs_notes (Postgres)     │
 └──────────┬───────────────────────────────────┘
-           │ GET /v1/wcs/notes/all (read-only, named machine key)
+           │ GET /v1/wcs/wiki/export (read-only)
            ▼
 ┌──────────────────────────┐
 │   wiki-curator-cog        │  (this repo)
@@ -45,7 +45,7 @@ Drive transcript drop
 
 Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 
-- **Layer 1 — deterministic collection.** This cog. Reads `notes_json` from the API and routes its fields onto wiki pages mechanically via three alias maps (`instructors/`, `concepts/`, `techniques/` _aliases.yaml). Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream notes and the same alias maps, the same input always produces the same output.
+- **Layer 1 — deterministic collection.** This cog. Reads the canonical entity graph from the API and routes its fields onto wiki pages mechanically via three alias maps (`instructors/`, `concepts/`, `techniques/` _aliases.yaml). Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream notes and the same alias maps, the same input always produces the same output.
 - **Layer 2 — LLM polish pass.** Operates on Layer 1's output and refines it: prose synthesis where Layer 1 emits a mechanical Overview template, instructor-page `## Background` / `## Teaching themes` / `## Notable framings`, terminology-page creation when vocabulary collapses are ambiguous, lint findings, query answering. Runs after Layer 1 finishes. Its coordination is still to be designed; the Prefect slot this originally named is gone (ADR-004).
 
 This cog implements Layer 1.

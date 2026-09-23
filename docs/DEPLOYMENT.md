@@ -52,8 +52,6 @@ A Railway service backed by this repo, Railpack builder, start command from
   GitPython, which shells out to `git`; without this entry the image lacks the
   binary and the cog crashes **on import**. This is load-bearing and is the
   single reason the cog did not move to Lambda — see ADR-004.
-- `nixpacks.toml` is vestigial: the builder is Railpack. Left in place rather
-  than deleted as part of this change.
 
 ### 3. Environment variables
 
