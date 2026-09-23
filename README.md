@@ -3,7 +3,14 @@
 [![CI](https://github.com/mini-app-polis/wiki-curator-cog/actions/workflows/ci.yml/badge.svg)](https://github.com/mini-app-polis/wiki-curator-cog/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/mini-app-polis/wiki-curator-cog?label=version)](https://github.com/mini-app-polis/wiki-curator-cog/releases)
 
-Prefect pipeline cog that maintains the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base.
+Renders the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base from the canonical WCS corpus in `api-kaianolevine-com`.
+
+> **Parts of this README are stale.** The mode table and the local-run
+> commands below predate ADR-002/ADR-003 (render from canonical entities,
+> flat sources layout) and ADR-004 (one shot on Railway, no Prefect). There
+> is **one mode**, `export`: a full idempotent re-render, run by
+> `python -m wiki_curator_cog.main`. See `docs/PIPELINE.md` and
+> `docs/DEPLOYMENT.md`, which are current.
 
 Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), deterministically routes their content onto concept / technique / instructor / terminology pages in a local clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
 
@@ -12,7 +19,7 @@ Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), de
 | `backfill`      | One-time corpus run: process every existing note in chronological order   | `api-kaianolevine-com` (`/v1/wcs/notes/all`) | `wcs-wiki` repo     |
 | `incremental`   | Process notes added since the last run (steady-state, post-Phase-2)       | `api-kaianolevine-com` (`/v1/wcs/notes/all?since=…`) | `wcs-wiki` repo     |
 
-Triggered by `watcher-cog` downstream of `transcription-cog` completion (incremental), or manually via Prefect UI (backfill).
+Triggered manually. One wake is one run: the process renders once and exits. The direction of travel is a run per source change, asked for by `api-kaianolevine-com`; nothing is built for that yet (ADR-004).
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
@@ -50,7 +57,6 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 - [uv](https://docs.astral.sh/uv/) installed
 - A `.env` file populated from `.env.example`
 - A local clone of `wcs-wiki`
-- An Anthropic API key
 - `WIKI_CURATOR_COG_API_KEY` — this cog's own named key. The API grants it the
   `corpus-reader` and `pipeline-writer` roles; there is no fallback credential.
 
@@ -75,7 +81,7 @@ uv run pytest
 ### Run a backfill locally
 
 ```bash
-uv run python -m wiki_curator_cog.main --mode backfill
+uv run python -m wiki_curator_cog.main export
 ```
 
 ---
@@ -102,6 +108,6 @@ Pipeline-evaluation findings (a fourth signal) are emitted to `pipeline_evaluati
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
-**Single-instance concurrency.** Two concurrent runs against the same wiki repo would race on git operations and inventory consistency. Configure a Prefect concurrency slot of 1.
+**Single-instance concurrency.** Each run is its own process with its own clone, so there is no shared working tree to race on, and Railway will not start the service again while a previous start is `Active`. Two overlapping runs could still race on the push, where git rejects the loser non-fast-forward. The Prefect concurrency slot this used to require is gone (ADR-004).
 
 **Read-only against upstream.** The curator only calls `GET` endpoints for note content. The only `POST` is to `/v1/evaluations` for pipeline-evaluation findings.

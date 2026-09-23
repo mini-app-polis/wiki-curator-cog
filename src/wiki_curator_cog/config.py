@@ -9,26 +9,24 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from mini_app_polis.environment import env_var
-
-LLMProvider = Literal["anthropic", "openai"]
-
-_DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "gpt-4.1-mini",
-}
 
 _DEFAULT_WIKI_REPO_URL = "https://github.com/mini-app-polis/wcs-wiki.git"
 _DEFAULT_WIKI_REPO_PATH = "/tmp/wcs-wiki"
 
-
-def _require(name: str) -> str:
-    v = os.getenv(name)
-    if not v:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return v
+#: How long one export may take before :mod:`._deadline` stops it.
+#:
+#: Declared rather than discovered: there is no runtime clock to read on
+#: Railway. It exists because a run that never ends blocks every later
+#: start silently — see ``_deadline`` for why that is the failure worth
+#: guarding.
+#:
+#: 600s against a measured run: the 2026-09-23 run reached the push in 15
+#: seconds — a 3s clone, a 6s export GET, a 1s render. That is a 40x margin,
+#: which leaves room for a full-corpus push on a slow day and still fails
+#: fast enough to be a signal rather than an afternoon.
+_DEFAULT_RUN_TIMEOUT_SECONDS = 600
 
 
 def _require_api_base_url() -> str:
@@ -42,12 +40,22 @@ def _require_api_base_url() -> str:
     return v
 
 
+def _run_timeout_seconds() -> int:
+    raw = os.getenv("RUN_TIMEOUT_SECONDS", "").strip()
+    if not raw:
+        return _DEFAULT_RUN_TIMEOUT_SECONDS
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"RUN_TIMEOUT_SECONDS must be an integer number of seconds, got {raw!r}"
+        ) from exc
+
+
 @dataclass(frozen=True)
 class Config:
     """Runtime configuration for the wiki renderer."""
 
-    llm_provider: LLMProvider
-    llm_model: str
     kaiano_api_base_url: str
     wiki_repo_path: Path
     wiki_repo_url: str
@@ -59,11 +67,7 @@ class Config:
     healthchecks_url: str
     sentry_dsn: str
     logging_level: str
-
-    @property
-    def default_models(self) -> dict[str, str]:
-        """The default model name for each LLM role, as a mapping."""
-        return _DEFAULT_MODELS
+    run_timeout_seconds: int
 
     @property
     def wiki_repo_is_https(self) -> bool:
@@ -73,15 +77,6 @@ class Config:
 
 def load_config() -> Config:
     """Load and validate environment variables into a Config instance."""
-    provider_raw = os.getenv("LLM_PROVIDER", "anthropic").lower().strip()
-    if provider_raw not in ("anthropic", "openai"):
-        raise RuntimeError(
-            f"Unsupported LLM_PROVIDER: {provider_raw!r}. "
-            "Must be 'anthropic' or 'openai'."
-        )
-    provider: LLMProvider = provider_raw  # type: ignore[assignment]
-    model = os.getenv("LLM_MODEL", _DEFAULT_MODELS[provider])
-
     wiki_repo_path_raw = os.getenv("WIKI_REPO_PATH", _DEFAULT_WIKI_REPO_PATH)
     wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
     wiki_repo_url = os.getenv("WIKI_REPO_URL", _DEFAULT_WIKI_REPO_URL).strip()
@@ -97,8 +92,6 @@ def load_config() -> Config:
         )
 
     return Config(
-        llm_provider=provider,
-        llm_model=model,
         kaiano_api_base_url=_require_api_base_url(),
         wiki_repo_path=wiki_repo_path,
         wiki_repo_url=wiki_repo_url,
@@ -110,8 +103,16 @@ def load_config() -> Config:
         ),
         gh_token=gh_token,
         healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),
+        # SENTRY_DSN_WIKI_CURATOR_COG, not the fleet-wide SENTRY_DSN. The
+        # cogs that moved to Lambda each got a function of their own, so a
+        # bare name there addresses exactly one cog. This one is still a
+        # Railway service sharing a secrets store with its neighbours, where
+        # an unsuffixed name is the same name they read — and the failure is
+        # silent: events land in another cog's Sentry project and this one
+        # simply looks healthy. The suffix is what keeps them apart.
         sentry_dsn=os.getenv("SENTRY_DSN_WIKI_CURATOR_COG", ""),
         logging_level=os.getenv("LOGGING_LEVEL", "INFO"),
+        run_timeout_seconds=_run_timeout_seconds(),
     )
 
 

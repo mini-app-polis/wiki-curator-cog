@@ -1,15 +1,25 @@
-"""The cog reports its own run outcome as a notification.
+"""One run, one report — however the run ends.
 
 Findings this cog posts through :mod:`wiki_curator_cog.api_client` are
 graded results and stay rows. This is the separate question of whether
 the export itself ran, which is not a finding and is not persisted.
+
+The reporting used to live in ``main.wiki_curator_router`` and only
+covered the success path; a crash was reported by a Prefect state hook.
+With Prefect gone the report is the only channel, so these tests care as
+much about the failure path as the happy one.
 """
 
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
-import wiki_curator_cog.main as main
+import pytest
+
+import wiki_curator_cog.flow as flow
+from wiki_curator_cog._deadline import RunOutOfTime
 
 
 def _summary(
@@ -20,7 +30,7 @@ def _summary(
     source_pages: int | None = None,
     dropped: list[tuple[str, str]] | None = None,
 ) -> dict:
-    out = {
+    return {
         "entities": 12,
         "sources": sources,
         "instructors": 2,
@@ -31,49 +41,129 @@ def _summary(
         "source_pages": sources if source_pages is None else source_pages,
         "dropped": [] if dropped is None else dropped,
     }
-    return out
 
 
-def test_export_that_changed_the_wiki_is_notable() -> None:
+def _config(budget: int = 0) -> SimpleNamespace:
+    """A config stub. Budget 0 disables the deadline, which suits a test."""
+    return SimpleNamespace(run_timeout_seconds=budget)
+
+
+def _run(summary_or_exc, *, budget: int = 0):
+    """Run export_run with _export stubbed.
+
+    Returns the patched ``send`` (the success channel) and
+    ``post_run_finding`` (the failure channel) so a test can assert that
+    exactly one of them fired.
+    """
+    kwargs = (
+        {"side_effect": summary_or_exc}
+        if isinstance(summary_or_exc, BaseException)
+        else {"return_value": summary_or_exc}
+    )
     with (
-        patch.object(main, "export_flow", return_value=_summary(written=4)),
-        patch.object(main.RunReport, "send", autospec=True) as send,
+        patch.object(flow, "load_config", return_value=_config(budget)),
+        patch.object(flow, "_export", **kwargs),
+        patch.object(flow.RunReport, "send", autospec=True) as send,
+        patch.object(flow, "post_run_finding") as finding,
     ):
-        result = main.wiki_curator_router.fn()
+        try:
+            result = flow.export_run(run_id="run-1")
+        except BaseException as exc:  # noqa: BLE001 — the test inspects it
+            return send, finding, None, exc
+    return send, finding, result, None
 
+
+# ── exactly one message, on exactly one channel ─────────────────────────
+
+
+def test_a_successful_run_sends_one_report() -> None:
+    send, finding, result, exc = _run(_summary(written=4))
+
+    assert exc is None
     assert result["paths_written"] == 4
     send.assert_called_once()
+    finding.assert_not_called()
     report = send.call_args.args[0]
     assert report.repo == "wiki-curator-cog"
+    assert report.run_id == "run-1"
     assert report.severity == "SUCCESS"
     assert report.processed == 4
-    # Notability is no longer hand-set: four pages moved, so the run has
-    # four outcomes, and the library sends a SUCCESS that has any.
+
+
+def test_a_failed_run_reports_error_and_re_raises() -> None:
+    """PIPE-021, and the severity the Prefect hook used to carry.
+
+    run_report() would have sent WARN here — its severity is derived, and a
+    report has no verb for ERROR. A run that died on a rejected push must
+    not read like one that dropped a dangling reference.
+    """
+    send, finding, _, exc = _run(RuntimeError("push rejected"))
+
+    assert isinstance(exc, RuntimeError)
+    finding.assert_called_once()
+    # ...and the report is NOT also sent. One run, one message.
+    send.assert_not_called()
+
+    args, kwargs = finding.call_args
+    assert args[1] == "ERROR"
+    assert kwargs["repo"] == "wiki-curator-cog"
+    assert kwargs["run_id"] == "run-1"
+    assert "RuntimeError" in kwargs["text"]
+
+
+def test_a_run_that_outlives_its_budget_is_reported_not_hung() -> None:
+    """The deadline failure travels the ordinary path, so Railway is freed."""
+    send, finding, _, exc = _run(RunOutOfTime("stopped early"))
+
+    assert isinstance(exc, RunOutOfTime)
+    finding.assert_called_once()
+    send.assert_not_called()
+    assert finding.call_args.args[1] == "ERROR"
+
+
+def test_a_run_killed_by_sigterm_still_says_what_it_did() -> None:
+    """BaseException, not Exception — a deploy mid-render still reports."""
+    send, finding, _, exc = _run(KeyboardInterrupt())
+
+    assert isinstance(exc, KeyboardInterrupt)
+    finding.assert_called_once()
+    send.assert_not_called()
+
+
+def test_the_report_carries_the_run_id_it_was_given() -> None:
+    """The library's fallback resolves Prefect ids and answers 'local-run'."""
+    send, _, _, _ = _run(_summary(written=1))
+    assert send.call_args.args[0].run_id == "run-1"
+
+
+def test_the_report_says_how_long_the_export_took() -> None:
+    send, _, _, _ = _run(_summary(written=1))
+    assert send.call_args.args[0].text().startswith("Run complete in ")
+
+
+# ── what one summary becomes on the report ──────────────────────────────
+
+
+def _recorded(summary: dict) -> flow.RunReport:
+    report = flow.RunReport(flow_name=flow.FLOW_NAME, repo=flow.REPO, run_id="r")
+    flow.record_summary(report, summary)
+    return report
+
+
+def test_pages_written_become_named_outcomes() -> None:
+    report = _recorded(_summary(written=4))
+    assert report.processed == 4
     assert len(report.outcomes) == 4
     assert "+ wiki page: entities/e0.md" in report.text()
 
 
-def test_export_that_changed_nothing_is_not_notable() -> None:
+def test_an_export_that_changed_nothing_records_no_outcome() -> None:
     """Re-rendering the same bundle is the steady state, not news."""
-    with (
-        patch.object(main, "export_flow", return_value=_summary()),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    report = send.call_args.args[0]
-    assert report.outcomes == []
-    assert not send.call_args.kwargs.get("notable")
+    assert _recorded(_summary()).outcomes == []
 
 
 def test_removals_alone_count_as_a_change() -> None:
-    with (
-        patch.object(main, "export_flow", return_value=_summary(removed=2)),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    report = send.call_args.args[0]
+    report = _recorded(_summary(removed=2))
     assert len(report.outcomes) == 2
     assert "- wiki page: sources/s0.md" in report.text()
 
@@ -82,75 +172,42 @@ def test_a_summary_without_paths_still_says_the_wiki_changed() -> None:
     """An older export shape reports counts and no paths."""
     summary = _summary(written=3)
     del summary["written_paths"]
-    with (
-        patch.object(main, "export_flow", return_value=summary),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    report = send.call_args.args[0]
+    report = _recorded(summary)
     assert len(report.outcomes) == 3
     assert "+ wiki page x3" in report.text()
 
 
-def test_the_report_says_how_long_the_export_took() -> None:
-    with (
-        patch.object(main, "export_flow", return_value=_summary(written=1)),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    assert send.call_args.args[0].text().startswith("Run complete in ")
-
-
-def test_a_clean_export_still_reports_success() -> None:
-    """No drops, no collisions — severity unchanged from today."""
-    with (
-        patch.object(main, "export_flow", return_value=_summary(written=1)),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    report = send.call_args.args[0]
-    assert report.severity == "SUCCESS"
-    assert not report.issues
-
-
 def test_dropped_items_make_the_run_warn() -> None:
-    dropped = [("missing_entity", "relation abc from")]
-    with (
-        patch.object(
-            main,
-            "export_flow",
-            return_value=_summary(written=1, dropped=dropped),
-        ),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
-
-    report = send.call_args.args[0]
+    report = _recorded(_summary(written=1, dropped=[("missing_entity", "rel abc")]))
     assert report.severity == "WARN"
     assert report.issues["missing_entity"] == 1
 
 
-def test_source_pages_counted_when_they_differ_from_sources() -> None:
-    with (
-        patch.object(
-            main,
-            "export_flow",
-            return_value=_summary(written=1, sources=2, source_pages=1),
-        ),
-        patch.object(main.RunReport, "send", autospec=True) as send,
-    ):
-        main.wiki_curator_router.fn()
+def test_a_clean_export_still_reports_success() -> None:
+    report = _recorded(_summary(written=1))
+    assert report.severity == "SUCCESS"
+    assert not report.issues
 
-    report = send.call_args.args[0]
+
+def test_source_pages_counted_only_when_they_differ_from_sources() -> None:
+    report = _recorded(_summary(written=1, sources=2, source_pages=1))
     assert report.counters["sources"] == 2
     assert report.counters["source_pages"] == 1
 
+    assert "source_pages" not in _recorded(_summary(written=1)).counters
 
-def test_flow_declares_failure_hooks() -> None:
-    """A crash must reach the channel even though nothing else reports it."""
-    flow = main.wiki_curator_router
-    assert flow.on_failure_hooks
-    assert flow.on_crashed_hooks
+
+# ── the concurrency slot is gone on purpose ─────────────────────────────
+
+
+def test_the_export_holds_no_prefect_machinery() -> None:
+    """The slot guarded one shared working tree; each run now has its own."""
+    assert not hasattr(flow, "concurrency")
+    assert not hasattr(flow, "get_run_logger")
+    # Importing the cog must not drag Prefect in behind it.
+    assert not any(m == "prefect" or m.startswith("prefect.") for m in sys.modules)
+
+
+@pytest.mark.parametrize("attr", ["export_flow", "wiki_curator_router"])
+def test_the_prefect_era_entrypoints_are_gone(attr: str) -> None:
+    assert not hasattr(flow, attr)

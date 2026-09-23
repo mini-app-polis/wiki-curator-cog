@@ -50,7 +50,7 @@ The following pieces of the current codebase are reusable in the renderer:
 - **`markdown_utils.py`** — markdown parser/serializer with frontmatter and section helpers. Preserved; the renderer uses it to emit markdown.
 - **`config.py`** — config loading, with adjustments (no `curator_version`, no `state_path`, simpler).
 - **`main.py`** — entrypoint pattern; simplified to one production flow (`export`) plus the existing `regenerate-views` utility (which becomes redundant once `export` itself regenerates views every time).
-- **The Prefect deployment shape and concurrency slot.** A single-instance flow that exports the wiki, scheduled or triggered on demand.
+- ~~**The Prefect deployment shape and concurrency slot.** A single-instance flow that exports the wiki, scheduled or triggered on demand.~~ **Superseded by ADR-004** — Prefect is gone. One wake is one one-shot process on Railway; the slot is removed rather than replaced.
 
 ### What goes away
 

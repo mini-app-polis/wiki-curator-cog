@@ -1,19 +1,17 @@
 [project]
 name = "wiki-curator-cog"
 dynamic = ["version"]
-description = "Prefect pipeline cog. Reads structured WCS notes from api-kaianolevine-com and maintains the wcs-wiki markdown knowledge base."
+description = "Renders the wcs-wiki markdown knowledge base from the canonical WCS corpus in api-kaianolevine-com. One run per wake; no resident process."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "miniapppolis-common-utils[llm]>=5.9.0,<6",
-    "prefect>=3.0.0,<4.0.0",
+    "miniapppolis-common-utils>=5.11.0,<6",
     "pydantic>=2.0.0,<3.0.0",
     "pydantic-settings>=2.4.0,<3.0.0",
     "python-dotenv>=1.0.1,<2.0.0",
     "sentry-sdk>=2.0.0,<3.0.0",
     "pyyaml>=6.0,<7.0",
     "gitpython>=3.1,<4.0",
-    "anthropic>=0.40",
     "httpx>=0.27",
 ]
 
