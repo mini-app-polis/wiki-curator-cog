@@ -115,3 +115,49 @@ def test_push_uses_explicit_refspec_and_sets_upstream(tmp_path: Path) -> None:
         refspec="phase-1-backfill:phase-1-backfill",
         set_upstream=True,
     )
+
+
+# ── staged_changes: what the next commit would contain ──────────────────
+
+
+def _repo_reporting(tmp_path: Path, name_status: str) -> WikiRepo:
+    """A WikiRepo whose `git diff --cached --name-status HEAD` is canned."""
+    mock_repo = MagicMock()
+    mock_repo.git.diff.return_value = name_status
+    with patch.object(git_ops, "Repo", return_value=mock_repo):
+        return WikiRepo(_make_config(tmp_path))
+
+
+def test_staged_changes_groups_by_what_happened(tmp_path: Path) -> None:
+    repo = _repo_reporting(
+        tmp_path,
+        "M\tconcepts/anchor.md\nA\tconcepts/new.md\nD\tconcepts/gone.md\n",
+    )
+    assert repo.staged_changes() == {
+        "added": ["concepts/new.md"],
+        "modified": ["concepts/anchor.md"],
+        "removed": ["concepts/gone.md"],
+    }
+
+
+def test_staged_changes_is_empty_when_the_rebuild_was_identical(
+    tmp_path: Path,
+) -> None:
+    """The case the whole method exists for."""
+    repo = _repo_reporting(tmp_path, "")
+    assert repo.staged_changes() == {"added": [], "modified": [], "removed": []}
+
+
+def test_staged_changes_splits_a_rename_into_both_halves(tmp_path: Path) -> None:
+    """A slug change is a page gone and a page arrived; say both."""
+    repo = _repo_reporting(tmp_path, "R100\tsources/old-slug.md\tsources/new-slug.md\n")
+    changes = repo.staged_changes()
+    assert changes["removed"] == ["sources/old-slug.md"]
+    assert changes["added"] == ["sources/new-slug.md"]
+
+
+def test_staged_changes_asks_git_rather_than_the_index_diff(tmp_path: Path) -> None:
+    """--name-status against HEAD; GitPython's index.diff reverses A and D."""
+    repo = _repo_reporting(tmp_path, "")
+    repo.staged_changes()
+    repo._repo.git.diff.assert_called_once_with("--cached", "--name-status", "HEAD")

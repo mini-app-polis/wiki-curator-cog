@@ -99,6 +99,45 @@ class WikiRepo:
             # disk; we just need git to record the deletion.
             self._repo.index.remove(rel, working_tree=False)
 
+    #: ``git diff --name-status`` codes, mapped onto what happened.
+    _STATUS: dict[str, str] = {"A": "added", "M": "modified", "D": "removed"}
+
+    def staged_changes(self) -> dict[str, list[str]]:
+        """What the next commit would contain, grouped by what happened.
+
+        Asked of git rather than inferred from what the render wrote, and
+        that distinction is the whole point. ``_write_bundle`` rewrites
+        every page on every run whether or not a byte differs, so "pages
+        written" is a constant — 2505 of them at the time of writing — and
+        says nothing about whether the wiki changed. A run report built on
+        it announces 2505 created pages every time, including for a
+        rebuild that produced a byte-identical tree.
+
+        ``git diff --cached --name-status HEAD`` rather than GitPython's
+        ``index.diff("HEAD")``: that compares the index to HEAD in that
+        order, so additions are reported as deletions and vice versa, and
+        a report that swaps those is worse than no report.
+
+        A rename is recorded as both halves — a page gone and a page
+        arrived — because for a wiki that is what a slug change is, and
+        naming only the new one hides a dead link.
+        """
+        raw = str(self._repo.git.diff("--cached", "--name-status", "HEAD"))
+        out: dict[str, list[str]] = {"added": [], "modified": [], "removed": []}
+        for line in raw.splitlines():
+            if not line.strip():
+                continue
+            fields = line.split("\t")
+            code = fields[0][:1]
+            if code in ("R", "C") and len(fields) >= 3:
+                out["removed"].append(fields[1])
+                out["added"].append(fields[2])
+                continue
+            key = self._STATUS.get(code)
+            if key:
+                out[key].append(fields[-1])
+        return out
+
     def commit(self, message: str) -> str:
         """Create a commit. Returns the new commit hex."""
         commit = self._repo.index.commit(

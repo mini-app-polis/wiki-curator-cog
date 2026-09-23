@@ -27,7 +27,7 @@ jobs:
     with:
       # TEST-006: coverage measured on every run, reported in the terminal.
       pytest-args: "--cov=wiki_curator_cog --cov-report=term-missing"
-      # TEST-012: [tool.mypy] is declared, so it runs here. It did not
+      # TEST-012: every Python repo typechecks in CI, against its [tool.mypy]. It did not
       # before, which is how a union-attr error in boot.py sat unnoticed.
       typecheck: "uv run mypy src/"
       # No terraform-dir: this cog owns no infra/. See ADR-004.
