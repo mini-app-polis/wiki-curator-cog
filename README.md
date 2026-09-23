@@ -5,19 +5,14 @@
 
 Renders the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base from the canonical WCS corpus in `api-kaianolevine-com`.
 
-> **Parts of this README are stale.** The mode table and the local-run
-> commands below predate ADR-002/ADR-003 (render from canonical entities,
-> flat sources layout) and ADR-004 (one shot on Railway, no Prefect). There
-> is **one mode**, `export`: a full idempotent re-render, run by
-> `python -m wiki_curator_cog.main`. See `docs/PIPELINE.md` and
-> `docs/DEPLOYMENT.md`, which are current.
+Reads the canonical WCS entity graph from `api-kaianolevine-com` in one call (`GET /v1/wcs/wiki/export`, read-only), deterministically renders it onto source / concept / technique / instructor / terminology pages and views in a clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
 
-Reads structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only), deterministically routes their content onto concept / technique / instructor / terminology pages in a local clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
-
-| Mode (`mode=…`) | What it does                                                              | Source                         | Sink                |
-| --------------- | ------------------------------------------------------------------------- | ------------------------------ | ------------------- |
-| `backfill`      | One-time corpus run: process every existing note in chronological order   | `api-kaianolevine-com` (`/v1/wcs/notes/all`) | `wcs-wiki` repo     |
-| `incremental`   | Process notes added since the last run (steady-state, post-Phase-2)       | `api-kaianolevine-com` (`/v1/wcs/notes/all?since=…`) | `wcs-wiki` repo     |
+**One mode, `export`.** A run takes no arguments: it fetches the whole corpus,
+re-renders every page from it, removes derived pages that are no longer
+produced, commits what changed and pushes. Running it twice over unchanged
+upstream data produces the same bundle and the second run commits nothing —
+which is why the trigger is allowed to be crude. The three-mode split this
+README used to document was retired by ADR-002 and ADR-004.
 
 Triggered manually. One wake is one run: the process renders once and exits. The direction of travel is a run per source change, asked for by `api-kaianolevine-com`; nothing is built for that yet (ADR-004).
 
@@ -78,7 +73,7 @@ cp .env.example .env
 uv run pytest
 ```
 
-### Run a backfill locally
+### Run an export locally
 
 ```bash
 uv run python -m wiki_curator_cog.main export
@@ -88,13 +83,18 @@ uv run python -m wiki_curator_cog.main export
 
 ## Observability
 
-Three layers, matching ecosystem convention:
+Four layers, matching ecosystem convention:
 
-1. **Healthchecks.io** — pinged on startup (liveness signal).
+1. **Healthchecks.io** — `/start` at the beginning of a run, then success or
+   `/fail` at the end. Per run rather than on boot: a boot ping went green
+   whether or not the export then hung for an hour, and the check's grace
+   period is what catches a run that never came back at all.
 2. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`.
-3. **Sentry** — unhandled exceptions and warnings on schema-violation findings.
+3. **Sentry** — the unhandled exception that ends a run.
+4. **Run report** — one per run, sent however it ends: SUCCESS or WARN out of a
+   good run, ERROR out of a failed one.
 
-Pipeline-evaluation findings (a fourth signal) are emitted to `pipeline_evaluations` per-run, surfaced in the existing pipeline-evaluations UI on `website-astro-software`.
+Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surfaced in the existing pipeline-evaluations UI on `website-astro-software`.
 
 ---
 
@@ -104,7 +104,7 @@ Pipeline-evaluation findings (a fourth signal) are emitted to `pipeline_evaluati
 
 **Deterministic by design.** No LLM calls at runtime. Given the same upstream notes_json and the same alias maps, the same input produces the same output. The only LLM step in the pipeline is upstream in `notes-ingest-cog`.
 
-**Idempotency.** In incremental mode, ingesting the same `note_id` at the same curator version is a no-op. Backfill mode bypasses this — it wipes the derived layer (concepts, techniques, instructors, terminology) at start of run and rebuilds from scratch so behavior changes to the curator produce a clean result.
+**Idempotency.** The render is a pure function of the export it fetched: every page is rewritten each run, derived pages no longer produced are removed, and an unchanged corpus yields an unchanged tree with nothing to commit. There is no per-item skip to get wrong, which is what lets a redundant run cost time rather than correctness.
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
