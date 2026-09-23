@@ -25,6 +25,7 @@ def _config(**overrides: object) -> SimpleNamespace:
         "wiki_repo_url": "https://github.com/mini-app-polis/wcs-wiki.git",
         "gh_token": "ghp_notreal",
         "wiki_branch": "main",
+        "push_preflight_timeout_seconds": 10.0,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -79,3 +80,11 @@ def test_an_ssh_remote_is_skipped() -> None:
         )
     )
     assert not route.called
+
+
+@respx.mock
+def test_the_probe_timeout_comes_from_config() -> None:
+    """TEST-013: a test can zero it without touching source."""
+    route = respx.get(_REFS).mock(return_value=httpx.Response(200))
+    assert_push_access(_config(push_preflight_timeout_seconds=0.5))
+    assert route.calls[0].request.extensions["timeout"]["connect"] == 0.5

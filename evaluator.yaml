@@ -8,73 +8,104 @@ type: pipeline-cog
 # no infra/ — see docs/decisions/ADR-004-one-shot-on-railway-no-prefect.md for
 # why, and for the Lambda fit check that failed before any of it was decided.
 #
-# These are DEFERRALS, not exemptions, and the distinction is the point. An
-# exemption claims a rule should not apply to this repo. That claim cannot be
-# made yet: ADR-002's own test — the same exemption carried for the same
-# structural reason — says the taxonomy is what has fallen behind, and the
-# Layer 2 polish pass will be the second thing of this shape. Until that
-# decision is taken these say "not satisfied, and known", which is what a
-# deferral is for.
+# The AWS-shaped rules below are exemptions, not deferrals. A deferral says
+# "unmet, and known"; these are not unmet. There is no queue to give a
+# dead-letter target, no function whose memory to declare, no mapping to bound.
+# The rules describe a runtime this cog does not have.
+#
+# Six exemptions for one structural reason is, by ADR-002's own test, the
+# signal that the taxonomy has fallen behind rather than that the cog has. The
+# Layer 2 polish pass described in ADR-001 will be the second thing shaped like
+# this — a periodic whole-corpus rebuild with no per-item work. This file is
+# the evidence for that conversation, not a way of avoiding it.
 
-deferrals:
+deferrals: []
+
+exemptions:
   - rule: PIPE-016
     reason: >
       Requires infra/ declaring a queue, a function and an event source
-      mapping. This cog has none of the three. A run takes no arguments —
-      the export is a full idempotent re-render of the whole corpus — so
-      every queue message would be identical and a consumer would collapse
-      them into one run. Prefect is gone, which is the half of PIPE-016 that
-      is satisfied. Blocked on the taxonomy decision in ADR-004.
-    until: null
+      mapping. There is no queue because a run takes no arguments: the export
+      is a full idempotent re-render of the whole corpus, so every message
+      would be identical and a consumer would collapse N of them into one
+      run. In the other cogs a message names a distinct unit of work — a
+      drive_file_id, a repo — and there is no such unit here. The half of
+      PIPE-016 that is about Prefect is satisfied outright: the dependency is
+      gone.
 
   - rule: PIPE-017
     reason: >
       Per-record failure reporting, a dead-letter queue and a visibility
-      timeout longer than the function timeout. There are no records: one
-      wake is one run of one mode. What the rule is protecting — a failure
-      that nobody hears about — is covered instead by run_report (one run,
-      one report, sent on the way out of a failure) and by the Healthchecks
-      grace period. Blocked on the taxonomy decision in ADR-004.
-    until: null
+      timeout longer than the function timeout. There are no records — one
+      wake is one run of one mode. What the rule protects against, a failure
+      nobody hears about, is covered by run reporting (one run, one message,
+      sent on the way out of a failure at ERROR) and by the Healthchecks
+      grace period, which catches a run that never came back at all.
 
   - rule: PIPE-018
     reason: >
       A concurrency ceiling declared in infra/. There is no infra/ and no
-      reservation to declare. Serialisation comes from the shape instead:
-      one wake is one process with its own clone, and Railway will not start
-      the service again while a previous start is Active. Two overlapping
-      runs could still race on the push, where git rejects the loser
-      non-fast-forward. Blocked on the taxonomy decision in ADR-004.
-    until: null
+      reservation to declare. Serialisation comes from the shape instead: one
+      wake is one process with its own clone, and Railway will not start the
+      service again while a previous start is Active. Two overlapping runs
+      could still race on the push, where git rejects the loser
+      non-fast-forward and it fails visibly.
 
   - rule: PIPE-020
     reason: >
-      The check looks for get_remaining_time_in_millis in production source.
-      There is no Lambda context to read it from. The rule's concern — a run
-      killed by its ceiling with no report — is met by
-      src/wiki_curator_cog/_deadline.py, which raises inside the run a margin
-      before a declared budget (RUN_TIMEOUT_SECONDS) so the report is sent
-      and main exits non-zero. That budget matters more here than on Lambda:
-      Railway silently skips every later start while one is still Active.
-      Wants a non-Lambda branch in the rule.
-    until: null
+      The only one of these where the rule's concern applies and it is the
+      check that does not fit. A run here does stop before its ceiling and
+      does say so — src/wiki_curator_cog/_deadline.py raises inside the run a
+      margin before RUN_TIMEOUT_SECONDS, so the report is sent and main exits
+      non-zero. The check looks for get_remaining_time_in_millis, which reads
+      Lambda's own clock; there is no runtime clock on Railway, so the budget
+      is declared instead. It matters more here than on Lambda: Railway
+      silently skips every later start while one is still Active, so a run
+      that hangs takes all its successors with it. Worth a non-Lambda branch
+      in the rule rather than an exemption per cog.
 
   - rule: CD-010
     reason: >
       ADR-009 makes a pipeline cog's liveness layer a dead-letter-queue alarm
-      with an action. There is no queue. Liveness is Healthchecks.io instead,
-      pinged /start and then success or /fail per run, so the check's grace
-      period catches a run that never came back — which is the failure a
-      process cannot report on its own behalf. Sentry covers the unhandled
-      exception. Blocked on the taxonomy decision in ADR-004.
-    until: null
+      with an action. There is no queue to alarm on. Liveness is
+      Healthchecks.io instead — pinged /start and then success or /fail per
+      run, so the check's grace period catches the one failure a process
+      cannot report on its own behalf. Sentry covers the unhandled exception,
+      and the run report covers everything the process lived long enough to
+      say.
 
   - rule: CD-024
     reason: >
       Reads a pipeline cog's infra/ Terraform — memory_size and timeout — as
-      its platform descriptor. There is no infra/. The equivalent declarations
-      live in railway.json (startCommand, restartPolicyType: NEVER) and in
-      RUN_TIMEOUT_SECONDS. Blocked on the taxonomy decision in ADR-004.
-    until: null
+      its platform descriptor. There is no infra/. The equivalent
+      declarations are railway.json (startCommand, restartPolicyType: NEVER)
+      and RUN_TIMEOUT_SECONDS, which is the ceiling a run is actually stopped
+      against.
 
-exemptions: []
+  # ── Not about the runtime: these two describe a file-processing cog ──
+
+  - rule: PY-012
+    reason: >
+      FAILED_ prefixing renames an input file that failed processing so it
+      stays visible in the source folder. This cog has no input files. Its
+      input is one HTTP response — GET /v1/wcs/wiki/export, the canonical
+      entity graph — and its output is markdown in a git repo. There is
+      nothing in a source folder to rename, and a run that fails leaves the
+      upstream untouched by construction. Its visibility mechanism is the run
+      report and a non-zero exit, not a renamed file.
+
+  - rule: PY-013
+    reason: >
+      Taken from the rule's own exemption path: a cog whose inputs cannot
+      contain duplicates by construction declares that here with a reason
+      naming why.
+
+      One run reads one document — the whole corpus in a single call — and
+      re-renders every page from it deterministically. There is no stream of
+      arriving items to see twice, so there is nothing to deduplicate. Two
+      runs over unchanged upstream data produce byte-identical output and the
+      second commits nothing; the render is a pure function of its input,
+      which is what makes the trigger allowed to be crude. Duplicate
+      suppression that does matter — one source row per extraction — is
+      upstream in api-kaianolevine-com, enforced by a unique index
+      (PIPE-002, migration 030), not here.

@@ -18,24 +18,19 @@ jobs:
       language: python
       package-manager: uv
 
+  # Lock check, lint, format, coverage and typecheck, from the shared
+  # workflow so every cog's `test` stage is the same stage (CD-026). It is
+  # the union of what the cogs ran inline, so adopting it loses nothing —
+  # the CD-020 lock check this job used to spell out is in there.
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      # CD-020. `uv sync` without --locked silently re-resolves when the
-      # lockfile and pyproject.toml disagree, so a stale lock passes CI and
-      # then fails the deploy, where `uv sync --locked` refuses the drift.
-      # Checked here because this is where the failure is cheap to fix.
-      - name: Verify the lockfile matches pyproject
-        run: uv lock --check
-
-      - run: uv sync --all-extras
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
-      - run: uv run pytest
+    uses: mini-app-polis/.github/.github/workflows/python-test.yml@v3
+    with:
+      # TEST-006: coverage measured on every run, reported in the terminal.
+      pytest-args: "--cov=wiki_curator_cog --cov-report=term-missing"
+      # TEST-012: [tool.mypy] is declared, so it runs here. It did not
+      # before, which is how a union-attr error in boot.py sat unnoticed.
+      typecheck: "uv run mypy src/"
+      # No terraform-dir: this cog owns no infra/. See ADR-004.
 
   release:
     name: Release
