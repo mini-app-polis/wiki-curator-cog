@@ -49,7 +49,6 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
-from typing import Any
 
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
@@ -125,11 +124,16 @@ def _export(config: Config) -> dict:
     if written:
         wiki_repo.stage(written)
 
+    # After staging and before committing: this is the only moment the
+    # index holds the whole changeset and HEAD still holds the old one.
+    changes = wiki_repo.staged_changes()
+
     commit_msg = (
         f"render: {rendered_at.isoformat()} "
         f"({stats.entity_count} entities, {stats.source_count} sources)"
     )
-    if wiki_repo.has_changes():
+    committed = wiki_repo.has_changes()
+    if committed:
         wiki_repo.commit(commit_msg)
 
     wiki_repo.push()
@@ -138,12 +142,14 @@ def _export(config: Config) -> dict:
         "entities": stats.entity_count,
         "sources": stats.source_count,
         "instructors": stats.instructor_count,
-        "paths_written": len(written),
-        "paths_removed": len(stale),
-        # The paths themselves, not only how many. The run report names
-        # what moved; a count is not something anyone can go and look at.
-        "written_paths": [str(p) for p in written],
-        "removed_paths": [str(p) for p in stale],
+        # How much was rendered, and separately what that actually changed.
+        # The first is very nearly a constant — every page is rewritten
+        # every run — so only the second says whether the wiki moved.
+        "pages_rendered": len(written),
+        "added": changes["added"],
+        "modified": changes["modified"],
+        "removed": changes["removed"],
+        "committed": committed,
         # Pages actually in the bundle, which is not the same as
         # len(export.sources) once two sources collide on a slug.
         "source_pages": sum(1 for p in bundle if p.startswith("sources/")),
@@ -153,39 +159,41 @@ def _export(config: Config) -> dict:
     return summary
 
 
-def _record_pages(record: Any, summary: dict, paths_key: str, count_key: str) -> None:
-    """Record one page outcome per path, or an unnamed one per count."""
-    paths = summary.get(paths_key)
-    if paths:
-        for path in paths:
-            record("wiki page", str(path))
-        return
-    for _ in range(int(summary.get(count_key, 0) or 0)):
-        record("wiki page")
-
-
 def record_summary(report: RunReport, summary: dict) -> None:
     """Translate one export summary onto the run report.
 
-    Severity is derived, never asserted: any dangling reference, colliding
-    slug or unresolved instructor makes the run WARN, which is what this
-    module means by "results worth a human look".
+    Outcomes are what git recorded, not what the renderer wrote. A page
+    that was rewritten with identical bytes is not an outcome, and the
+    run that rewrote 2505 of them and changed none has nothing to
+    announce — which is what makes a SUCCESS worth staying quiet about.
+    The work done is still visible, as the ``rendered`` counter.
+
+    Severity is derived, never asserted: any dangling reference,
+    colliding slug or unresolved instructor makes the run WARN, which is
+    what this module means by "results worth a human look".
     """
-    report.ok(int(summary.get("paths_written", 0)))
+    added = list(summary.get("added", []))
+    modified = list(summary.get("modified", []))
+    removed = list(summary.get("removed", []))
+
+    report.ok(len(added) + len(modified) + len(removed))
     for reason, ref in summary.get("dropped", []):
         report.issue(str(reason), str(ref))
-    report.count("removed", summary.get("paths_removed", 0))
+
+    report.count("rendered", summary.get("pages_rendered", 0))
     report.count("entities", summary.get("entities", 0))
     report.count("sources", summary.get("sources", 0))
     source_pages = summary.get("source_pages")
     if source_pages is not None and source_pages != summary.get("sources"):
         report.count("source_pages", source_pages)
 
-    # Which pages moved, not only how many. Falls back to unnamed outcomes
-    # when the export reports counts without paths, so an older summary
-    # shape still says that the wiki changed.
-    _record_pages(report.created, summary, "written_paths", "paths_written")
-    _record_pages(report.removed, summary, "removed_paths", "paths_removed")
+    # Which pages moved, and how — a rewrite is an update, not a creation.
+    for path in added:
+        report.created("wiki page", str(path))
+    for path in modified:
+        report.updated("wiki page", str(path))
+    for path in removed:
+        report.removed("wiki page", str(path))
 
 
 def export_run(*, run_id: str) -> dict:
@@ -193,10 +201,10 @@ def export_run(*, run_id: str) -> dict:
 
     The report is opened before the export rather than after, so the
     duration on it is the export's and not the microsecond it takes to fill
-    in. No explicit notability on the success path: an export that rendered
-    the same bundle as last time recorded no outcome and stays quiet; one
-    that wrote or removed a path has one, and that is what makes it worth
-    sending. A WARN is sent either way.
+    in. No explicit notability on the success path: an export whose commit
+    was empty recorded no outcome and stays quiet; one that added, changed
+    or removed a page has one, and that is what makes it worth sending. A
+    WARN is sent either way.
 
     Exactly one message leaves this function. ``report.send()`` is never
     reached on the failure path, and the ERROR below is never posted on the
