@@ -20,9 +20,13 @@ _DEFAULT_WIKI_REPO_PATH = "/tmp/wcs-wiki"
 #: Declared rather than discovered: there is no runtime clock to read on
 #: Railway. It exists because a run that never ends blocks every later
 #: start silently — see ``_deadline`` for why that is the failure worth
-#: guarding. The default is generous against a full render plus a clone
-#: and a push; lower it once a real run has been measured.
-_DEFAULT_RUN_TIMEOUT_SECONDS = 1800
+#: guarding.
+#:
+#: 600s against a measured run: the 2026-09-23 run reached the push in 15
+#: seconds — a 3s clone, a 6s export GET, a 1s render. That is a 40x margin,
+#: which leaves room for a full-corpus push on a slow day and still fails
+#: fast enough to be a signal rather than an afternoon.
+_DEFAULT_RUN_TIMEOUT_SECONDS = 600
 
 
 def _require_api_base_url() -> str:

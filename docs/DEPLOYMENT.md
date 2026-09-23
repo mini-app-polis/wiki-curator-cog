@@ -75,7 +75,8 @@ Optional:
 ```
 SENTRY_DSN_WIKI_CURATOR_COG=https://…@sentry.io/…  # suffixed on purpose — see below
 HEALTHCHECKS_URL_WIKI_CURATOR_COG=https://hc-ping.com/…
-RUN_TIMEOUT_SECONDS=1800                           # the run budget; see below
+RUN_TIMEOUT_SECONDS=600                            # the run budget; see below
+RUN_ON_START=                                      # see "Triggering a run"
 LOGGING_LEVEL=INFO
 ```
 
@@ -95,9 +96,29 @@ push to main.
 
 ## Triggering a run
 
-The trigger is **manual** for now. Redeploy the service, or start it from the
-Railway dashboard; it renders once and exits with `status: 0` and a JSON
-summary on stdout:
+The trigger is **manual** for now: starting the container is the run. Redeploy
+the service, or start it from the Railway dashboard.
+
+**That is gated outside production.** A development deploy is someone shipping
+code, not asking for a rebuild — and there is no development wiki, so a run
+there would clone the real `wcs-wiki`, re-render the whole corpus and push to a
+branch of it. So a bare `python -m wiki_curator_cog.main` runs only when
+`_auto_run_enabled()` says so:
+
+| `RUN_ON_START` | Production | Anywhere else |
+|---|---|---|
+| unset | runs | **skips, exits 0** |
+| `true` / `1` / `yes` / `on` | runs | runs |
+| `false` / `0` / `no` / `off` | skips | skips |
+
+To render from a development deploy, set `RUN_ON_START=true` for that deploy.
+A skipped start logs `export.skipped reason=auto_run_disabled` and exits 0
+before `load_config`, so it needs no secrets in place.
+
+Naming the mode — `python -m wiki_curator_cog.main export` — is an explicit
+request and always runs, gate or no gate. That is the local path.
+
+A run that happens exits with `status: 0` and a JSON summary on stdout:
 
 ```json
 {
@@ -112,8 +133,7 @@ summary on stdout:
 The direction of travel is a run per source change, asked for by
 api-kaianolevine-com. Nothing is built for that yet.
 
-Locally: `uv run python -m wiki_curator_cog.main export` (the `export`
-argument is an explicit spelling of the default and does the same thing).
+Locally: `uv run python -m wiki_curator_cog.main export`.
 
 ## The run budget, and why it exists
 
@@ -121,7 +141,10 @@ Railway will not start this service again while a previous start is still
 `Active`. A run that hangs therefore does not merely run long — it takes every
 later run with it, silently, with the service showing green.
 
-`RUN_TIMEOUT_SECONDS` (default 1800) is the budget. `_deadline.py` raises
+`RUN_TIMEOUT_SECONDS` (default 600) is the budget. The 2026-09-23 run
+reached the push in 15 seconds — a 3s clone, a 6s export GET, a 1s render — so
+600 is roughly a 40x margin. Lower it further once a successful full run with
+a real push has been timed. `_deadline.py` raises
 `RunOutOfTime` inside the run 30 seconds before it, so the failure travels the
 ordinary path: the run report is sent, `main` exits non-zero, and the next
 start is free to happen.
@@ -142,9 +165,16 @@ cannot report on its own behalf. Set the grace period above the budget.
 | L5    | Quality signals      | `pipeline_evaluations` via `POST /v1/evaluations` |
 
 L4 is new in shape, not in kind: the report used to cover only the success
-path, with a crash reported by a Prefect state hook. With Prefect gone,
-`run_report` records the exception as an issue, sends, and re-raises — one run,
-one report.
+path, with a crash reported by a Prefect state hook at severity **ERROR**.
+With Prefect gone, `flow.export_run` owns both paths — `report.send()` on
+success, an explicit ERROR finding on failure — so there is still exactly one
+message per run, and a run that died still reads as ERROR rather than as the
+WARN a derived severity would have produced.
+
+**A credential preflight runs before the clone.** `boot.assert_push_access`
+makes the same request `git push` makes first, so a token that reads but
+cannot write fails in a second instead of after the clone, the full render and
+the commit.
 
 ## Troubleshooting
 
@@ -153,6 +183,8 @@ one report.
 | `WIKI_REPO_URL is HTTPS but GH_TOKEN is not set` at boot | PAT not configured | Set `GH_TOKEN` in Doppler |
 | `Permission denied` on git push | PAT lacks `contents:write` or wrong repo scope | Recreate the PAT with the scope from step 1 |
 | `ImportError: Bad git executable` on boot | runtime image lacks the `git` binary | Confirm `railpack.json` declares `deploy.aptPackages: ["git"]` |
+| `GH_TOKEN cannot push to … (git-receive-pack answered 403)` at boot | the PAT reads but does not write | Reissue it with `Contents: Read and write`. Note that `GET /repos/{owner}/{repo}` will *not* show this — its `permissions` block reports your own role on the repo, not the token's grants |
+| A deploy finishes but nothing rendered | the auto-run gate, outside production | Expected. `export.skipped reason=auto_run_disabled` in the logs; set `RUN_ON_START=true` for that deploy |
 | `error: RPC failed; curl 92 HTTP/2 stream … was not closed cleanly` on push | large push trips libcurl's HTTP/2 stream error | Already mitigated: `boot.ensure_wiki_clone` sets `http.version=HTTP/1.1` and `http.postBuffer=500MB`, and `WikiRepo.push` retries three times with backoff |
 | `RunOutOfTime` in the logs, run reported as failed | the render plus clone and push exceeded `RUN_TIMEOUT_SECONDS` | Working as intended — it failed instead of hanging. Raise the budget once a real run has been timed, or find what got slow |
 | A new run never starts and the service shows `Active` | a previous run neither finished nor failed | This is what the budget exists to prevent; if it happens the budget is unset or too high. Stop the service, then check why the run hung |

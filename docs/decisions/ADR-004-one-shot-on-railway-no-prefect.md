@@ -65,7 +65,7 @@ What each Prefect facility did, and what does it now:
 |---|---|
 | `serve()` and the `wiki_curator_router` dispatcher in `main.py` | Nothing. `main` calls `flow.export_run` once and exits. One mode, so nothing to dispatch. |
 | `concurrency("wiki-curator-cog", occupy=1)` | Removed, not replaced. The slot guarded one shared working tree; a one-shot process clones into its own container's `/tmp` and shares nothing. Two overlapping runs could still race on the push, and git arbitrates that — the loser is rejected non-fast-forward and fails visibly. |
-| `on_failure` / `on_crashed` (`make_failure_hook`) | `mini_app_polis.pipeline_status.run_report`, which records the exception as an issue, sends, and re-raises. One run, one report. |
+| `on_failure` / `on_crashed` (`make_failure_hook`) | The explicit failure path in `flow.export_run`: one ERROR finding carrying what the run managed to do, then re-raise. `run_report` was used first and was wrong — its severity is derived, and a report has no verb for ERROR, so a run that died on a rejected push reported WARN. The report is now sent on exactly one of the two paths. |
 | `get_run_id()` | A uuid4 minted in `main` and threaded through. The library's fallback resolves Prefect's ids and answers `"local-run"` without them, which would make every report unattributable. |
 | `@task(retries=...)` | There were none in this flow. The push retries itself three times with backoff; the export GET retries inside `KaianoApiClient`. Nothing else is retried, and with no queue there is no redelivery to fall back on — a failed run is re-triggered by hand. |
 
@@ -111,8 +111,22 @@ Prefect. The lock fell from 173 packages to 87.
   clone, a full render and another push attempt, and — since the flow now
   reports on its way out — three reports for one triggered run. A failure
   should be seen and re-triggered, not multiplied.
-- The trigger is manual for now. The direction of travel is a run per source
-  change, asked for by api-kaianolevine-com; nothing is built for that yet.
+- The trigger is manual for now: starting the container is the run. The
+  direction of travel is a run per source change, asked for by
+  api-kaianolevine-com; nothing is built for that yet.
+- **Starting the container is a run only in production.** A development deploy
+  is someone shipping code, and there is no development wiki — a run there
+  would clone the real `wcs-wiki`, re-render everything and push to a branch of
+  it. `RUN_ON_START` overrides in both directions; naming the `export` argument
+  bypasses the gate outright.
+- **The credential is checked before the clone.** A fine-grained PAT issued
+  with `Contents: Read` clones happily and is refused only at
+  `git-receive-pack` — which is what happened on the first run, after the whole
+  corpus had been rendered and committed. `boot.assert_push_access` makes that
+  same request first. It probes the git transport rather than the REST API on
+  purpose: `GET /repos/{owner}/{repo}` reports the *owner's* role on the
+  repository, not the token's grants, so it answers `push: true` for a
+  read-only token.
 
 ## Alternatives considered
 

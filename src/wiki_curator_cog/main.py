@@ -3,8 +3,16 @@
 One invocation is one export. The process renders the wiki once and
 exits; there is no resident loop and nothing to dispatch.
 
-    python -m wiki_curator_cog.main
-    python -m wiki_curator_cog.main export   # the same thing, said aloud
+    python -m wiki_curator_cog.main          # what Railway's start command runs
+    python -m wiki_curator_cog.main export   # a run asked for on purpose
+
+**Those two are not quite the same thing, and the difference is the point.**
+Starting the container is how a run is triggered today, which means every
+deploy renders and pushes. That is wanted in production and not in
+development, where a deploy is someone shipping code rather than asking for
+the wiki to be rebuilt. A bare invocation is therefore gated by
+:func:`_auto_run_enabled`; naming ``export`` is an explicit request and always
+runs.
 
 It used to register a Prefect deployment and serve it forever. The
 ``serve()`` loop and the ``wiki_curator_router`` dispatcher are gone —
@@ -38,7 +46,12 @@ import httpx
 import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
-from mini_app_polis.environment import Effect, current_environment, effect_enabled
+from mini_app_polis.environment import (
+    Effect,
+    Environment,
+    current_environment,
+    effect_enabled,
+)
 
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
@@ -102,23 +115,57 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="wiki-curator-cog",
         description=(
-            "Render the wcs-wiki once and exit. 'export' is accepted as an "
-            "explicit spelling of the default and does the same thing."
+            "Render the wcs-wiki once and exit. Naming 'export' runs "
+            "unconditionally; with no argument the run is gated by "
+            "RUN_ON_START, which defaults to on in production only."
         ),
     )
     parser.add_argument(
         "mode",
         nargs="?",
-        default="export",
+        default=None,
         choices=["export"],
-        help="Optional. Only one mode exists; omitting it runs that mode.",
+        help=(
+            "Optional, and only one mode exists. Naming it asks for a run "
+            "outright; omitting it defers to RUN_ON_START."
+        ),
     )
     return parser.parse_args(argv)
 
 
+def _auto_run_enabled() -> bool:
+    """Whether starting the container should, by itself, rebuild the wiki.
+
+    Production: yes. Starting the service *is* the trigger until the API
+    owns the wake, so a deploy there is a run.
+
+    Everywhere else: no. A development deploy is someone shipping code, and
+    it would otherwise clone the real wcs-wiki, re-render the whole corpus
+    and push — to a branch of the production repo, since there is no second
+    wiki. Shipping twice in a row would mean rendering twice, for nothing.
+
+    ``RUN_ON_START`` overrides in both directions, so a development run can
+    be asked for without editing the start command.
+    """
+    raw = os.getenv("RUN_ON_START", "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    return current_environment() is Environment.PRODUCTION
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one export and return the process exit code."""
-    _parse_args(sys.argv[1:] if argv is None else argv)
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+
+    # Before load_config, so a container that is not going to do anything
+    # exits cleanly whether or not its secrets are in place.
+    if args.mode is None and not _auto_run_enabled():
+        LOG.info(
+            "export.skipped reason=auto_run_disabled env=%s "
+            "hint=set RUN_ON_START=true, or pass the export argument",
+            current_environment().value,
+        )
+        return 0
 
     # Minted here, not in the flow, so that the id is in the first log
     # line — the one a run that dies during config load still writes.

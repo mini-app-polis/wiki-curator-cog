@@ -28,6 +28,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse, urlunparse
 
+import httpx
 from git import GitCommandError, Repo
 from mini_app_polis import logger as log
 
@@ -169,3 +170,65 @@ def ensure_wiki_clone(config: Config) -> Repo:
     _checkout_or_create(repo, config.wiki_branch, config.wiki_repo_remote)
 
     return repo
+
+
+# ── Preflight ───────────────────────────────────────────────────────────
+
+
+#: What GitHub answers when the credential may read but not write.
+_DENIED = frozenset({401, 403})
+
+
+def assert_push_access(config: Config) -> None:
+    """Fail now if the credential cannot push, rather than after the render.
+
+    A fine-grained PAT issued with ``Contents: Read`` instead of
+    ``Contents: Read and write`` clones happily and is refused only at
+    ``git-receive-pack``. Without this, that is discovered after the clone,
+    the full render and the commit — all of it thrown away, and the run
+    reported as a failure that looks like a push problem rather than a
+    permissions one. It happened on 2026-09-23, which is why this exists.
+
+    The probe is the first request ``git push`` itself makes, so it tests
+    the exact credential form :func:`_inject_token` builds rather than an
+    API endpoint that answers about the *user's* role on the repository —
+    which is what makes ``GET /repos/{owner}/{repo}`` useless here: it
+    reports the owner's permissions, not the token's grants.
+
+    Nothing is written and the token is never logged. A non-HTTPS remote is
+    skipped: an SSH deploy key has no equivalent cheap probe. A response
+    that is neither success nor a denial is a warning, not a failure — a
+    flaky probe should not stop a run that would otherwise work, and the
+    clone is about to test the network anyway.
+    """
+    if not config.wiki_repo_is_https or not config.gh_token:
+        return
+
+    url = f"{config.wiki_repo_url.removesuffix('.git')}.git/info/refs"
+    try:
+        response = httpx.get(
+            url,
+            params={"service": "git-receive-pack"},
+            auth=("x-access-token", config.gh_token),
+            timeout=10.0,
+            follow_redirects=True,
+        )
+    except httpx.HTTPError as exc:
+        LOG.warning("wiki.push_preflight.unreachable", extra={"err": str(exc)})
+        return
+
+    if response.status_code in _DENIED:
+        raise RuntimeError(
+            f"GH_TOKEN cannot push to {mask_url(config.wiki_repo_url)} "
+            f"(git-receive-pack answered {response.status_code}). The token "
+            "reads but does not write: reissue it with 'Contents: Read and "
+            "write', not 'Contents: Read'. Nothing was cloned or rendered."
+        )
+    if response.status_code != 200:
+        LOG.warning(
+            "wiki.push_preflight.inconclusive",
+            extra={"status": response.status_code},
+        )
+        return
+
+    LOG.info("wiki.push_preflight.ok", extra={"branch": config.wiki_branch})

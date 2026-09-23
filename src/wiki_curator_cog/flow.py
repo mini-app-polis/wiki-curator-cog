@@ -26,10 +26,17 @@ now:
     to fall back on — a failed run is re-triggered by hand.
 
 ``on_failure`` / ``on_crashed`` (``make_failure_hook``)
-    :func:`mini_app_polis.pipeline_status.run_report`, which records the
-    exception as an issue, sends the report, and re-raises. One run, one
-    report — the hook and the report used to be two messages about one bad
-    run, told apart by ``source``; now there is only the report.
+    The explicit failure path in :func:`export_run`, which posts one ERROR
+    carrying whatever the run had managed to do, and re-raises.
+
+    Not ``pipeline_status.run_report``, though it is the obvious fit and was
+    used first. Its severity is derived from the report, and a report has no
+    verb for ERROR — the library says so, because ERROR used to mean "a flow
+    died" and that was the Prefect hook's to say. Through ``run_report`` a
+    run that died on a rejected push reported WARN, the same severity as one
+    that merely dropped a dangling reference. So the report is built here and
+    sent on exactly one of the two paths: ``send()`` on success, an explicit
+    ERROR on failure. One run, one message, at the severity it deserves.
 
 ``get_run_id()``
     A uuid4 minted by ``main`` and threaded in. The library's fallback
@@ -46,11 +53,11 @@ from typing import Any
 
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
-from mini_app_polis.pipeline_status import RunReport, run_report
+from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
 from ._deadline import deadline
 from .api_client import WikiCuratorApiClient
-from .boot import ensure_wiki_clone, mask_url
+from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
 from .git_ops import WikiRepo
 from .render import list_stale_derived_paths, render_bundle
@@ -83,6 +90,11 @@ def _export(config: Config) -> dict:
         config.wiki_branch,
         mask_url(config.wiki_repo_url),
     )
+
+    # Before the clone, not after the render: a credential that reads but
+    # cannot write is otherwise discovered once the whole bundle is on disk
+    # and committed. See boot.assert_push_access.
+    assert_push_access(config)
 
     ensure_wiki_clone(config)
     assert_wiki_clone_ready(config)
@@ -180,15 +192,37 @@ def export_run(*, run_id: str) -> dict:
     """Run one export and report it, however it ends.
 
     The report is opened before the export rather than after, so the
-    duration on it is the export's and not the microsecond it takes to
-    fill in. No explicit notability: an export that rendered the same
-    bundle as last time recorded no outcome and stays quiet; one that
-    wrote or removed a path has one, and that is what makes it worth
+    duration on it is the export's and not the microsecond it takes to fill
+    in. No explicit notability on the success path: an export that rendered
+    the same bundle as last time recorded no outcome and stays quiet; one
+    that wrote or removed a path has one, and that is what makes it worth
     sending. A WARN is sent either way.
+
+    Exactly one message leaves this function. ``report.send()`` is never
+    reached on the failure path, and the ERROR below is never posted on the
+    success path.
     """
     config = load_config()
-    with run_report(FLOW_NAME, repo=REPO, run_id=run_id) as report:
+    report = RunReport(flow_name=FLOW_NAME, repo=REPO, run_id=run_id)
+
+    try:
         with deadline(config.run_timeout_seconds):
             summary = _export(config)
-        record_summary(report, summary)
+    except BaseException as exc:  # noqa: BLE001 — reported, then re-raised
+        # BaseException, not Exception: a run killed by SIGTERM mid-render
+        # should still say what it had managed to do. Re-raised either way.
+        report.issue("export_failed", type(exc).__name__, detail=str(exc))
+        post_run_finding(
+            FLOW_NAME,
+            "ERROR",
+            text=report.text(),
+            repo=REPO,
+            run_id=run_id,
+            notable=True,
+            **report.counters,
+        )
+        raise
+
+    record_summary(report, summary)
+    report.send()
     return summary

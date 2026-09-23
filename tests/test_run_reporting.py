@@ -49,7 +49,12 @@ def _config(budget: int = 0) -> SimpleNamespace:
 
 
 def _run(summary_or_exc, *, budget: int = 0):
-    """Run export_run with _export stubbed, capturing the sent report."""
+    """Run export_run with _export stubbed.
+
+    Returns the patched ``send`` (the success channel) and
+    ``post_run_finding`` (the failure channel) so a test can assert that
+    exactly one of them fired.
+    """
     kwargs = (
         {"side_effect": summary_or_exc}
         if isinstance(summary_or_exc, BaseException)
@@ -59,23 +64,25 @@ def _run(summary_or_exc, *, budget: int = 0):
         patch.object(flow, "load_config", return_value=_config(budget)),
         patch.object(flow, "_export", **kwargs),
         patch.object(flow.RunReport, "send", autospec=True) as send,
+        patch.object(flow, "post_run_finding") as finding,
     ):
         try:
             result = flow.export_run(run_id="run-1")
         except BaseException as exc:  # noqa: BLE001 — the test inspects it
-            return send, None, exc
-    return send, result, None
+            return send, finding, None, exc
+    return send, finding, result, None
 
 
-# ── the report is sent, once, either way ────────────────────────────────
+# ── exactly one message, on exactly one channel ─────────────────────────
 
 
 def test_a_successful_run_sends_one_report() -> None:
-    send, result, exc = _run(_summary(written=4))
+    send, finding, result, exc = _run(_summary(written=4))
 
     assert exc is None
     assert result["paths_written"] == 4
     send.assert_called_once()
+    finding.assert_not_called()
     report = send.call_args.args[0]
     assert report.repo == "wiki-curator-cog"
     assert report.run_id == "run-1"
@@ -83,34 +90,54 @@ def test_a_successful_run_sends_one_report() -> None:
     assert report.processed == 4
 
 
-def test_a_failed_run_still_sends_a_report_and_re_raises() -> None:
-    """PIPE-021. Nothing else reports this run — there is no hook left."""
-    send, _, exc = _run(RuntimeError("push rejected"))
+def test_a_failed_run_reports_error_and_re_raises() -> None:
+    """PIPE-021, and the severity the Prefect hook used to carry.
+
+    run_report() would have sent WARN here — its severity is derived, and a
+    report has no verb for ERROR. A run that died on a rejected push must
+    not read like one that dropped a dangling reference.
+    """
+    send, finding, _, exc = _run(RuntimeError("push rejected"))
 
     assert isinstance(exc, RuntimeError)
-    send.assert_called_once()
-    report = send.call_args.args[0]
-    assert report.severity == "WARN"
-    assert report.issues["unhandled_exception"] == 1
+    finding.assert_called_once()
+    # ...and the report is NOT also sent. One run, one message.
+    send.assert_not_called()
+
+    args, kwargs = finding.call_args
+    assert args[1] == "ERROR"
+    assert kwargs["repo"] == "wiki-curator-cog"
+    assert kwargs["run_id"] == "run-1"
+    assert "RuntimeError" in kwargs["text"]
 
 
 def test_a_run_that_outlives_its_budget_is_reported_not_hung() -> None:
     """The deadline failure travels the ordinary path, so Railway is freed."""
-    send, _, exc = _run(RunOutOfTime("stopped early"))
+    send, finding, _, exc = _run(RunOutOfTime("stopped early"))
 
     assert isinstance(exc, RunOutOfTime)
-    send.assert_called_once()
-    assert send.call_args.args[0].issues["unhandled_exception"] == 1
+    finding.assert_called_once()
+    send.assert_not_called()
+    assert finding.call_args.args[1] == "ERROR"
+
+
+def test_a_run_killed_by_sigterm_still_says_what_it_did() -> None:
+    """BaseException, not Exception — a deploy mid-render still reports."""
+    send, finding, _, exc = _run(KeyboardInterrupt())
+
+    assert isinstance(exc, KeyboardInterrupt)
+    finding.assert_called_once()
+    send.assert_not_called()
 
 
 def test_the_report_carries_the_run_id_it_was_given() -> None:
     """The library's fallback resolves Prefect ids and answers 'local-run'."""
-    send, _, _ = _run(_summary(written=1))
+    send, _, _, _ = _run(_summary(written=1))
     assert send.call_args.args[0].run_id == "run-1"
 
 
 def test_the_report_says_how_long_the_export_took() -> None:
-    send, _, _ = _run(_summary(written=1))
+    send, _, _, _ = _run(_summary(written=1))
     assert send.call_args.args[0].text().startswith("Run complete in ")
 
 
