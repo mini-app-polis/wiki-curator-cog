@@ -84,6 +84,9 @@ def _ping_healthchecks(url: str, suffix: str = "") -> None:
     if not url:
         return
     try:
+        # no-retry: the ping is not the job. A missed /start or /fail
+        # costs one late check; retrying would delay the run that the
+        # check exists to watch. PIPE-007.
         httpx.get(url.rstrip("/") + suffix, timeout=5.0)
     except Exception as exc:  # noqa: BLE001 — the ping is not the job
         LOG.warning("healthchecks.ping_failed suffix=%s err=%s", suffix or "/", exc)

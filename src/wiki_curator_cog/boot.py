@@ -74,6 +74,12 @@ def _is_existing_repo(path) -> bool:
 def _remote_branch_exists(repo: Repo, remote_name: str, branch: str) -> bool:
     """True if ``refs/heads/<branch>`` exists on the named remote."""
     try:
+        # no-retry: the run is the unit of retry. Nothing has been committed
+        # or pushed at this point, so a transient failure here costs a
+        # re-trigger and a re-render and nothing else. There is no queue
+        # behind this cog to redeliver, and a retry here would only move
+        # the same decision one layer down. PIPE-007.
+        #
         # str(): GitPython types every ``repo.git.*`` call as the union of
         # everything the porcelain can return (bytes, a status tuple, an
         # _AutoInterrupt for kill_after_timeout). ls_remote with no such
@@ -129,6 +135,7 @@ def ensure_wiki_clone(config: Config) -> Repo:
         # Re-point origin URL in case the token rotated between runs.
         authed_url = _inject_token(config.wiki_repo_url, config.gh_token)
         repo.git.remote("set-url", config.wiki_repo_remote, authed_url)
+        # no-retry: see _remote_branch_exists — the run is the retry unit.
         repo.git.fetch(config.wiki_repo_remote, "--prune")
     else:
         LOG.info(
@@ -137,6 +144,11 @@ def ensure_wiki_clone(config: Config) -> Repo:
         )
         path.parent.mkdir(parents=True, exist_ok=True)
         authed_url = _inject_token(config.wiki_repo_url, config.gh_token)
+        # no-retry: see _remote_branch_exists — the run is the retry unit.
+        # Deliberately unlike WikiRepo.push, which does retry: by the time
+        # the push runs the whole commit graph is built, and replaying the
+        # render to absorb one failed HTTPS request is the waste that
+        # retry exists to avoid. Nothing is built yet here.
         repo = Repo.clone_from(authed_url, str(path))
 
     # Local identity for commits.
@@ -206,6 +218,9 @@ def assert_push_access(config: Config) -> None:
 
     url = f"{config.wiki_repo_url.removesuffix('.git')}.git/info/refs"
     try:
+        # no-retry: a failed probe is already non-fatal — the handler below
+        # warns and lets the run continue, and the clone that follows tests
+        # the same network a second later. PIPE-007.
         response = httpx.get(
             url,
             params={"service": "git-receive-pack"},
