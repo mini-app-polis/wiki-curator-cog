@@ -28,6 +28,15 @@ _DEFAULT_WIKI_REPO_PATH = "/tmp/wcs-wiki"
 #: fast enough to be a signal rather than an afternoon.
 _DEFAULT_RUN_TIMEOUT_SECONDS = 600
 
+#: How long the push preflight and the Healthchecks ping may wait.
+#:
+#: Separate from the run budget and from each other: one is a credential
+#: check whose failure stops the run, the other is a ping whose failure is
+#: shrugged off. Both are here rather than inline so a test can set them to
+#: zero without touching source (TEST-013).
+_DEFAULT_PUSH_PREFLIGHT_TIMEOUT_SECONDS = 10.0
+_DEFAULT_HEALTHCHECKS_TIMEOUT_SECONDS = 5.0
+
 
 def _require_api_base_url() -> str:
     """Production reads ``KAIANO_API_BASE_URL``; everywhere else the ``_DEV`` form."""
@@ -38,6 +47,16 @@ def _require_api_base_url() -> str:
             "(or KAIANO_API_BASE_URL_DEV outside production)"
         )
     return v
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a number of seconds, got {raw!r}") from exc
 
 
 def _run_timeout_seconds() -> int:
@@ -68,6 +87,8 @@ class Config:
     sentry_dsn: str
     logging_level: str
     run_timeout_seconds: int
+    push_preflight_timeout_seconds: float
+    healthchecks_timeout_seconds: float
 
     @property
     def wiki_repo_is_https(self) -> bool:
@@ -113,6 +134,12 @@ def load_config() -> Config:
         sentry_dsn=os.getenv("SENTRY_DSN_WIKI_CURATOR_COG", ""),
         logging_level=os.getenv("LOGGING_LEVEL", "INFO"),
         run_timeout_seconds=_run_timeout_seconds(),
+        push_preflight_timeout_seconds=_float_env(
+            "PUSH_PREFLIGHT_TIMEOUT_SECONDS", _DEFAULT_PUSH_PREFLIGHT_TIMEOUT_SECONDS
+        ),
+        healthchecks_timeout_seconds=_float_env(
+            "HEALTHCHECKS_TIMEOUT_SECONDS", _DEFAULT_HEALTHCHECKS_TIMEOUT_SECONDS
+        ),
     )
 
 

@@ -64,7 +64,7 @@ LOG = log.get_logger()
 __all__ = ["REPO", "main"]
 
 
-def _ping_healthchecks(url: str, suffix: str = "") -> None:
+def _ping_healthchecks(config: Config, suffix: str = "") -> None:
     """Tell Healthchecks.io a run started, succeeded or failed.
 
     Three pings per run rather than one on boot. A boot ping said the
@@ -81,13 +81,17 @@ def _ping_healthchecks(url: str, suffix: str = "") -> None:
     if not effect_enabled(Effect.HEALTHCHECKS):
         LOG.info("healthchecks.ping_suppressed reason=not_production")
         return
+    url = config.healthchecks_url
     if not url:
         return
     try:
         # no-retry: the ping is not the job. A missed /start or /fail
         # costs one late check; retrying would delay the run that the
         # check exists to watch. PIPE-007.
-        httpx.get(url.rstrip("/") + suffix, timeout=5.0)
+        httpx.get(
+            url.rstrip("/") + suffix,
+            timeout=config.healthchecks_timeout_seconds,
+        )
     except Exception as exc:  # noqa: BLE001 — the ping is not the job
         LOG.warning("healthchecks.ping_failed suffix=%s err=%s", suffix or "/", exc)
 
@@ -176,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     _init_observability(config, run_id)
-    _ping_healthchecks(config.healthchecks_url, "/start")
+    _ping_healthchecks(config, "/start")
 
     try:
         summary = export_run(run_id=run_id)
@@ -186,10 +190,10 @@ def main(argv: list[str] | None = None) -> int:
         # itself, to Sentry, and a non-zero exit, to Railway.
         sentry_sdk.capture_exception(exc)
         LOG.error("export.failed run_id=%s err=%s", run_id, exc)
-        _ping_healthchecks(config.healthchecks_url, "/fail")
+        _ping_healthchecks(config, "/fail")
         return 1
 
-    _ping_healthchecks(config.healthchecks_url)
+    _ping_healthchecks(config)
     LOG.info("export.complete run_id=%s summary=%s", run_id, summary)
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0

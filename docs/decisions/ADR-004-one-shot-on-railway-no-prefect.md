@@ -96,16 +96,24 @@ Prefect. The lock fell from 173 packages to 87.
 
 - Prefect is retired from this cog, which is what the fleet-wide migration
   needed. The Prefect Cloud teardown is now unblocked.
-- **The taxonomy question is left open, deliberately.** ADR-009 says
-  `pipeline-cog` means a queue-driven Lambda worker, and this cog is now
-  none of those things. It therefore fails PIPE-016, PIPE-017, PIPE-018 and
-  CD-024, which read an `infra/` that does not exist. Those are recorded as
-  deferrals in `evaluator.yaml`, not exemptions: an exemption says the rule
-  should not apply, and that claim cannot be made until the taxonomy
-  decision is taken. ADR-002's own test — the same exemption carried for the
-  same structural reason — points at a missing type rather than at this cog,
-  and the Layer 2 polish pass described in ADR-001 will be the second thing
-  of this shape. Revisit when Layer 2 is built.
+- **The AWS-shaped rules are exempted, not deferred.** ADR-009 says
+  `pipeline-cog` means a queue-driven Lambda worker, and this cog is none of
+  those things, so PIPE-016, PIPE-017, PIPE-018, CD-010 and CD-024 — all of
+  which read an `infra/` that does not exist — do not describe it. A deferral
+  would say "unmet, and known"; they are not unmet. There is no queue to give
+  a dead-letter target and no function whose memory to declare. PIPE-020 is
+  the one exception to the exception: its concern does apply and is met by
+  `_deadline.py`; only its check, which looks for Lambda's
+  `get_remaining_time_in_millis`, cannot see it.
+
+- **That is a taxonomy signal, and it is recorded as one.** Six exemptions
+  for a single structural reason is exactly ADR-002's test for a taxonomy
+  that has fallen behind, and ADR-009 rejected both a second cog type and
+  exempting cogs on that same test. The Layer 2 polish pass described in
+  ADR-001 will be the second thing shaped like this — a periodic
+  whole-corpus rebuild with no per-item work. `evaluator.yaml` says so at the
+  top, so the exemptions read as evidence for reopening ADR-009 rather than
+  as a way around it.
 - A failed run is not retried. `railway.json` sets `restartPolicyType: NEVER`
   rather than `ON_FAILURE` with three retries: each restart would be a fresh
   clone, a full render and another push attempt, and — since the flow now

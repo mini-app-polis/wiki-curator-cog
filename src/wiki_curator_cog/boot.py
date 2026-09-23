@@ -225,7 +225,7 @@ def assert_push_access(config: Config) -> None:
             url,
             params={"service": "git-receive-pack"},
             auth=("x-access-token", config.gh_token),
-            timeout=10.0,
+            timeout=config.push_preflight_timeout_seconds,
             follow_redirects=True,
         )
     except httpx.HTTPError as exc:
