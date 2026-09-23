@@ -1,3 +1,11 @@
+## [2.0.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.0...v2.0.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* addressing findings from evaluator ([1c9a44a](https://github.com/mini-app-polis/wiki-curator-cog/commit/1c9a44a8dbd332a6b6e66500a17bfca7764a70d2))
+* **config:** drop env keys for settings that no longer exist ([90215c5](https://github.com/mini-app-polis/wiki-curator-cog/commit/90215c5e2339775c449acda584c14f9cb0fdf966))
+
 # [2.0.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.8.2...v2.0.0) (2026-09-23)
 
 
