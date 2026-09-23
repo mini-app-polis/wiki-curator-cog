@@ -1,17 +1,29 @@
 """Application entrypoint for wiki-curator-cog.
 
-Two invocation styles:
+One invocation is one export. The process renders the wiki once and
+exits; there is no resident loop and nothing to dispatch.
 
-  ``python -m wiki_curator_cog.main``
-      Default. Registers the Prefect deployment and starts a runner loop.
+    python -m wiki_curator_cog.main
+    python -m wiki_curator_cog.main export   # the same thing, said aloud
 
-  ``python -m wiki_curator_cog.main export``
-      One-off mode. Runs export_flow synchronously and exits.
+It used to register a Prefect deployment and serve it forever. The
+``serve()`` loop and the ``wiki_curator_router`` dispatcher are gone —
+see :mod:`wiki_curator_cog.flow` for what replaced each Prefect facility.
+What is left here is the shell around one run: observability, the run id,
+and the exit code.
+
+**The exit code is load-bearing.** Railway will not start this service
+again while a previous start is still ``Active``, so a run that neither
+finishes nor fails takes every later run with it, silently. The deadline
+in :mod:`wiki_curator_cog._deadline` stops that from inside; this module
+makes sure the outcome reaches the outside as a non-zero exit and a
+failed Healthchecks ping.
 
 Observability layers:
-  L1 — Healthchecks.io: pinged on startup
+  L1 — Healthchecks.io: start, then success or failure, per run
   L2 — Structured logs: mini_app_polis logger throughout
-  L3 — Sentry: captures all unhandled exceptions
+  L3 — Sentry: captures the unhandled exception that ends a run
+  L4 — Run report: one per run, sent by ``flow.export_run``
 """
 
 from __future__ import annotations
@@ -20,106 +32,51 @@ import argparse
 import json
 import os
 import sys
-from typing import Any
+import uuid
 
 import httpx
 import sentry_sdk
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
 from mini_app_polis.environment import Effect, current_environment, effect_enabled
-from mini_app_polis.pipeline_status import RunReport, make_failure_hook
-from prefect import flow, serve
 
 from wiki_curator_cog.boot import mask_url
-from wiki_curator_cog.config import load_config
-from wiki_curator_cog.flow import export_flow
+from wiki_curator_cog.config import Config, load_config
+from wiki_curator_cog.flow import REPO, export_run
 
 load_dotenv()
 
 LOG = log.get_logger()
 
-
-REPO = "wiki-curator-cog"
-"""Machine name this cog reports under; also names its API key variable."""
-
-_report_failure = make_failure_hook(REPO, repo=REPO)
+__all__ = ["REPO", "main"]
 
 
-@flow(
-    name="wiki-curator-cog",
-    on_failure=[_report_failure],
-    on_crashed=[_report_failure],
-)
-def wiki_curator_router() -> Any:
-    """Single entrypoint flow that runs the export renderer.
+def _ping_healthchecks(url: str, suffix: str = "") -> None:
+    """Tell Healthchecks.io a run started, succeeded or failed.
 
-    Reports the run outcome as a notification. The findings this cog
-    posts through :mod:`wiki_curator_cog.api_client` are unaffected —
-    those are graded results and stay rows; this is only the record of
-    whether the export itself ran.
+    Three pings per run rather than one on boot. A boot ping said the
+    process had started, which for a one-shot is the least interesting
+    moment in the run: it is green whether or not the export then hung
+    for an hour. ``/start`` followed by a success or ``/fail`` ping means
+    the check's grace period catches the run that never came back — the
+    one failure mode a process cannot report on its own behalf.
+
+    One URL is one check across both environments. A dev container
+    pinging it holds the production check green while production is dead,
+    so the effect gate comes before the URL is read.
     """
-    # Opened before the export, not after, so the duration on the report
-    # is the export's and not the microsecond it takes to fill this in.
-    report = RunReport(flow_name=REPO, repo=REPO)
-    summary = export_flow()
-
-    # Severity was the literal string "SUCCESS", so no export could ever
-    # report a problem however bad the data was. It is derived now: any
-    # dangling reference, colliding slug or unresolved instructor makes
-    # the run WARN, which is what this module means by "results worth a
-    # human look".
-    report.ok(int(summary.get("paths_written", 0)))
-    for reason, ref in summary.get("dropped", []):
-        report.issue(str(reason), str(ref))
-    report.count("removed", summary.get("paths_removed", 0))
-    report.count("entities", summary.get("entities", 0))
-    report.count("sources", summary.get("sources", 0))
-    source_pages = summary.get("source_pages")
-    if source_pages is not None and source_pages != summary.get("sources"):
-        report.count("source_pages", source_pages)
-
-    # Which pages moved, not only how many. Falls back to unnamed
-    # outcomes when the export reports counts without paths, so an older
-    # summary shape still says that the wiki changed.
-    _record_pages(report.created, summary, "written_paths", "paths_written")
-    _record_pages(report.removed, summary, "removed_paths", "paths_removed")
-
-    # No explicit notability. An export that rendered the same bundle as
-    # last time produced no outcome and stays quiet; one that wrote or
-    # removed a path has one, and that is what makes it worth sending.
-    # A WARN is sent either way — RunReport only suppresses SUCCESS.
-    report.send()
-    return summary
-
-
-def _record_pages(record: Any, summary: dict, paths_key: str, count_key: str) -> None:
-    """Record one page outcome per path, or an unnamed one per count."""
-    paths = summary.get(paths_key)
-    if paths:
-        for path in paths:
-            record("wiki page", str(path))
-        return
-    for _ in range(int(summary.get(count_key, 0) or 0)):
-        record("wiki page")
-
-
-def _ping_healthchecks(url: str) -> None:
-    # One URL is one check across both environments. A dev container
-    # pinging it holds the production check green while production is
-    # dead — the one failure the check exists to catch. Gated before the
-    # URL is read.
     if not effect_enabled(Effect.HEALTHCHECKS):
         LOG.info("healthchecks.ping_suppressed reason=not_production")
         return
     if not url:
         return
     try:
-        httpx.get(url, timeout=5.0)
-    except Exception as exc:
-        LOG.warning("healthchecks.ping_failed err=%s", exc)
+        httpx.get(url.rstrip("/") + suffix, timeout=5.0)
+    except Exception as exc:  # noqa: BLE001 — the ping is not the job
+        LOG.warning("healthchecks.ping_failed suffix=%s err=%s", suffix or "/", exc)
 
 
-def _init_observability(config) -> None:  # noqa: ANN001
+def _init_observability(config: Config, run_id: str) -> None:
     if config.sentry_dsn:
         sentry_sdk.init(
             dsn=config.sentry_dsn,
@@ -127,71 +84,65 @@ def _init_observability(config) -> None:  # noqa: ANN001
             environment=current_environment().value,
             release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown"),
         )
-    _ping_healthchecks(config.healthchecks_url)
     LOG.info(
-        "wiki-curator-cog.boot env=%s version=%s api=%s wiki=%s branch=%s repo=%s",
+        "wiki-curator-cog.boot env=%s version=%s run_id=%s api=%s wiki=%s "
+        "branch=%s repo=%s budget=%ss",
         current_environment().value,
         os.getenv("RELEASE_VERSION", "dev"),
+        run_id,
         config.kaiano_api_base_url,
         config.wiki_repo_path,
         config.wiki_branch,
         mask_url(config.wiki_repo_url),
+        config.run_timeout_seconds,
     )
-
-
-def _serve_forever() -> int:
-    config = load_config()
-    _init_observability(config)
-    deployment = wiki_curator_router.to_deployment(name="wiki-curator-cog")
-    serve(deployment)  # type: ignore[arg-type]
-    return 0
-
-
-def _run_one_off() -> int:
-    config = load_config()
-    _init_observability(config)
-    LOG.info("one_off.start mode=export")
-    try:
-        summary = export_flow()
-    except Exception as exc:  # noqa: BLE001 — top-level guard
-        sentry_sdk.capture_exception(exc)
-        LOG.error("one_off.failed mode=export err=%s", exc)
-        return 1
-
-    LOG.info("one_off.complete mode=export summary=%s", summary)
-    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
-    return 0
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="wiki-curator-cog",
         description=(
-            "Run wiki-curator-cog. With no subcommand, registers a Prefect "
-            "deployment and serves forever. With 'export', runs one render "
-            "and exits."
+            "Render the wcs-wiki once and exit. 'export' is accepted as an "
+            "explicit spelling of the default and does the same thing."
         ),
     )
     parser.add_argument(
         "mode",
         nargs="?",
-        default=None,
+        default="export",
         choices=["export"],
-        help="Subcommand to run. Omit to serve the Prefect deployment.",
+        help="Optional. Only one mode exists; omitting it runs that mode.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Run the requested subcommand and return the process exit code.
+    """Run one export and return the process exit code."""
+    _parse_args(sys.argv[1:] if argv is None else argv)
 
-    With no mode argument the cog serves the Prefect deployment forever;
-    ``export`` renders once and exits.
-    """
-    args = _parse_args(sys.argv[1:] if argv is None else argv)
-    if args.mode is None:
-        return _serve_forever()
-    return _run_one_off()
+    # Minted here, not in the flow, so that the id is in the first log
+    # line — the one a run that dies during config load still writes.
+    run_id = str(uuid.uuid4())
+
+    config = load_config()
+    _init_observability(config, run_id)
+    _ping_healthchecks(config.healthchecks_url, "/start")
+
+    try:
+        summary = export_run(run_id=run_id)
+    except Exception as exc:  # noqa: BLE001 — top-level guard
+        # The run report has already been sent by export_run on its way
+        # out. This adds the two things the report cannot: the exception
+        # itself, to Sentry, and a non-zero exit, to Railway.
+        sentry_sdk.capture_exception(exc)
+        LOG.error("export.failed run_id=%s err=%s", run_id, exc)
+        _ping_healthchecks(config.healthchecks_url, "/fail")
+        return 1
+
+    _ping_healthchecks(config.healthchecks_url)
+    LOG.info("export.complete run_id=%s summary=%s", run_id, summary)
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
 
 
 if __name__ == "__main__":

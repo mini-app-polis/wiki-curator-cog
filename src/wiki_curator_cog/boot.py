@@ -73,10 +73,14 @@ def _is_existing_repo(path) -> bool:
 def _remote_branch_exists(repo: Repo, remote_name: str, branch: str) -> bool:
     """True if ``refs/heads/<branch>`` exists on the named remote."""
     try:
-        out = repo.git.ls_remote("--heads", remote_name, branch)
+        # str(): GitPython types every ``repo.git.*`` call as the union of
+        # everything the porcelain can return (bytes, a status tuple, an
+        # _AutoInterrupt for kill_after_timeout). ls_remote with no such
+        # option always returns text, and mypy cannot know that.
+        out = str(repo.git.ls_remote("--heads", remote_name, branch))
     except GitCommandError:
         return False
-    return bool(out and out.strip())
+    return bool(out.strip())
 
 
 def _checkout_or_create(repo: Repo, branch: str, remote_name: str) -> None:

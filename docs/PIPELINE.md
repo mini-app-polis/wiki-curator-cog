@@ -28,7 +28,7 @@ Drive transcript drop
            ▼
 ┌──────────────────────────┐
 │   wiki-curator-cog        │  (this repo)
-│   backfill | incremental  │  (deterministic, no LLM)
+│   one mode: export        │  (deterministic, no LLM)
 └──────────┬────────────────┘
            │ git commit / push
            ▼
@@ -46,7 +46,7 @@ Drive transcript drop
 Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 
 - **Layer 1 — deterministic collection.** This cog. Reads `notes_json` from the API and routes its fields onto wiki pages mechanically via three alias maps (`instructors/`, `concepts/`, `techniques/` _aliases.yaml). Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream notes and the same alias maps, the same input always produces the same output.
-- **Layer 2 — LLM polish pass.** Operates on Layer 1's output and refines it: prose synthesis where Layer 1 emits a mechanical Overview template, instructor-page `## Background` / `## Teaching themes` / `## Notable framings`, terminology-page creation when vocabulary collapses are ambiguous, lint findings, query answering. Runs in the same Prefect concurrency slot, after Layer 1 finishes.
+- **Layer 2 — LLM polish pass.** Operates on Layer 1's output and refines it: prose synthesis where Layer 1 emits a mechanical Overview template, instructor-page `## Background` / `## Teaching themes` / `## Notable framings`, terminology-page creation when vocabulary collapses are ambiguous, lint findings, query answering. Runs after Layer 1 finishes. Its coordination is still to be designed; the Prefect slot this originally named is gone (ADR-004).
 
 This cog implements Layer 1.
 
@@ -61,21 +61,34 @@ This cog implements Layer 1.
 
 | Layer | Signal              | Where                                             |
 | ----- | ------------------- | ------------------------------------------------- |
-| L1    | Liveness            | Healthchecks.io ping on startup                   |
+| L1    | Liveness            | Healthchecks.io: `/start`, then success or `/fail`, per run |
 | L2    | Structured logs     | `mini_app_polis` JSON logger                      |
 | L3    | Unhandled exceptions| Sentry                                            |
 | L4    | Quality signals     | `pipeline_evaluations` via `POST /v1/evaluations` |
 
 ## Concurrency
 
-Single-instance Prefect flow (concurrency slot of 1). Two concurrent runs would race on git operations and wiki state. The `concurrency("wiki-curator-cog", occupy=1)` block in each flow enforces this.
+One wake is one run in one process, which clones into its own container's `/tmp` and shares nothing — so the working-tree race the old Prefect concurrency slot guarded against cannot happen. Railway will not start the service again while a previous start is `Active`. What two overlapping runs could still race on is the push, and git arbitrates that: the loser is rejected non-fast-forward and fails visibly. That is weaker than a lock and strong enough for a manually-triggered rebuild; it would not be enough for anything automatic and frequent. See ADR-004.
 
-## Idempotency and run modes
+## One mode, and the run budget
 
-- `backfill` — full-corpus rebuild. Wipes the derived layer (`concepts/`, `techniques/`, `instructors/`, `terminology/`) at start of run, preserving `_aliases.yaml` files. Bypasses the version-equality skip — every source re-ingests at the running curator version. Used when shipping curator behavior changes that should reshape the derived layer.
-- `incremental` — steady-state, processes notes created since the last run. Honors the version-equality skip: sources whose existing `curator_version` matches the running version are no-ops. Auto-adds unknown instructor names to `instructors/_aliases.yaml` as identity mappings.
+There is one mode, `export`: a full, deterministic re-render of the whole
+corpus from the canonical entity graph. It takes no arguments, and running it
+twice against unchanged upstream data produces the same bundle — which is why
+the trigger can be crude and why redundant runs cost time rather than
+correctness. The `backfill` / `incremental` / `interactive` split described in
+ADR-001 no longer exists.
 
-The curator version is auto-derived at runtime from `pyproject.toml` via `importlib.metadata.version("wiki-curator-cog")`. semantic-release bumps the version on push to main based on conventional commits (`feat:` → minor, `fix:` → patch). `WIKI_CURATOR_VERSION` env var is an escape hatch for local dev.
+A run has a declared budget, `RUN_TIMEOUT_SECONDS` (default 1800). This is not
+a Lambda-style ceiling being imitated for its own sake: Railway silently skips
+every later start while a previous one is still `Active`, so a run that hangs
+takes all its successors with it and says nothing. `_deadline.py` raises inside
+the run a margin before the budget, so the failure travels the ordinary path —
+the report is sent, `main` exits non-zero, and the next start is free to happen.
+
+The curator version is auto-derived at runtime from `pyproject.toml` via
+`importlib.metadata.version("wiki-curator-cog")`. semantic-release bumps it on
+push to main based on conventional commits (`feat:` → minor, `fix:` → patch).
 
 ## Operating manual
 

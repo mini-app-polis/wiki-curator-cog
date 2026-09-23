@@ -21,6 +21,7 @@ if not hasattr(_dt, "UTC"):
 
 # Polyfill enum.StrEnum (3.11+) for older interpreters so the curator
 # module can be imported. No-op on 3.11+.
+import contextlib  # noqa: E402
 import enum as _enum  # noqa: E402
 
 if not hasattr(_enum, "StrEnum"):
@@ -44,7 +45,7 @@ def _install_mini_app_polis_stub() -> None:
         from mini_app_polis.api import KaianoApiClient
         KaianoApiClient.from_env() -> stub instance
         from mini_app_polis.pipeline_status import (
-            RunReport, make_failure_hook
+            RunReport, run_report
         )
         from mini_app_polis.environment import (
             Effect, current_environment, effect_enabled, env_var
@@ -117,31 +118,65 @@ def _install_mini_app_polis_stub() -> None:
         def ok(self) -> bool:
             return True
 
-    class _StubRunReport:
-        """Minimal RunReport so main can accumulate and send without the real package."""
+    class _StubOutcome:
+        def __init__(self, verb: str, kind: str, item: str | None) -> None:
+            self.verb = verb
+            self.kind = kind
+            self.item = item
 
-        def __init__(self, flow_name: str, *, repo: str, **_kwargs: object) -> None:
+        def label(self) -> str:
+            sign = "+" if self.verb == "created" else "-"
+            if self.item:
+                return f"{sign} {self.kind}: {self.item}"
+            return f"{sign} {self.kind}"
+
+    class _StubRunReport:
+        """Minimal RunReport so a run can accumulate and send without the real package."""
+
+        def __init__(
+            self,
+            flow_name: str,
+            *,
+            repo: str,
+            run_id: str | None = None,
+            **_kwargs: object,
+        ) -> None:
             self.flow_name = flow_name
             self.repo = repo
+            self.run_id = run_id
             self.processed = 0
+            self.notes: dict[str, int] = {}
             self.issues: dict[str, int] = {}
             self.counters: dict[str, object] = {}
+            self.outcomes: list[object] = []
             self._notable: bool | None = None
 
         def ok(self, n: int = 1) -> None:
             self.processed += n
 
-        def issue(
-            self, reason: str, item: str | None = None, **_kwargs: object
-        ) -> None:
+        def note(self, reason: str, item: str | None = None, **_kw: object) -> None:
+            self.notes[reason] = self.notes.get(reason, 0) + 1
+
+        def issue(self, reason: str, item: str | None = None, **_kw: object) -> None:
             self.issues[reason] = self.issues.get(reason, 0) + 1
 
         def count(self, key: str, value: object) -> None:
             self.counters[key] = value
 
+        def created(self, kind: str, item: str | None = None) -> None:
+            self.outcomes.append(_StubOutcome("created", kind, item))
+
+        def removed(self, kind: str, item: str | None = None) -> None:
+            self.outcomes.append(_StubOutcome("removed", kind, item))
+
         @property
         def severity(self) -> str:
             return "WARN" if self.issues else "SUCCESS"
+
+        def text(self) -> str:
+            lines = ["Run complete in 0s"]
+            lines += [o.label() for o in self.outcomes]
+            return "\n".join(lines)
 
         def send(
             self, *, notable: bool = False, **_kwargs: object
@@ -149,17 +184,23 @@ def _install_mini_app_polis_stub() -> None:
             self._notable = notable
             return _StubDeliveryReport()
 
+    @contextlib.contextmanager
+    def run_report(flow_name: str, *, repo: str, **kwargs: object):  # noqa: ANN202
+        """Mirrors the real helper: send however the block ends, then re-raise."""
+        report = _StubRunReport(flow_name, repo=repo, **kwargs)
+        try:
+            yield report
+        except BaseException as exc:
+            report.issue("unhandled_exception", type(exc).__name__)
+            report.send(notable=True)
+            raise
+        report.send(notable=bool(kwargs.get("notable", False)))
+
     def post_run_finding(*args: object, **kwargs: object) -> _StubDeliveryReport:  # noqa: ARG001 - matches the real signature
         return _StubDeliveryReport()
 
-    def make_failure_hook(*args: object, **kwargs: object):  # noqa: ANN202, ARG001 - matches the real signature
-        def _hook(flow: object, flow_run: object, state: object) -> None:
-            return None
-
-        return _hook
-
     status_module.post_run_finding = post_run_finding  # type: ignore[attr-defined]
-    status_module.make_failure_hook = make_failure_hook  # type: ignore[attr-defined]
+    status_module.run_report = run_report  # type: ignore[attr-defined]
     status_module.DeliveryReport = _StubDeliveryReport  # type: ignore[attr-defined]
     status_module.RunReport = _StubRunReport  # type: ignore[attr-defined]
 
