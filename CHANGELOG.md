@@ -1,3 +1,18 @@
+# [2.0.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.8.2...v2.0.0) (2026-09-23)
+
+
+* feat!: run as a one-shot Railway process, drop Prefect ([e01e094](https://github.com/mini-app-polis/wiki-curator-cog/commit/e01e0941f4829d0ad72f51d9cb6ff85e28b973bd))
+
+
+### Features
+
+* gate auto-run outside production, check push access before the render ([742f3fc](https://github.com/mini-app-polis/wiki-curator-cog/commit/742f3fcc595526f1b5bad9acc0b0cce1aca47ae0))
+
+
+### BREAKING CHANGES
+
+* PREFECT_API_KEY and PREFECT_API_URL are no longer read.
+
 ## [1.8.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v1.8.1...v1.8.2) (2026-09-21)
 
 
