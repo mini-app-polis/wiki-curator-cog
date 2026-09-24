@@ -1,3 +1,10 @@
+## [2.0.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.2...v2.0.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* **deps:** require common-utils 5.13.1 ([9a5b66d](https://github.com/mini-app-polis/wiki-curator-cog/commit/9a5b66d53c191d53fd32861a8bfbff86984276b0))
+
 ## [2.0.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.1...v2.0.2) (2026-09-23)
 
 
