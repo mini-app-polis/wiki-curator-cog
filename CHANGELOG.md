@@ -1,3 +1,10 @@
+## [2.0.6](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.5...v2.0.6) (2026-09-29)
+
+
+### Bug Fixes
+
+* **deps:** bump oauthlib to 4.0.0 for CVE-2026-49265 ([ea2c436](https://github.com/mini-app-polis/wiki-curator-cog/commit/ea2c436c8c7b8681dc3ea1b8c87f40b871dc4a12))
+
 ## [2.0.5](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.4...v2.0.5) (2026-09-28)
 
 
