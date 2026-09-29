@@ -52,10 +52,11 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from mini_app_polis import logger as log
+from mini_app_polis.api import KaianoApiClient
+from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
 from ._deadline import deadline
-from .api_client import WikiCuratorApiClient
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
 from .git_ops import WikiRepo
@@ -70,6 +71,22 @@ REPO = "wiki-curator-cog"
 
 FLOW_NAME = "wiki-curator-cog-export"
 """What the run reports call themselves. Unchanged from the Prefect name."""
+
+
+#: This cog's name in api-kaianolevine-com's identity_registry.MACHINES. The
+#: shared client derives WIKI_CURATOR_COG_API_KEY from it, and the API derives
+#: the same variable from the same name, so the audit trail records which cog
+#: read the corpus.
+MACHINE_NAME = "wiki-curator-cog"
+
+
+def _fetch_export() -> WcsWikiExportItem:
+    """GET /v1/wcs/wiki/export — the full canonical corpus, in one call.
+
+    Reads everything regardless of per-source visibility, which takes
+    ``wcs.corpus.read`` and nothing more: reading is not administering.
+    """
+    return KaianoApiClient.from_env(MACHINE_NAME).export_wcs_wiki()
 
 
 def _write_bundle(wiki_repo_path: Path, bundle: dict[str, str]) -> list[Path]:
@@ -98,10 +115,9 @@ def _export(config: Config) -> dict:
     ensure_wiki_clone(config)
     assert_wiki_clone_ready(config)
 
-    api = WikiCuratorApiClient()
     wiki_repo = WikiRepo(config)
 
-    export = api.fetch_export()
+    export = _fetch_export()
     log_path = config.wiki_repo_path / "log.md"
     existing_log = log_path.read_text() if log_path.exists() else ""
 
