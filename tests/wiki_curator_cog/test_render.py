@@ -7,7 +7,16 @@ import uuid
 
 import pytest
 
-from wiki_curator_cog.models import (
+from wiki_curator_cog.render import (
+    build_indexes,
+    export_attributions_for_instructor,
+    find_dangling_references,
+    render_bundle,
+    render_entity_page,
+    slugify,
+)
+
+from .export_builders import (
     WcsAttribution,
     WcsDefinition,
     WcsDrillPurpose,
@@ -18,14 +27,6 @@ from wiki_curator_cog.models import (
     WcsSource,
     WcsTechniqueRequirement,
     WcsWikiExport,
-)
-from wiki_curator_cog.render import (
-    build_indexes,
-    export_attributions_for_instructor,
-    find_dangling_references,
-    render_bundle,
-    render_entity_page,
-    slugify,
 )
 
 

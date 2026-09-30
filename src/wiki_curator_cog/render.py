@@ -15,19 +15,22 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
+from mini_app_polis.api import contract
+
 from . import markdown_utils as md
-from .models import (
-    WcsAttribution,
-    WcsDefinition,
-    WcsDrillPurpose,
-    WcsEntity,
-    WcsInstructor,
-    WcsReference,
-    WcsRelation,
-    WcsSource,
-    WcsTechniqueRequirement,
-    WcsWikiExport,
-)
+
+# The export's own models, from the shared contract, under the short names
+# the renderer has always used for them.
+WcsAttribution = contract.WcsSourceAttributionItem
+WcsDefinition = contract.WcsEntityDefinitionItem
+WcsDrillPurpose = contract.WcsDrillPurposeItem
+WcsEntity = contract.WcsEntityItem
+WcsInstructor = contract.WcsInstructorItem
+WcsReference = contract.WcsSourceReferenceItem
+WcsRelation = contract.WcsEntityRelationItem
+WcsSource = contract.WcsSourceItem
+WcsTechniqueRequirement = contract.WcsTechniqueRequirementItem
+WcsWikiExport = contract.WcsWikiExportItem
 
 _SLUG_MAX_LEN: int = 80
 
