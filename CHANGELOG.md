@@ -1,3 +1,11 @@
+## [2.0.7](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.6...v2.0.7) (2026-09-30)
+
+
+### Bug Fixes
+
+* **api:** render from common's contract models and drop the local copies ([3a6330f](https://github.com/mini-app-polis/wiki-curator-cog/commit/3a6330f2aa8a52824b7f629eb29223d5b7fdf0cc))
+* uv lock ([0c10b8a](https://github.com/mini-app-polis/wiki-curator-cog/commit/0c10b8add6024d96130a47488d133a1841b64971))
+
 ## [2.0.6](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.5...v2.0.6) (2026-09-29)
 
 
