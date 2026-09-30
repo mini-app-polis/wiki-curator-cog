@@ -1,3 +1,10 @@
+## [2.0.8](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.7...v2.0.8) (2026-09-30)
+
+
+### Bug Fixes
+
+* **deps:** patch vulnerable dependencies (urllib3, virtualenv) ([6eb015c](https://github.com/mini-app-polis/wiki-curator-cog/commit/6eb015cbc61786469f7d1946b4d633275f58b9ad))
+
 ## [2.0.7](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.6...v2.0.7) (2026-09-30)
 
 
