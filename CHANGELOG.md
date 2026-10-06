@@ -1,3 +1,12 @@
+## [2.0.10](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.9...v2.0.10) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils ([0643af4](https://github.com/mini-app-polis/wiki-curator-cog/commit/0643af4894c27f570ee67f42c19d5baab8fb6003))
+* **deps:** bump miniapppolis-common-utils ([370ad9a](https://github.com/mini-app-polis/wiki-curator-cog/commit/370ad9af7eff46223cab031c9f1b8d3aecd79b35))
+* **deps:** bump sentry-sdk ([7c66694](https://github.com/mini-app-polis/wiki-curator-cog/commit/7c66694cab6e86bd71aad30de5cb9d4426900864))
+
 ## [2.0.9](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.8...v2.0.9) (2026-10-01)
 
 
