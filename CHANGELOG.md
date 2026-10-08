@@ -1,3 +1,10 @@
+## [2.0.14](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.13...v2.0.14) (2026-10-08)
+
+
+### Bug Fixes
+
+* **observability:** move to shared SENTRY_DSN_COGS and tag service ([e6b81e6](https://github.com/mini-app-polis/wiki-curator-cog/commit/e6b81e603b89627a399d57dfc4424d3009aaa091))
+
 ## [2.0.13](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.12...v2.0.13) (2026-10-08)
 
 
