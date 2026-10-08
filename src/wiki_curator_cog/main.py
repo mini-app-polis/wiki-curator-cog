@@ -104,6 +104,7 @@ def _init_observability(config: Config, run_id: str) -> None:
             environment=current_environment().value,
             release=os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown"),
         )
+        sentry_sdk.get_global_scope().set_tag("service", "wiki-curator-cog")
     LOG.info(
         "wiki-curator-cog.boot env=%s version=%s run_id=%s api=%s wiki=%s "
         "branch=%s repo=%s budget=%ss",

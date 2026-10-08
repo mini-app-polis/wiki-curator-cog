@@ -124,14 +124,9 @@ def load_config() -> Config:
         ),
         gh_token=gh_token,
         healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),
-        # SENTRY_DSN_WIKI_CURATOR_COG, not the fleet-wide SENTRY_DSN. The
-        # cogs that moved to Lambda each got a function of their own, so a
-        # bare name there addresses exactly one cog. This one is still a
-        # Railway service sharing a secrets store with its neighbours, where
-        # an unsuffixed name is the same name they read — and the failure is
-        # silent: events land in another cog's Sentry project and this one
-        # simply looks healthy. The suffix is what keeps them apart.
-        sentry_dsn=os.getenv("SENTRY_DSN_WIKI_CURATOR_COG", ""),
+        # The shared cogs Sentry project, under the same name every cog
+        # reads. Events are told apart by the `service` tag main.py sets.
+        sentry_dsn=os.getenv("SENTRY_DSN_COGS", ""),
         logging_level=os.getenv("LOGGING_LEVEL", "INFO"),
         run_timeout_seconds=_run_timeout_seconds(),
         push_preflight_timeout_seconds=_float_env(

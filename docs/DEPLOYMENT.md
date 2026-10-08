@@ -71,7 +71,7 @@ WIKI_GIT_AUTHOR_EMAIL=wiki-curator@kaianolevine.com
 Optional:
 
 ```
-SENTRY_DSN_WIKI_CURATOR_COG=https://…@sentry.io/…  # suffixed on purpose — see below
+SENTRY_DSN_COGS=https://…@sentry.io/…              # the shared cogs project — see below
 HEALTHCHECKS_URL_WIKI_CURATOR_COG=https://hc-ping.com/…
 RUN_TIMEOUT_SECONDS=600                            # the run budget; see below
 RUN_ON_START=                                      # see "Triggering a run"
@@ -81,12 +81,9 @@ LOGGING_LEVEL=INFO
 **`PREFECT_API_KEY` and `PREFECT_API_URL` are no longer read.** Remove them
 from Doppler with the rest of the Prefect teardown.
 
-**The Sentry variable keeps its `_WIKI_CURATOR_COG` suffix**, unlike the cogs
-that moved to Lambda. Each of those got a function with an environment of its
-own, so a bare `SENTRY_DSN` there addresses one cog. This one is still a
-Railway service sharing a secrets store with its neighbours, and an
-unsuffixed name is the same name they read — events would land in another
-cog's Sentry project while this one looked healthy.
+**Sentry is the shared cogs project**, read from `SENTRY_DSN_COGS` like every
+other cog. Events from this service carry `service:wiki-curator-cog`; filter
+on that tag in Sentry.
 
 The curator version is derived at runtime from `pyproject.toml` via
 `importlib.metadata.version("wiki-curator-cog")`; semantic-release bumps it on
@@ -188,4 +185,4 @@ the commit.
 | A new run never starts and the service shows `Active` | a previous run neither finished nor failed | This is what the budget exists to prevent; if it happens the budget is unset or too high. Stop the service, then check why the run hung |
 | Healthchecks shows the check late but Railway shows no failure | the process died without pinging `/fail` | Check Sentry — a hard kill (OOM) leaves no report |
 | Every call returns 401 | `WIKI_CURATOR_COG_API_KEY` unset, stale, or not matching the API's copy | Compare Doppler against the API's environment. There is no fallback credential — rotation must land on both sides |
-| Sentry is silent on a failed run | `SENTRY_DSN_WIKI_CURATOR_COG` not set | Set it in Doppler. Note the suffix: a bare `SENTRY_DSN` is read by the neighbouring Railway services too, and events would land in another cog's project while this one looked healthy |
+| Sentry is silent on a failed run | `SENTRY_DSN_COGS` not set | Set it in Doppler. In Sentry, filter the cogs project on `service:wiki-curator-cog` |
