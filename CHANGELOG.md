@@ -1,3 +1,11 @@
+## [2.0.12](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.11...v2.0.12) (2026-10-08)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils ([383331d](https://github.com/mini-app-polis/wiki-curator-cog/commit/383331dd5ee837804d25595bb6877050b90cd0c0))
+* **deps:** bump python-dotenv ([b95d48f](https://github.com/mini-app-polis/wiki-curator-cog/commit/b95d48f3d85726a0266791b1a48473896445ba8b))
+
 ## [2.0.11](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.10...v2.0.11) (2026-10-07)
 
 
