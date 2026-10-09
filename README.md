@@ -50,7 +50,7 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/) installed
-- A `.env` file populated from `.env.example`
+- The [Doppler CLI](https://docs.doppler.com/docs/install-cli), logged in (`doppler login`)
 - A local clone of `wcs-wiki`
 - `WIKI_CURATOR_COG_API_KEY` — this cog's own named key. The API grants it the
   `corpus-reader` and `pipeline-writer` roles; there is no fallback credential.
@@ -83,7 +83,8 @@ uv run pytest
 ### Run an export locally
 
 `WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the
-shell and `doppler run` passes it through:
+shell. `doppler run` passes it through because Doppler holds no value for
+that name; if it did, Doppler's would win:
 
 ```bash
 WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main export
