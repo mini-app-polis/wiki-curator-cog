@@ -50,7 +50,6 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
-from dotenv import load_dotenv
 from mini_app_polis import logger as log
 from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
@@ -61,8 +60,6 @@ from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
 from .git_ops import WikiRepo
 from .render import list_stale_derived_paths, render_bundle
-
-load_dotenv()
 
 LOG = log.get_logger()
 
