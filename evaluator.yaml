@@ -74,6 +74,16 @@ exemptions:
       and the run report covers everything the process lived long enough to
       say.
 
+  - rule: PIPE-015
+    reason: >
+      Requires a pipeline cog's work to arrive on a queue the API enqueues
+      onto. There is no queue (see PIPE-016): a run takes no arguments and
+      re-renders the whole corpus, so a run per message would collapse into
+      one. A run starts on a Railway deploy (RUN_ON_START) or from the CLI
+      (`main.py export`), as ADR-004 decides. ADR-004 also names the
+      direction of travel — a run asked for by api-kaianolevine-com per
+      source change — and that, if built, is where this exemption ends.
+
   - rule: CD-024
     reason: >
       Reads a pipeline cog's infra/ Terraform — memory_size and timeout — as
