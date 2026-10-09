@@ -1818,7 +1818,6 @@ dependencies = [
     { name = "miniapppolis-common-utils" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
-    { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "sentry-sdk" },
 ]
@@ -1841,7 +1840,6 @@ requires-dist = [
     { name = "miniapppolis-common-utils", specifier = ">=5,<6" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.4.0,<3.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.1,<2.0.0" },
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
     { name = "sentry-sdk", specifier = ">=2.0.0,<3.0.0" },
 ]

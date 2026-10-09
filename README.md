@@ -57,14 +57,21 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 
 ### Setup
 
+Secrets come from Doppler's shared `dev` config through the
+[Doppler CLI](https://docs.doppler.com/docs/install-cli) — nothing reads a
+`.env` file, and local runs never use `prd`.
+
 ```bash
+brew install gnupg dopplerhq/cli/doppler   # once per machine
+doppler login                              # once per machine
+
 git clone git@github.com:mini-app-polis/wiki-curator-cog.git
 cd wiki-curator-cog
+doppler setup                              # reads doppler.yaml: mini-app-polis-ecosystem / dev
 uv sync --all-extras
 uv run pre-commit install
 uv run pre-commit run --all-files
-cp .env.example .env
-# populate .env with your values, including WIKI_REPO_PATH pointing at your wcs-wiki clone
+uv run check-doppler-keys                  # every required .env.example name is in dev
 ```
 
 ### Run tests
@@ -75,8 +82,11 @@ uv run pytest
 
 ### Run an export locally
 
+`WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the
+shell and `doppler run` passes it through:
+
 ```bash
-uv run python -m wiki_curator_cog.main export
+WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main export
 ```
 
 ---

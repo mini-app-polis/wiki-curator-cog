@@ -44,7 +44,6 @@ import uuid
 
 import httpx
 import sentry_sdk
-from dotenv import load_dotenv
 from mini_app_polis import logger as log
 from mini_app_polis.environment import (
     Effect,
@@ -56,8 +55,6 @@ from mini_app_polis.environment import (
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
 from wiki_curator_cog.flow import REPO, export_run
-
-load_dotenv()
 
 LOG = log.get_logger()
 
