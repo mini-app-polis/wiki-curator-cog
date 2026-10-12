@@ -1,3 +1,10 @@
+## [2.0.18](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.17...v2.0.18) (2026-10-12)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 5.25.3 ([c48869b](https://github.com/mini-app-polis/wiki-curator-cog/commit/c48869b6d96291cf30bc12dcbe53348a6d00acc3))
+
 ## [2.0.17](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.16...v2.0.17) (2026-10-11)
 
 
