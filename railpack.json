@@ -1,5 +1,8 @@
 {
   "$schema": "https://schema.railpack.com",
+  "packages": {
+    "uv": "0.13.0"
+  },
   "deploy": {
     "aptPackages": ["git"]
   }
