@@ -1,8 +1,8 @@
 """Git operations for the wiki repo.
 
 The curator commits one-per-source to the wcs-wiki repo and pushes when
-each ingest succeeds. Concurrency is gated to a single Prefect slot, so
-no locking is needed here.
+each ingest succeeds. Each run is a one-shot process with its own clone,
+so no locking is needed here; git arbitrates overlapping pushes.
 
 Uses GitPython rather than shelling out so errors are typed and tests
 can mock cleanly.

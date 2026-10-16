@@ -14,24 +14,19 @@ the wiki to be rebuilt. A bare invocation is therefore gated by
 :func:`_auto_run_enabled`; naming ``export`` is an explicit request and always
 runs.
 
-It used to register a Prefect deployment and serve it forever. The
-``serve()`` loop and the ``wiki_curator_router`` dispatcher are gone —
-see :mod:`wiki_curator_cog.flow` for what replaced each Prefect facility.
-What is left here is the shell around one run: observability, the run id,
-and the exit code.
+This module is the shell around one run: observability, the run id,
+and the exit code. The run itself is :func:`wiki_curator_cog.flow.export_run`.
 
 **The exit code is load-bearing.** Railway will not start this service
 again while a previous start is still ``Active``, so a run that neither
 finishes nor fails takes every later run with it, silently. The deadline
 in :mod:`wiki_curator_cog._deadline` stops that from inside; this module
-makes sure the outcome reaches the outside as a non-zero exit and a
-failed Healthchecks ping.
+makes sure the outcome reaches the outside as a non-zero exit.
 
 Observability layers:
-  L1 — Healthchecks.io: start, then success or failure, per run
-  L2 — Structured logs: mini_app_polis logger throughout
-  L3 — Sentry: captures the unhandled exception that ends a run
-  L4 — Run report: one per run, sent by ``flow.export_run``
+  L1 — Structured logs: mini_app_polis logger throughout
+  L2 — Sentry: captures the unhandled exception that ends a run
+  L3 — Run report: one per run, sent by ``flow.export_run``
 """
 
 from __future__ import annotations
@@ -42,15 +37,9 @@ import os
 import sys
 import uuid
 
-import httpx
 import sentry_sdk
 from mini_app_polis import logger as log
-from mini_app_polis.environment import (
-    Effect,
-    Environment,
-    current_environment,
-    effect_enabled,
-)
+from mini_app_polis.environment import Environment, current_environment
 
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
@@ -59,38 +48,6 @@ from wiki_curator_cog.flow import REPO, export_run
 LOG = log.get_logger()
 
 __all__ = ["REPO", "main"]
-
-
-def _ping_healthchecks(config: Config, suffix: str = "") -> None:
-    """Tell Healthchecks.io a run started, succeeded or failed.
-
-    Three pings per run rather than one on boot. A boot ping said the
-    process had started, which for a one-shot is the least interesting
-    moment in the run: it is green whether or not the export then hung
-    for an hour. ``/start`` followed by a success or ``/fail`` ping means
-    the check's grace period catches the run that never came back — the
-    one failure mode a process cannot report on its own behalf.
-
-    One URL is one check across both environments. A dev container
-    pinging it holds the production check green while production is dead,
-    so the effect gate comes before the URL is read.
-    """
-    if not effect_enabled(Effect.HEALTHCHECKS):
-        LOG.info("healthchecks.ping_suppressed reason=not_production")
-        return
-    url = config.healthchecks_url
-    if not url:
-        return
-    try:
-        # no-retry: the ping is not the job. A missed /start or /fail
-        # costs one late check; retrying would delay the run that the
-        # check exists to watch. PIPE-007.
-        httpx.get(
-            url.rstrip("/") + suffix,
-            timeout=config.healthchecks_timeout_seconds,
-        )
-    except Exception as exc:  # noqa: BLE001 — the ping is not the job
-        LOG.warning("healthchecks.ping_failed suffix=%s err=%s", suffix or "/", exc)
 
 
 def _init_observability(config: Config, run_id: str) -> None:
@@ -178,7 +135,6 @@ def main(argv: list[str] | None = None) -> int:
 
     config = load_config()
     _init_observability(config, run_id)
-    _ping_healthchecks(config, "/start")
 
     try:
         summary = export_run(run_id=run_id)
@@ -188,10 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         # itself, to Sentry, and a non-zero exit, to Railway.
         sentry_sdk.capture_exception(exc)
         LOG.error("export.failed run_id=%s err=%s", run_id, exc)
-        _ping_healthchecks(config, "/fail")
         return 1
 
-    _ping_healthchecks(config)
     LOG.info("export.complete run_id=%s summary=%s", run_id, summary)
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0

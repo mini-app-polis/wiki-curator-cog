@@ -37,8 +37,8 @@ exemptions:
       timeout longer than the function timeout. There are no records — one
       wake is one run of one mode. What the rule protects against, a failure
       nobody hears about, is covered by run reporting (one run, one message,
-      sent on the way out of a failure at ERROR) and by the Healthchecks
-      grace period, which catches a run that never came back at all.
+      sent on the way out of a failure at ERROR), Sentry, and a non-zero
+      exit.
 
   - rule: PIPE-018
     reason: >
@@ -65,12 +65,12 @@ exemptions:
   - rule: CD-010
     reason: >
       ADR-009 makes a pipeline cog's liveness layer a dead-letter-queue alarm
-      with an action. There is no queue to alarm on. Liveness is
-      Healthchecks.io instead — pinged /start and then success or /fail per
-      run, so the check's grace period catches the one failure a process
-      cannot report on its own behalf. Sentry covers the unhandled exception,
-      and the run report covers everything the process lived long enough to
-      say.
+      with an action. There is no queue to alarm on, and no external
+      liveness check stands in for one. Sentry covers the unhandled
+      exception, the run report covers everything the process lived long
+      enough to say, and _deadline.py turns a hang into a reported failure.
+      A process killed outright (OOM) is not caught; the planned Lambda move
+      (see CD-021) brings the DLQ alarm this rule asks for.
 
   - rule: PIPE-015
     reason: >

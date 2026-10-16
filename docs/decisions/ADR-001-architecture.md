@@ -3,6 +3,7 @@
 **Date:** 2026-05-16 (revised 2026-05-18)
 **Status:** Accepted — partially superseded by ADR-004
 **Superseded parts:** "Three operating modes" and the `wiki_curator_router` dispatcher. There is one mode, `export`, and no router; see ADR-004.
+**Amendment (2026-10-16):** ADR-002 also supersedes this ADR's foundations — Layer 1 no longer routes `notes_json` via alias maps, and the `_aliases.yaml` files and `backfill` / `interactive` modes described below no longer exist. The cog renders the canonical entity graph; read ADR-002 for the current model.
 
 ## Context
 

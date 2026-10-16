@@ -86,7 +86,6 @@ def test_naming_the_mode_runs_regardless_of_the_gate(
         enum_patch,
         patch.object(main, "load_config"),
         patch.object(main, "_init_observability"),
-        patch.object(main, "_ping_healthchecks"),
         patch.object(main, "export_run", return_value={"paths_written": 0}) as export,
     ):
         assert main.main(["export"]) == 0

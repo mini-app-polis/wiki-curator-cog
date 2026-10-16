@@ -48,7 +48,7 @@ def _install_mini_app_polis_stub() -> None:
             RunReport, run_report
         )
         from mini_app_polis.environment import (
-            Effect, current_environment, effect_enabled, env_var
+            Environment, current_environment, env_var
         )
 
     Tests that exercise the curator never call the API stub's methods;
@@ -211,24 +211,14 @@ def _install_mini_app_polis_stub() -> None:
         DEVELOPMENT = type("E", (), {"value": "development"})()
         LOCAL = type("E", (), {"value": "local"})()
 
-    class _StubEffect:
-        HEALTHCHECKS = type(
-            "E", (), {"name": "HEALTHCHECKS", "value": "healthchecks"}
-        )()
-
     def _current_environment():
         return _StubEnvironment.PRODUCTION
-
-    def _effect_enabled(_effect: object) -> bool:
-        return True
 
     def _env_var(name: str) -> str:
         return (os.environ.get(name) or "").strip()
 
     env_module.Environment = _StubEnvironment  # type: ignore[attr-defined]
-    env_module.Effect = _StubEffect  # type: ignore[attr-defined]
     env_module.current_environment = _current_environment  # type: ignore[attr-defined]
-    env_module.effect_enabled = _effect_enabled  # type: ignore[attr-defined]
     env_module.env_var = _env_var  # type: ignore[attr-defined]
 
     pkg.logger = logger_module  # type: ignore[attr-defined]
@@ -267,7 +257,7 @@ def wiki_repo_path(tmp_path: Path) -> Path:
 def _env_isolation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip env vars that would otherwise leak from the host shell."""
     for key in list(os.environ):
-        if key.startswith(("KAIANO_", "WIKI_", "LLM_", "SENTRY_", "HEALTHCHECKS_")):
+        if key.startswith(("KAIANO_", "WIKI_", "LLM_", "SENTRY_")):
             monkeypatch.delenv(key, raising=False)
 
 
@@ -283,5 +273,3 @@ def _production_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     non-production path set ENVIRONMENT themselves.
     """
     monkeypatch.setenv("ENVIRONMENT", "production")
-    monkeypatch.delenv("PREFECT_TRIGGER_ENABLED", raising=False)
-    monkeypatch.delenv("HEALTHCHECKS_ENABLED", raising=False)

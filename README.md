@@ -5,7 +5,7 @@
 
 Renders the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base from the canonical WCS corpus in `api-kaianolevine-com`.
 
-Reads the canonical WCS entity graph from `api-kaianolevine-com` in one call (`GET /v1/wcs/wiki/export`, read-only), deterministically renders it onto source / concept / technique / instructor / terminology pages and views in a clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `notes-ingest-cog` has already extracted the structured `notes_json` from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
+Reads the canonical WCS entity graph from `api-kaianolevine-com` in one call (`GET /v1/wcs/wiki/export`, read-only), deterministically renders it onto source / concept / technique / instructor / terminology pages and views in a clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `transcription-cog` has already extracted the structured data from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
 
 **One mode, `export`.** A run takes no arguments: it fetches the whole corpus,
 re-renders every page from it, removes derived pages that are no longer
@@ -26,10 +26,7 @@ See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for 
 Drive transcript drop
         │
         ▼
-transcription-cog ──► raw transcripts
-        │
-        ▼
-notes-ingest-cog (LLM extraction) ──► api-kaianolevine-com (structured notes)
+transcription-cog (LLM extraction) ──► api-kaianolevine-com (transcripts + sources)
                                             │
                                             ▼ (HTTP API, read-only)
                                     wiki-curator-cog
@@ -94,15 +91,11 @@ WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main
 
 ## Observability
 
-Four layers, matching ecosystem convention:
+Three layers:
 
-1. **Healthchecks.io** — `/start` at the beginning of a run, then success or
-   `/fail` at the end. Per run rather than on boot: a boot ping went green
-   whether or not the export then hung for an hour, and the check's grace
-   period is what catches a run that never came back at all.
-2. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`.
-3. **Sentry** — the unhandled exception that ends a run.
-4. **Run report** — one per run, sent however it ends: SUCCESS or WARN out of a
+1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`.
+2. **Sentry** — the unhandled exception that ends a run.
+3. **Run report** — one per run, sent however it ends: SUCCESS or WARN out of a
    good run, ERROR out of a failed one.
 
 Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surfaced in the existing pipeline-evaluations UI on `website-astro-software`.
@@ -113,12 +106,12 @@ Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surf
 
 **The curator does not invent content.** Every wiki claim traces to an upstream source. The schema in `wcs-wiki/CLAUDE.md` is the operating manual; this cog implements it.
 
-**Deterministic by design.** No LLM calls at runtime. Given the same upstream notes_json and the same alias maps, the same input produces the same output. The only LLM step in the pipeline is upstream in `notes-ingest-cog`.
+**Deterministic by design.** No LLM calls at runtime. Given the same upstream export, the same input produces the same output. The only LLM step in the pipeline is upstream in `transcription-cog`.
 
 **Idempotency.** The render is a pure function of the export it fetched: every page is rewritten each run, derived pages no longer produced are removed, and an unchanged corpus yields an unchanged tree with nothing to commit. There is no per-item skip to get wrong, which is what lets a redundant run cost time rather than correctness.
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
-**Single-instance concurrency.** Each run is its own process with its own clone, so there is no shared working tree to race on, and Railway will not start the service again while a previous start is `Active`. Two overlapping runs could still race on the push, where git rejects the loser non-fast-forward. The Prefect concurrency slot this used to require is gone (ADR-004).
+**Single-instance concurrency.** Each run is its own process with its own clone, so there is no shared working tree to race on, and Railway will not start the service again while a previous start is `Active`. Two overlapping runs could still race on the push, where git rejects the loser non-fast-forward (ADR-004).
 
 **Read-only against upstream.** The curator only calls `GET` endpoints for note content. The only `POST` is to `/v1/evaluations` for pipeline-evaluation findings.
