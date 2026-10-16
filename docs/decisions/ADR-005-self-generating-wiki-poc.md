@@ -52,15 +52,56 @@ defined. A concept with no definition still gets its page.
 
 - Relations already satisfy this: composition find-or-creates both endpoints
   through `resolve_entity`.
-- Skills do not. A drill's purposes and a technique's requirements store the
-  skill as text (`skill_name`) and never resolve it, so the skill has no page.
-  They are to resolve through `resolve_entity`, keeping the entity id
-  alongside the text.
-- Every reference renders as a link, and every page gets a `## Referenced by`
-  section built from relations, drill purposes and technique requirements.
-- A run fails if any rendered link has no page.
+- Mentions do not. The baseline (2026-10-16, against the May render) found no
+  broken links — every rendered link resolves — but found foundational
+  concepts with no page at all, discussed across hundreds of pages and linked
+  from none: *connection*, *anchor*, *timing*. The extraction names specific
+  ideas ("anchor as a stationary arrival") and never the general concept they
+  belong to, so the general concept exists only as a scatter of narrower
+  variants with nothing pointing at a shared page.
+- `skill_name` on drill purposes and technique requirements is not a name to
+  resolve: it is a free-text sentence, every one distinct. Resolving it would
+  mint one junk entity per sentence. The references are the concepts
+  mentioned *inside* it — and inside every attribution and definition.
 - Thin pages are **not** marked as placeholders. A reader sees an
   underdeveloped concept and feeds the pipeline more material.
+
+### The linking pass: mentions become references
+
+An LLM pass reads each statement — attribution prose, definition, drill
+purpose, technique requirement — and names the concepts it refers to,
+general ones included. Each is resolved through `resolve_entity`, created if
+missing, and recorded as a reference from the entity the statement is about to
+the concept it mentions, carrying the statement's source and date.
+
+- Narrower variants come to point at their general concept; the general
+  concept collects everything that mentions it. That is the web. Variants are
+  not merged — whether *connection*'s variants should collapse is separate
+  curation, not this pass.
+- References are stored in the API as relations with a linker origin, so the
+  renderer, generation and eventually the website all read the same rows.
+- Every page gets a `## Referenced by` section, mechanically rendered from
+  them. A run fails if any rendered link has no page.
+- **Watermarked, like generation.** Each statement is linked once; a re-run
+  skips what is already linked. It covers the existing corpus and every new
+  source without re-extraction. Raising the linker version (a better prompt)
+  makes every statement eligible again — a rerun, not a correction.
+- Extending the extraction prompt instead was considered: cleaner for new
+  material, but the existing corpus would need re-extracting, which the
+  pipeline treats as rare-to-never. Running over stored statements also means
+  correction notes and operator additions are linked by the same pass.
+
+**References can be denied, and the newest word wins.** A statement can deny
+a reference as well as assert one ("frame has nothing to do with anchor").
+For any pair of entities the newest assertion or denial is the one that holds;
+the renderer and generation see only that. Older assertions stay stored, so
+history survives, and a later source that connects them again wins over the
+denial. This is how a correction note corrects a link.
+
+Links typed into the prose by hand (`[[anchor]]`) are part of the prose and
+sync back with it as a human revision. `## Referenced by` comes only from
+reference data; changing it means a correction note. The API's admin
+endpoints (delete a relation row) remain the escape hatch, not the path.
 
 ### Corrections are sources
 
@@ -131,7 +172,8 @@ proven as part of this work, not assumed.
 Tracked in Asana under MINI-29.
 
 1. **MINI-83** — baseline export and link check.
-2. **MINI-84** — resolve skill references to entities; `## Referenced by`.
+2. **MINI-84** — the linking pass: mentions become references, general
+   concepts get pages, denials and newest-wins, `## Referenced by`.
 3. **MINI-85** — notes and corrections ingest as sources. transcription-cog's
    minimum-length gate (`MIN_TRANSCRIPT_CHARS`) currently drops short notes;
    the extraction must emit a correction as a statement that can supersede an
@@ -142,6 +184,9 @@ Tracked in Asana under MINI-29.
 5. **MINI-87** — prove the update loop by hand and in tests:
    - a new lesson regenerates only the entities it touches;
    - a correction note contradicting an older claim changes the page;
+   - a correction note denying a link removes it from the pages, and a later
+     source re-asserting it brings it back;
+   - raising the linker version relinks every statement;
    - an edit in the repo syncs to the API and survives a later lesson, merged
      with it;
    - a newer note overrides an older edit;
@@ -163,11 +208,13 @@ Tracked in Asana under MINI-29.
   the AWS follow-on; `evaluator.yaml` is not changed until the code is.
 - If the markdown repo stops being the edit surface, the git dependency — the
   reason ADR-004's Lambda fit check failed — stops being load-bearing.
-- New API surface: skill entity ids on drill purposes and technique
-  requirements, a prose revisions table, a per-entity watermark, and a write
-  endpoint for the cog.
-- Cost becomes a real input: generation calls an LLM per changed entity. The
-  watermark keeps steady-state cost proportional to new material.
+- New API surface: linker-origin relations with an assert/deny polarity and
+  a statement reference, a per-statement linking watermark, a prose revisions
+  table, a per-entity integration watermark, and write endpoints for the cog.
+- Cost becomes a real input: linking calls an LLM per new statement and
+  generation per changed entity. The watermarks keep steady-state cost
+  proportional to new material; the first pass over the existing corpus is the
+  expensive one, and MINI-88 measures it.
 
 ## Follow-ons, if MINI-88 is a go
 
@@ -190,6 +237,10 @@ Separate work, not part of this decision:
 - **A concept hierarchy with top-level parent pages.** Rejected: the domain is
   a web of references, not a tree.
 - **Mark placeholder pages.** Rejected: a thin page already says it is thin.
+- **Resolve `skill_name` to entities.** Rejected after the baseline: it is a
+  sentence, not a name.
+- **Emit references from the extraction.** Deferred: needs re-extracting the
+  existing corpus; the linking pass covers old and new material alike.
 - **A separate correction surface** (CLI, guidance notes, prose
   status/approval). Rejected: corrections are sources and share the
   ingestion, with recency deciding conflicts.
