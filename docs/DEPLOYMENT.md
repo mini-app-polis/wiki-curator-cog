@@ -41,8 +41,8 @@ is echoed.
 
 A Railway service backed by this repo, Railpack builder, its production
 settings declared in `.railway/railway.ts` and applied by CI: a pull request
-into `main` that changes `.railway/` gets a plan comment, and merging it
-applies that plan (`.railway/README.md`). The development service keeps the
+into `main` that changes `.railway/` is planned, and merging it applies —
+removals only with the `allow-destroy` label (`.railway/README.md`). The development service keeps the
 settings its dashboard holds.
 
 - `.railway/railway.ts` declares `python -m wiki_curator_cog.main` — which now
