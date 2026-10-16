@@ -1,0 +1,25 @@
+# Applies the plan railway-plan.yml pinned on the pull request, when that
+# pull request lands on main. It applies exactly the reviewed change set,
+# and fails if the environment or .railway/ moved since the plan. A push to
+# main that did not come through a pull request has no plan and fails by
+# design. The steps live in the shared workflow in mini-app-polis/.github.
+# MINI-69.
+name: Railway apply
+
+on:
+  push:
+    branches: [main]
+    paths: [".railway/**"]
+
+# pull-requests: read lets the action find the merged pull request, and
+# actions: read lets it download that pull request's plan.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  apply:
+    uses: mini-app-polis/.github/.github/workflows/railway-apply.yml@v3
+    secrets:
+      railway-token: ${{ secrets.RAILWAY_TOKEN }}

@@ -39,11 +39,14 @@ is echoed.
 
 ### 2. Railway service
 
-A Railway service backed by this repo, Railpack builder, start command from
-`railway.json`.
+A Railway service backed by this repo, Railpack builder, its production
+settings declared in `.railway/railway.ts` and applied by CI: a pull request
+into `main` that changes `.railway/` gets a plan comment, and merging it
+applies that plan (`.railway/README.md`). The development service keeps the
+settings its dashboard holds.
 
-- `railway.json` declares `python -m wiki_curator_cog.main` — which now renders
-  once and exits rather than serving a Prefect deployment forever.
+- `.railway/railway.ts` declares `python -m wiki_curator_cog.main` — which now
+  renders once and exits rather than serving a Prefect deployment forever.
 - `restartPolicyType` is **`NEVER`**, deliberately. Each restart would be a
   fresh clone, a full render and another push attempt, and — since the run
   reports on its way out — another report for the same triggered run. A

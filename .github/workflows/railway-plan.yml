@@ -1,0 +1,22 @@
+# Plans .railway/railway.ts on every pull request into main that changes it,
+# and pins that plan for the apply on merge (railway-apply.yml). The plan is
+# posted to the pull request as a comment; reading it is the review, and
+# merging is the approval. The steps live in the shared workflow in
+# mini-app-polis/.github. MINI-69.
+name: Railway plan
+
+on:
+  pull_request:
+    branches: [main]
+    paths: [".railway/**"]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  plan:
+    uses: mini-app-polis/.github/.github/workflows/railway-plan.yml@v3
+    secrets:
+      # A project token for the ecosystem project's production environment.
+      railway-token: ${{ secrets.RAILWAY_TOKEN }}
