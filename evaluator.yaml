@@ -106,17 +106,7 @@ exemptions:
       service. If the Lambda move is dropped, it stops being true: replace it
       with a root Dockerfile modelled on db-ops's.
 
-  # ── Not about the runtime: these two describe a file-processing cog ──
-
-  - rule: PY-012
-    reason: >
-      FAILED_ prefixing renames an input file that failed processing so it
-      stays visible in the source folder. This cog has no input files. Its
-      input is one HTTP response — GET /v1/wcs/wiki/export, the canonical
-      entity graph — and its output is markdown in a git repo. There is
-      nothing in a source folder to rename, and a run that fails leaves the
-      upstream untouched by construction. Its visibility mechanism is the run
-      report and a non-zero exit, not a renamed file.
+  # ── Not about the runtime: this one describes a file-processing cog ──
 
   - rule: PY-013
     reason: >
