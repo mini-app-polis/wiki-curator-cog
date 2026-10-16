@@ -19,18 +19,6 @@ type: pipeline-cog
 # this — a periodic whole-corpus rebuild with no per-item work. This file is
 # the evidence for that conversation, not a way of avoiding it.
 
-deferrals:
-  - rule: CD-021
-    reason: >
-      Applies: this cog is built by Railpack from railway.json, so its base
-      image, interpreter patch and system packages (git, from railpack.json)
-      are recorded nowhere. It is not given a Dockerfile because it is moving
-      to Lambda once its design is finished (decided 2026-10-14), and that
-      move removes railway.json and the Railway build with it. This deferral
-      comes out in the change that retires the Railway service. If the Lambda
-      move is dropped, add a root Dockerfile modelled on db-ops's instead.
-    until: null
-
 exemptions:
   - rule: PIPE-016
     reason: >
@@ -101,6 +89,22 @@ exemptions:
       declarations are railway.json (startCommand, restartPolicyType: NEVER)
       and RUN_TIMEOUT_SECONDS, which is the ceiling a run is actually stopped
       against.
+
+  # ── Not about the runtime: a build this cog is leaving ──
+
+  - rule: CD-021
+    reason: >
+      The rule's concern is real while the Railway build exists: Railpack
+      infers the base image, the interpreter patch and the system packages
+      (git, from railpack.json) at build time and records them nowhere. It is
+      exempt rather than deferred because the fix it asks for has no future
+      here. This cog is moving to Lambda (decided 2026-10-14), the Lambda
+      cogs deploy as zips rather than images, and that move deletes
+      railway.json and railpack.json. A root Dockerfile would be written only
+      to be removed, and would describe a runtime the cog is not going to
+      have. This exemption comes out in the change that retires the Railway
+      service. If the Lambda move is dropped, it stops being true: replace it
+      with a root Dockerfile modelled on db-ops's.
 
   # ── Not about the runtime: these two describe a file-processing cog ──
 
