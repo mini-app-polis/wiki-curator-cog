@@ -86,7 +86,7 @@ exemptions:
     reason: >
       Reads a pipeline cog's infra/ Terraform — memory_size and timeout — as
       its platform descriptor. There is no infra/. The equivalent
-      declarations are railway.json (startCommand, restartPolicyType: NEVER)
+      declarations are .railway/railway.ts (startCommand, restartPolicyType: NEVER)
       and RUN_TIMEOUT_SECONDS, which is the ceiling a run is actually stopped
       against.
 
@@ -100,7 +100,7 @@ exemptions:
       exempt rather than deferred because the fix it asks for has no future
       here. This cog is moving to Lambda (decided 2026-10-14), the Lambda
       cogs deploy as zips rather than images, and that move deletes
-      railway.json and railpack.json. A root Dockerfile would be written only
+      .railway/ and railpack.json. A root Dockerfile would be written only
       to be removed, and would describe a runtime the cog is not going to
       have. This exemption comes out in the change that retires the Railway
       service. If the Lambda move is dropped, it stops being true: replace it
