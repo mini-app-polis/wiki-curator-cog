@@ -59,7 +59,13 @@ from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
 from .git_ops import WikiRepo
-from .render import list_stale_derived_paths, render_bundle
+from .render import (
+    build_indexes,
+    corpus_quality,
+    find_broken_links,
+    list_stale_derived_paths,
+    render_bundle,
+)
 
 LOG = log.get_logger()
 
@@ -169,6 +175,69 @@ def _export(config: Config) -> dict:
         "dropped": list(stats.dropped),
     }
     LOG.info("export.complete %s", summary)
+    return summary
+
+
+def _existing_markdown(wiki_repo_path: Path) -> set[str]:
+    return {
+        str(p.relative_to(wiki_repo_path))
+        for p in wiki_repo_path.rglob("*.md")
+        if ".git" not in p.relative_to(wiki_repo_path).parts
+    }
+
+
+def render_local(wiki_repo_path: Path) -> dict:
+    """Render into an existing local clone. No clone, commit, push or report.
+
+    The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
+    Obsidian or ``git diff``, change something, run it again. Nothing leaves
+    the machine except the export GET, so it needs the API key and nothing
+    else — no GH_TOKEN, and no Discord message per iteration.
+
+    ``log.md`` is not touched: a local iteration is not an event in the
+    wiki's history. Stale derived pages are removed from the working tree,
+    as an export would, so ``git status`` shows exactly what an export would
+    commit.
+    """
+    if not (wiki_repo_path / "CLAUDE.md").exists():
+        raise RuntimeError(
+            f"WIKI_REPO_PATH does not look like a wcs-wiki clone "
+            f"(no CLAUDE.md found): {wiki_repo_path}"
+        )
+
+    export = _fetch_export()
+    bundle, stats = render_bundle(export, rendered_at=dt.date.today())
+    bundle.pop("log.md", None)
+
+    stale = list_stale_derived_paths(wiki_repo_path, set(bundle))
+    for path in stale:
+        path.unlink(missing_ok=True)
+    written = _write_bundle(wiki_repo_path, bundle)
+
+    broken = find_broken_links(
+        bundle, existing_paths=_existing_markdown(wiki_repo_path)
+    )
+    summary = {
+        "wiki_repo_path": str(wiki_repo_path),
+        "entities": stats.entity_count,
+        "sources": stats.source_count,
+        "instructors": stats.instructor_count,
+        "pages_rendered": len(written),
+        "pages_removed": [str(p.relative_to(wiki_repo_path)) for p in stale],
+        "broken_links": {
+            "count": len(broken),
+            "links": [{"page": page, "target": target} for page, target in broken],
+        },
+        "dropped": [{"reason": r, "reference": ref} for r, ref in stats.dropped],
+        "quality": corpus_quality(export, build_indexes(export)),
+    }
+    LOG.info(
+        "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",
+        len(written),
+        len(stale),
+        len(broken),
+        len(stats.dropped),
+    )
     return summary
 
 

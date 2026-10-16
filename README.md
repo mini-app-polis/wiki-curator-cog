@@ -84,6 +84,18 @@ uv run check-doppler-keys                  # every required .env.example name is
 uv run pytest
 ```
 
+### Render locally (no commit, no push)
+
+The proof-of-concept loop (ADR-005). Writes into your existing clone and
+stops — no commit, no push, no run report, and `log.md` is left alone — then
+prints a JSON summary: pages written and removed, broken links, dropped
+references, and how developed each entity is (thin, single-source, isolated).
+Exits 1 if any link has no page, after writing, so the result can be read.
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > render-summary.json
+```
+
 ### Run an export locally
 
 `WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the

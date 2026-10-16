@@ -1113,6 +1113,77 @@ def render_bundle(
     return bundle, stats
 
 
+#: An Obsidian wiki-link: ``[[target]]``, ``[[target|label]]`` or
+#: ``[[target#heading]]``. Group 1 is the target path, without ``.md``.
+_WIKI_LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+
+
+def _page_key(path: str) -> str:
+    return path[:-3] if path.endswith(".md") else path
+
+
+def find_broken_links(
+    bundle: dict[str, str],
+    *,
+    existing_paths: Iterable[str] = (),
+) -> list[tuple[str, str]]:
+    """Every wiki-link in the bundle whose target is not a page.
+
+    A target is a page if the bundle renders it or it already exists in the
+    wiki repo outside the derived layer (``README.md``, ``CLAUDE.md``).
+    Returns ``(page, target)`` pairs in page order, one per occurrence.
+
+    The renderers only ever link to what they render, so today this should
+    come back empty; it exists so that stays true as references grow
+    (ADR-005: every referenced concept has a page).
+    """
+    known = {_page_key(p) for p in bundle} | {_page_key(p) for p in existing_paths}
+    broken: list[tuple[str, str]] = []
+    for path in sorted(bundle):
+        for match in _WIKI_LINK_RE.finditer(bundle[path]):
+            target = match.group(1).strip()
+            if _page_key(target) not in known:
+                broken.append((path, target))
+    return broken
+
+
+def corpus_quality(export: WcsWikiExport, indexes: ExportIndexes) -> dict[str, Any]:
+    """How developed the corpus is, entity by entity.
+
+    For reading, not for gating: a thin page is expected and is fed by more
+    material, not flagged (ADR-005).
+
+    - ``thin``: no attribution and no definition — a page with a name and,
+      at most, links.
+    - ``single_source``: everything said about it comes from one source.
+    - ``isolated``: no relation in either direction.
+    """
+    by_kind: dict[str, int] = defaultdict(int)
+    thin: list[str] = []
+    single_source: list[str] = []
+    isolated: list[str] = []
+    for entity in sorted(export.entities, key=lambda e: e.slug):
+        by_kind[entity.kind] += 1
+        attributions = indexes.attributions_by_entity.get(entity.id, [])
+        definitions = indexes.definitions_by_entity.get(entity.id, [])
+        if not attributions and not definitions:
+            thin.append(entity.slug)
+        else:
+            source_ids = {a.source_id for a in attributions} | {
+                d.source_id for d in definitions
+            }
+            if len(source_ids) == 1:
+                single_source.append(entity.slug)
+        if not indexes.relations_by_entity.get(entity.id):
+            isolated.append(entity.slug)
+    return {
+        "entities_by_kind": dict(sorted(by_kind.items())),
+        "thin": {"count": len(thin), "slugs": thin},
+        "single_source": {"count": len(single_source), "slugs": single_source},
+        "isolated": {"count": len(isolated), "slugs": isolated},
+    }
+
+
 DERIVED_GLOBS: tuple[str, ...] = (
     "concepts/*.md",
     "techniques/*.md",

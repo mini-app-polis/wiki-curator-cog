@@ -5,6 +5,7 @@ exits; there is no resident loop and nothing to dispatch.
 
     python -m wiki_curator_cog.main          # what Railway's start command runs
     python -m wiki_curator_cog.main export   # a run asked for on purpose
+    python -m wiki_curator_cog.main render   # local only: no commit, push or report
 
 **Those two are not quite the same thing, and the difference is the point.**
 Starting the container is how a run is triggered today, which means every
@@ -36,6 +37,7 @@ import json
 import os
 import sys
 import uuid
+from pathlib import Path
 
 import sentry_sdk
 from mini_app_polis import logger as log
@@ -43,7 +45,7 @@ from mini_app_polis.environment import Environment, current_environment
 
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
-from wiki_curator_cog.flow import REPO, export_run
+from wiki_curator_cog.flow import REPO, export_run, render_local
 
 LOG = log.get_logger()
 
@@ -79,17 +81,19 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         description=(
             "Render the wcs-wiki once and exit. Naming 'export' runs "
             "unconditionally; with no argument the run is gated by "
-            "RUN_ON_START, which defaults to on in production only."
+            "RUN_ON_START, which defaults to on in production only. "
+            "'render' writes into the existing clone at WIKI_REPO_PATH and "
+            "stops there: no commit, no push, no run report."
         ),
     )
     parser.add_argument(
         "mode",
         nargs="?",
         default=None,
-        choices=["export"],
+        choices=["export", "render"],
         help=(
-            "Optional, and only one mode exists. Naming it asks for a run "
-            "outright; omitting it defers to RUN_ON_START."
+            "Optional. 'export' asks for a run outright; omitting it defers "
+            "to RUN_ON_START. 'render' is the local proof-of-concept loop."
         ),
     )
     return parser.parse_args(argv)
@@ -115,9 +119,29 @@ def _auto_run_enabled() -> bool:
     return current_environment() is Environment.PRODUCTION
 
 
+def _render(wiki_repo_path_raw: str) -> int:
+    """The local loop: render into a clone, print what it found.
+
+    Exits non-zero when any link has no page, after writing, so the result
+    is still there to inspect.
+    """
+    if not wiki_repo_path_raw.strip():
+        LOG.error(
+            "render.failed err=WIKI_REPO_PATH must point at a local wcs-wiki clone"
+        )
+        return 2
+    wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
+    summary = render_local(wiki_repo_path)
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 1 if summary["broken_links"]["count"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run one export and return the process exit code."""
+    """Run one export, or one local render, and return the process exit code."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+
+    if args.mode == "render":
+        return _render(os.getenv("WIKI_REPO_PATH", ""))
 
     # Before load_config, so a container that is not going to do anything
     # exits cleanly whether or not its secrets are in place.
