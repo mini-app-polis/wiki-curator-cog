@@ -5,8 +5,7 @@ run. It clones `wcs-wiki`, re-renders the whole corpus, commits, pushes,
 reports, and exits. Nothing stays resident between runs, and there is no queue.
 
 See `docs/decisions/ADR-004-one-shot-on-railway-no-prefect.md` for why this cog
-stayed on Railway when the rest of the fleet moved to SQS + Lambda, and for
-what replaced each Prefect facility.
+stayed on Railway when the rest of the fleet moved to SQS + Lambda.
 
 ## What the cog needs
 
@@ -45,8 +44,8 @@ into `main` that changes `.railway/` is planned, and merging it applies —
 removals only with the `allow-destroy` label (`.railway/README.md`). The development service keeps the
 settings its dashboard holds.
 
-- `.railway/railway.ts` declares `python -m wiki_curator_cog.main` — which now
-  renders once and exits rather than serving a Prefect deployment forever.
+- `.railway/railway.ts` declares `python -m wiki_curator_cog.main`, which
+  renders once and exits.
 - `restartPolicyType` is **`NEVER`**, deliberately. Each restart would be a
   fresh clone, a full render and another push attempt, and — since the run
   reports on its way out — another report for the same triggered run. A
@@ -75,14 +74,10 @@ Optional:
 
 ```
 SENTRY_DSN_COGS=https://…@sentry.io/…              # the shared cogs project — see below
-HEALTHCHECKS_URL_WIKI_CURATOR_COG=https://hc-ping.com/…
 RUN_TIMEOUT_SECONDS=600                            # the run budget; see below
 RUN_ON_START=                                      # see "Triggering a run"
 LOGGING_LEVEL=INFO
 ```
-
-**`PREFECT_API_KEY` and `PREFECT_API_URL` are no longer read.** Remove them
-from Doppler with the rest of the Prefect teardown.
 
 **Sentry is the shared cogs project**, read from `SENTRY_DSN_COGS` like every
 other cog. Events from this service carry `service:wiki-curator-cog`; filter
@@ -147,27 +142,23 @@ a real push has been timed. `_deadline.py` raises
 ordinary path: the run report is sent, `main` exits non-zero, and the next
 start is free to happen.
 
-Healthchecks.io is the other half. The cog pings `/start` at the beginning of
-a run and then either success or `/fail` at the end, so the check's grace
-period catches a run that never came back at all — the one failure a process
-cannot report on its own behalf. Set the grace period above the budget.
+There is no external liveness check. A process killed outright (OOM) sends no
+run report and leaves nothing in Sentry; the only signs are Railway's
+deployment status and a missing run report.
 
 ## Observability
 
 | Layer | Signal               | Where                                             |
 | ----- | -------------------- | ------------------------------------------------- |
-| L1    | Liveness             | Healthchecks.io `/start` → success or `/fail`     |
-| L2    | Structured logs      | `mini_app_polis` JSON logger                      |
-| L3    | Unhandled exceptions | Sentry                                            |
-| L4    | Run outcome          | One `RunReport` per run, sent however it ends     |
-| L5    | Quality signals      | `pipeline_evaluations` via `POST /v1/evaluations` |
+| L1    | Structured logs      | `mini_app_polis` JSON logger                      |
+| L2    | Unhandled exceptions | Sentry                                            |
+| L3    | Run outcome          | One `RunReport` per run, sent however it ends     |
+| L4    | Quality signals      | `pipeline_evaluations` via `POST /v1/evaluations` |
 
-L4 is new in shape, not in kind: the report used to cover only the success
-path, with a crash reported by a Prefect state hook at severity **ERROR**.
-With Prefect gone, `flow.export_run` owns both paths — `report.send()` on
-success, an explicit ERROR finding on failure — so there is still exactly one
-message per run, and a run that died still reads as ERROR rather than as the
-WARN a derived severity would have produced.
+`flow.export_run` owns both L3 paths — `report.send()` on success, an explicit
+ERROR finding on failure — so there is exactly one message per run, and a run
+that died reads as ERROR rather than as the WARN a derived severity would have
+produced.
 
 **A credential preflight runs before the clone.** `boot.assert_push_access`
 makes the same request `git push` makes first, so a token that reads but
@@ -186,6 +177,5 @@ the commit.
 | `error: RPC failed; curl 92 HTTP/2 stream … was not closed cleanly` on push | large push trips libcurl's HTTP/2 stream error | Already mitigated: `boot.ensure_wiki_clone` sets `http.version=HTTP/1.1` and `http.postBuffer=500MB`, and `WikiRepo.push` retries three times with backoff |
 | `RunOutOfTime` in the logs, run reported as failed | the render plus clone and push exceeded `RUN_TIMEOUT_SECONDS` | Working as intended — it failed instead of hanging. Raise the budget once a real run has been timed, or find what got slow |
 | A new run never starts and the service shows `Active` | a previous run neither finished nor failed | This is what the budget exists to prevent; if it happens the budget is unset or too high. Stop the service, then check why the run hung |
-| Healthchecks shows the check late but Railway shows no failure | the process died without pinging `/fail` | Check Sentry — a hard kill (OOM) leaves no report |
 | Every call returns 401 | `WIKI_CURATOR_COG_API_KEY` unset, stale, or not matching the API's copy | Compare Doppler against the API's environment. There is no fallback credential — rotation must land on both sides |
 | Sentry is silent on a failed run | `SENTRY_DSN_COGS` not set | Set it in Doppler. In Sentry, filter the cogs project on `service:wiki-curator-cog` |

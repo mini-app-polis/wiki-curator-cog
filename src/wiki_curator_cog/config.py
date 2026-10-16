@@ -28,14 +28,12 @@ _DEFAULT_WIKI_REPO_PATH = "/tmp/wcs-wiki"
 #: fast enough to be a signal rather than an afternoon.
 _DEFAULT_RUN_TIMEOUT_SECONDS = 600
 
-#: How long the push preflight and the Healthchecks ping may wait.
+#: How long the push preflight may wait.
 #:
-#: Separate from the run budget and from each other: one is a credential
-#: check whose failure stops the run, the other is a ping whose failure is
-#: shrugged off. Both are here rather than inline so a test can set them to
-#: zero without touching source (TEST-013).
+#: Separate from the run budget: it is a credential check whose failure
+#: stops the run. Here rather than inline so a test can set it to zero
+#: without touching source (TEST-013).
 _DEFAULT_PUSH_PREFLIGHT_TIMEOUT_SECONDS = 10.0
-_DEFAULT_HEALTHCHECKS_TIMEOUT_SECONDS = 5.0
 
 
 def _require_api_base_url() -> str:
@@ -83,12 +81,10 @@ class Config:
     wiki_git_author_name: str
     wiki_git_author_email: str
     gh_token: str
-    healthchecks_url: str
     sentry_dsn: str
     logging_level: str
     run_timeout_seconds: int
     push_preflight_timeout_seconds: float
-    healthchecks_timeout_seconds: float
 
     @property
     def wiki_repo_is_https(self) -> bool:
@@ -123,7 +119,6 @@ def load_config() -> Config:
             "WIKI_GIT_AUTHOR_EMAIL", "wiki-curator@kaianolevine.com"
         ),
         gh_token=gh_token,
-        healthchecks_url=os.getenv("HEALTHCHECKS_URL_WIKI_CURATOR_COG", ""),
         # The shared cogs Sentry project, under the same name every cog
         # reads. Events are told apart by the `service` tag main.py sets.
         sentry_dsn=os.getenv("SENTRY_DSN_COGS", ""),
@@ -131,9 +126,6 @@ def load_config() -> Config:
         run_timeout_seconds=_run_timeout_seconds(),
         push_preflight_timeout_seconds=_float_env(
             "PUSH_PREFLIGHT_TIMEOUT_SECONDS", _DEFAULT_PUSH_PREFLIGHT_TIMEOUT_SECONDS
-        ),
-        healthchecks_timeout_seconds=_float_env(
-            "HEALTHCHECKS_TIMEOUT_SECONDS", _DEFAULT_HEALTHCHECKS_TIMEOUT_SECONDS
         ),
     )
 

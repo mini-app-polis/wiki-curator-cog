@@ -1,6 +1,6 @@
 # Pipeline architecture
 
-`wiki-curator-cog` consumes structured WCS notes from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The notes themselves are produced by `notes-ingest-cog` running an LLM-based extraction over raw transcripts; the curator runs no LLM at runtime and processes the already-structured `notes_json` deterministically.
+`wiki-curator-cog` consumes the canonical WCS entity graph from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The structured data is produced by `transcription-cog` running an LLM-based extraction over raw transcripts; the curator runs no LLM at runtime and renders the already-structured export deterministically.
 
 ## Flow diagram
 
@@ -10,19 +10,14 @@ Drive transcript drop
         ▼
 ┌──────────────────────────┐
 │   transcription-cog       │
-│   raw transcripts         │
-└──────────┬────────────────┘
-           │ POST /v1/wcs/transcripts
-           ▼
-┌──────────────────────────┐
-│   notes-ingest-cog        │
 │   LLM extraction          │
 └──────────┬────────────────┘
-           │ POST /v1/wcs/notes
+           │ POST /v1/wcs/transcripts, POST /v1/wcs/sources
            ▼
 ┌──────────────────────────────────────────────┐
 │   api-kaianolevine-com                       │
-│   wcs_transcripts + wcs_notes (Postgres)     │
+│   wcs_transcripts + wcs_sources → canonical  │
+│   entity layer (Postgres)                    │
 └──────────┬───────────────────────────────────┘
            │ GET /v1/wcs/wiki/export (read-only)
            ▼
@@ -45,8 +40,8 @@ Drive transcript drop
 
 Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 
-- **Layer 1 — deterministic collection.** This cog. Reads the canonical entity graph from the API and routes its fields onto wiki pages mechanically via three alias maps (`instructors/`, `concepts/`, `techniques/` _aliases.yaml). Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream notes and the same alias maps, the same input always produces the same output.
-- **Layer 2 — LLM polish pass.** Operates on Layer 1's output and refines it: prose synthesis where Layer 1 emits a mechanical Overview template, instructor-page `## Background` / `## Teaching themes` / `## Notable framings`, terminology-page creation when vocabulary collapses are ambiguous, lint findings, query answering. Runs after Layer 1 finishes. Its coordination is still to be designed; the Prefect slot this originally named is gone (ADR-004).
+- **Layer 1 — deterministic collection.** This cog. Reads the canonical entity graph from the API and routes its fields onto wiki pages mechanically, matching names against the aliases each entity carries in the export. Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream export, the same input always produces the same output.
+- **Layer 2 — LLM polish pass.** Operates on Layer 1's output and refines it: prose synthesis where Layer 1 emits a mechanical Overview template, instructor-page `## Background` / `## Teaching themes` / `## Notable framings`, terminology-page creation when vocabulary collapses are ambiguous, lint findings, query answering. Runs after Layer 1 finishes. Its coordination is still to be designed.
 
 This cog implements Layer 1.
 
@@ -61,14 +56,13 @@ This cog implements Layer 1.
 
 | Layer | Signal              | Where                                             |
 | ----- | ------------------- | ------------------------------------------------- |
-| L1    | Liveness            | Healthchecks.io: `/start`, then success or `/fail`, per run |
-| L2    | Structured logs     | `mini_app_polis` JSON logger                      |
-| L3    | Unhandled exceptions| Sentry                                            |
-| L4    | Quality signals     | `pipeline_evaluations` via `POST /v1/evaluations` |
+| L1    | Structured logs     | `mini_app_polis` JSON logger                      |
+| L2    | Unhandled exceptions| Sentry                                            |
+| L3    | Quality signals     | `pipeline_evaluations` via `POST /v1/evaluations` |
 
 ## Concurrency
 
-One wake is one run in one process, which clones into its own container's `/tmp` and shares nothing — so the working-tree race the old Prefect concurrency slot guarded against cannot happen. Railway will not start the service again while a previous start is `Active`. What two overlapping runs could still race on is the push, and git arbitrates that: the loser is rejected non-fast-forward and fails visibly. That is weaker than a lock and strong enough for a manually-triggered rebuild; it would not be enough for anything automatic and frequent. See ADR-004.
+One wake is one run in one process, which clones into its own container's `/tmp` and shares nothing — so there is no working-tree race to guard against. Railway will not start the service again while a previous start is `Active`. What two overlapping runs could still race on is the push, and git arbitrates that: the loser is rejected non-fast-forward and fails visibly. That is weaker than a lock and strong enough for a manually-triggered rebuild; it would not be enough for anything automatic and frequent. See ADR-004.
 
 ## One mode, and the run budget
 
@@ -79,7 +73,7 @@ the trigger can be crude and why redundant runs cost time rather than
 correctness. The `backfill` / `incremental` / `interactive` split described in
 ADR-001 no longer exists.
 
-A run has a declared budget, `RUN_TIMEOUT_SECONDS` (default 1800). This is not
+A run has a declared budget, `RUN_TIMEOUT_SECONDS` (default 600). This is not
 a Lambda-style ceiling being imitated for its own sake: Railway silently skips
 every later start while a previous one is still `Active`, so a run that hangs
 takes all its successors with it and says nothing. `_deadline.py` raises inside

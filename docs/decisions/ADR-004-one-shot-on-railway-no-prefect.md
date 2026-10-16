@@ -1,7 +1,8 @@
 # ADR-004 — One shot on Railway, no Prefect, no queue
 
 **Date:** 2026-09-23
-**Status:** Accepted
+**Status:** Accepted — amended 2026-10-16
+**Amendment (2026-10-16):** Two parts of this ADR no longer hold. (1) "Healthchecks.io per run, not per boot" is reversed: no Healthchecks check exists for this cog, and the ping code and `HEALTHCHECKS_URL_WIKI_CURATOR_COG` were removed. There is no external liveness check; see `evaluator.yaml` CD-010. (2) Staying on Railway was revisited on 2026-10-14: the cog is to move to Lambda (see `evaluator.yaml` CD-021); that decision has no ADR yet. Smaller drift: the run budget default is 600s, not 1800s, and the restart policy lives in `.railway/railway.ts`, not `railway.json`. The Prefect removal stands.
 **Supersedes:** ADR-001's "Three operating modes" and its `wiki_curator_router`
 dispatcher; ADR-002's "The Prefect deployment shape and concurrency slot"
 

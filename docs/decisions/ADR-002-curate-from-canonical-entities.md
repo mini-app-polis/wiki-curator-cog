@@ -1,7 +1,7 @@
 # ADR-002 — Repurpose curator as renderer over canonical entities
 
 **Date:** 2026-05-19
-**Status:** Accepted
+**Status:** Accepted — partially superseded by ADR-003 (bucketed source directories) and ADR-004 (Prefect deployment shape)
 **Supersedes (partially):** ADR-001 (Architecture and scope)
 **Related:** `api-kaianolevine-com` ADR-0002 (WCS entity substrate), ADR-0004 (rebuild from scratch)
 
