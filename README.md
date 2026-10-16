@@ -18,6 +18,13 @@ Triggered manually. One wake is one run: the process renders once and exits. The
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
+> **Direction (ADR-005, planned):** the cog is becoming a self-generating wiki.
+> An LLM will maintain each entity's prose by integrating new statements —
+> lessons and correction notes alike, newer winning — into the current page,
+> human edits included, with the prose and its revisions owned by the API.
+> Until that code lands, the "no LLM at runtime" and "deterministic" statements
+> below describe the current renderer, not the plan. Tracked as MINI-29.
+
 ---
 
 ## Architecture

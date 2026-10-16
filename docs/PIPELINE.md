@@ -38,6 +38,11 @@ Drive transcript drop
 
 ## Two-layer wiki architecture
 
+> **Superseded in part by ADR-005 (planned).** The split returns in a different
+> form: mechanically rendered evidence sections, plus LLM-owned prose that is
+> integrated per entity from new statements and the current page, stored and
+> versioned in the API. The description below is the current renderer.
+
 Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 
 - **Layer 1 — deterministic collection.** This cog. Reads the canonical entity graph from the API and routes its fields onto wiki pages mechanically, matching names against the aliases each entity carries in the export. Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views. Given the same upstream export, the same input always produces the same output.
