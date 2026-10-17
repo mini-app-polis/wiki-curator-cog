@@ -49,13 +49,14 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+from typing import Any
 
 from mini_app_polis import logger as log
 from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import consolidate, generate, identity, link
+from . import consolidate, generate, identity, link, usage
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -340,8 +341,12 @@ def link_local(
     batch_size: int = link.DEFAULT_BATCH_SIZE,
     workers: int = 1,
     facets_path: Path | None = None,
+    dry_run: bool = False,
 ) -> dict:
     """Run the linking pass locally: references to a JSON file, nothing to the API.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
 
     ADR-005 / MINI-84, local half. Reads the export (read-only), links every
     statement not already in ``links_path`` under the current linker version
@@ -362,7 +367,7 @@ def link_local(
     )
     catalog = link.Catalog(export.entities)
     links = link.LinksFile.load(links_path)
-    llm, model = link.llm_from_env()
+    llm, model = link.llm_from_env(dry_run=dry_run)
 
     LOG.info(
         "link.start statements=%s chosen=%s catalog=%s model=%s file=%s",
@@ -379,9 +384,11 @@ def link_local(
         llm,
         model=model,
         batch_size=batch_size,
-        on_batch=lambda: links.save(links_path),
+        on_batch=None if dry_run else (lambda: links.save(links_path)),
         workers=workers,
     )
+    if dry_run:
+        return _dry_summary("link", llm, counts)
     links.save(links_path)
 
     keys = [s.key for s in chosen]
@@ -396,6 +403,7 @@ def link_local(
         "statements_in_corpus": len(statements),
         **counts,
         **link.summarize(links, keys),
+        "usage": usage.usage_of(llm),
     }
     LOG.info(
         "link.complete linked=%s skipped=%s references=%s new=%s",
@@ -417,8 +425,12 @@ def generate_local(
     workers: int = generate.DEFAULT_WORKERS,
     condense: bool = False,
     facets_path: Path | None = None,
+    dry_run: bool = False,
 ) -> dict:
     """Run generation locally: overviews to a JSON file, nothing to the API.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
 
     With ``condense``, no new evidence is integrated: only pages whose prose
     has outgrown the fixed shape are rewritten to fit it.
@@ -442,15 +454,17 @@ def generate_local(
     corpus = generate.build_corpus(export, overlay, links, merges)
     prose = generate.ProseFile.load(prose_path)
     if condense:
-        llm, model = link.llm_from_env()
+        llm, model = link.llm_from_env(dry_run=dry_run)
         counts = generate.run_condense(
             corpus,
             prose,
             llm,
             model=model,
             workers=workers,
-            on_entity=lambda: prose.save(prose_path),
+            on_entity=None if dry_run else (lambda: prose.save(prose_path)),
         )
+        if dry_run:
+            return _dry_summary("condense", llm, counts)
         prose.save(prose_path)
         review_path = prose_path.with_name(prose_path.stem + "-review.md")
         review_path.write_text(generate.review_markdown(prose, counts["slugs"]))
@@ -464,12 +478,13 @@ def generate_local(
             "review_file": str(review_path),
             "model": model,
             **counts,
+            "usage": usage.usage_of(llm),
         }
 
     chosen = generate.choose_entities(
         corpus, prose, slugs=entities or (), sample=sample
     )
-    llm, model = link.llm_from_env()
+    llm, model = link.llm_from_env(dry_run=dry_run)
 
     LOG.info(
         "generate.start entities=%s model=%s file=%s links=%s",
@@ -485,9 +500,11 @@ def generate_local(
         llm,
         model=model,
         wiki_repo_path=wiki_repo_path,
-        on_entity=lambda: prose.save(prose_path),
+        on_entity=None if dry_run else (lambda: prose.save(prose_path)),
         workers=workers,
     )
+    if dry_run:
+        return _dry_summary("generate", llm, counts)
     prose.save(prose_path)
 
     slugs = [e.slug for e in chosen]
@@ -501,6 +518,7 @@ def generate_local(
         "used_links": links is not None,
         **counts,
         "slugs": slugs,
+        "usage": usage.usage_of(llm),
     }
     LOG.info("generate.complete %s", counts)
     return summary
@@ -514,8 +532,12 @@ def consolidate_local(
     sample: int | None = None,
     batch_size: int = consolidate.DEFAULT_BATCH_SIZE,
     workers: int = consolidate.DEFAULT_WORKERS,
+    dry_run: bool = False,
 ) -> dict:
     """Decide which entities are facets of broader ones: to a JSON file.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
 
     MINI-93, local half. Runs on the corpus after the notes' alias merges, so
     a merged-away name is not decided twice. With ``prose_path``, the model
@@ -537,7 +559,7 @@ def consolidate_local(
         definitions = {e.slug: prose.definition(e.slug) for e in export.entities}
 
     facets = consolidate.FacetsFile.load(facets_path)
-    llm, model = link.llm_from_env()
+    llm, model = link.llm_from_env(dry_run=dry_run)
     LOG.info("consolidate.start model=%s file=%s", model, facets_path)
     counts = consolidate.run_consolidation(
         export,
@@ -549,8 +571,10 @@ def consolidate_local(
         batch_size=batch_size,
         workers=workers,
         sample=sample,
-        on_batch=lambda: facets.save(facets_path),
+        on_batch=None if dry_run else (lambda: facets.save(facets_path)),
     )
+    if dry_run:
+        return _dry_summary("consolidate", llm, counts)
     facets.save(facets_path)
 
     names = {e.slug: e.canonical_name for e in export.entities}
@@ -565,14 +589,45 @@ def consolidate_local(
         "facets_file": str(facets_path),
         "review_file": str(review_path),
         "thin_review_file": str(thin_path),
-        "consolidator_version": consolidate.CONSOLIDATOR_VERSION,
+        "consolidator_versions": dict(consolidate.CONSOLIDATOR_VERSIONS),
         "model": model,
         "used_links": links is not None,
         "thin_entities": sum(
             1 for c in consolidate.candidates(export, None, supports) if c.support.thin
         ),
         **counts,
+        "usage": usage.usage_of(llm),
     }
+
+
+def _dry_summary(command: str, llm: Any, counts: dict) -> dict:
+    """What a real run would do: the work it found, the calls, the cost.
+
+    Counts that depend on the model's answers (decided, linked, generated)
+    are left out — a dry run gets no answers.
+    """
+    found = {
+        k: v
+        for k, v in counts.items()
+        if k
+        in {
+            "statements",
+            "skipped",
+            "pending",
+            "pending_by_group",
+            "candidates",
+            "entities",
+            "over_shape",
+        }
+    }
+    summary = {
+        "dry_run": True,
+        "command": command,
+        **found,
+        "usage": usage.usage_of(llm),
+    }
+    LOG.info("%s.dry_run %s", command, summary)
+    return summary
 
 
 def record_summary(report: RunReport, summary: dict) -> None:

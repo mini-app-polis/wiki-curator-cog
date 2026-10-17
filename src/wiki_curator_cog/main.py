@@ -181,6 +181,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help="link / consolidate: statements or entities per LLM call.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "link / generate / consolidate: make no model calls and write "
+            "nothing; print how many calls a real run would make, their "
+            "tokens and an estimated cost. Needs no API key."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -248,7 +257,7 @@ def _render(
 
 def _link(args: argparse.Namespace) -> int:
     """The local linking pass: references to a file, a summary to stdout."""
-    kwargs: dict = {"sample": args.sample}
+    kwargs: dict = {"sample": args.sample, "dry_run": args.dry_run}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
     if args.workers is not None:
@@ -274,6 +283,7 @@ def _generate(args: argparse.Namespace) -> int:
         sample=args.sample,
         condense=args.condense,
         facets_path=_facets_path(args.facets, links),
+        dry_run=args.dry_run,
         **({"workers": args.workers} if args.workers is not None else {}),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
@@ -282,7 +292,7 @@ def _generate(args: argparse.Namespace) -> int:
 
 def _consolidate(args: argparse.Namespace) -> int:
     """Local facet consolidation: decisions to a file, a summary to stdout."""
-    kwargs: dict = {"sample": args.sample}
+    kwargs: dict = {"sample": args.sample, "dry_run": args.dry_run}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
     if args.workers is not None:

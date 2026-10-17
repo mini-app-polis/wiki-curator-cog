@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -36,7 +37,10 @@ ANCHOR = "anchor"
 STATIONARY = "stationary-anchor"
 DIRECTIONAL = "anchor-with-directional-intent"
 DRILL = "anchor-drill"
+WALL_DRILL = "anchor-drill-against-the-wall"
 WHIP = "whip"
+REVERSE_WHIP = "reverse-whip"
+WHIP_TURN = "whip-turn"
 
 LESSON = WcsSource(
     id=_id("s-lesson"),
@@ -112,6 +116,44 @@ def _export(*relations: WcsRelation) -> WcsWikiExport:
     )
 
 
+def _with_more() -> WcsWikiExport:
+    """The export plus a second drill and two more patterns.
+
+    ``anchor drill`` and ``whip`` each get a source, so they outweigh the
+    newcomers and can be their parent.
+    """
+    base = _export()
+    return base.model_copy(
+        update={
+            "entities": [
+                *base.entities,
+                _entity(WALL_DRILL, "Anchor Drill Against the Wall", kind="drill"),
+                _entity(REVERSE_WHIP, "Reverse Whip", kind="pattern"),
+                _entity(WHIP_TURN, "Whip Turn", kind="pattern"),
+            ],
+            "attributions": [
+                *base.attributions,
+                *(
+                    WcsAttribution(
+                        id=_id(f"a-{slug}"),
+                        source_id=LESSON.id,
+                        entity_id=_id(slug),
+                        attribution_kind="drilled" if slug == DRILL else "taught",
+                        prose="Practise it.",
+                    )
+                    for slug in (DRILL, WHIP)
+                ),
+            ],
+        }
+    )
+
+
+def _prompt_for(llm: FakeLLM, slug: str) -> tuple[str, str]:
+    """(system, user) of the call that carried ``slug`` as a candidate."""
+    i = next(n for n, ids in enumerate(llm.calls) if slug in ids)
+    return llm.systems[i], llm.prompts[i]
+
+
 def _note(frm: str, to: str, kind: str) -> WcsRelation:
     return WcsRelation(
         id=_id(f"n-{frm}-{to}-{kind}"),
@@ -132,12 +174,16 @@ class FakeLLM:
         self.same = set(same)
         self.calls: list[list[str]] = []
         self.prompts: list[str] = []
+        self.systems: list[str] = []
+        self._lock = threading.Lock()
 
     def generate_json(self, *, messages, json_schema, schema_name="output"):
         user = messages[-1].content
-        self.prompts.append(user)
         ids = [c["id"] for c in json.loads(user.split("Candidates (JSON):\n", 1)[1])]
-        self.calls.append(ids)
+        with self._lock:  # batches run on worker threads
+            self.prompts.append(user)
+            self.systems.append(messages[0].content)
+            self.calls.append(ids)
         out = {
             "entries": [
                 {
@@ -156,9 +202,9 @@ class FakeLLM:
 # ── the pass ──
 
 
-def test_only_concepts_and_techniques_are_candidates() -> None:
+def test_every_foldable_kind_is_a_candidate() -> None:
     slugs = [c.slug for c in consolidate.candidates(_export())]
-    assert slugs == [ANCHOR, DIRECTIONAL, STATIONARY]
+    assert slugs == [ANCHOR, DRILL, DIRECTIONAL, STATIONARY, WHIP]
 
 
 def test_the_model_sees_definitions_and_every_possible_parent() -> None:
@@ -167,7 +213,8 @@ def test_the_model_sees_definitions_and_every_possible_parent() -> None:
     consolidate.run_consolidation(
         _export(), facets, llm, model="fake", definitions={ANCHOR: "The settle."}
     )
-    prompt = llm.prompts[0]
+    system, prompt = _prompt_for(llm, ANCHOR)
+    assert system == consolidate.SYSTEM_PROMPT
     assert (
         "Anchor [2]; Anchor with Directional Intent [0]; Stationary Anchor [1]"
         in prompt
@@ -187,7 +234,7 @@ def test_parents_are_resolved_and_bad_answers_mean_standalone() -> None:
     )
     facets = consolidate.FacetsFile()
     counts = consolidate.run_consolidation(_export(), facets, llm, model="fake")
-    assert counts["decided"] == 3
+    assert counts["decided"] == 5
     assert facets.parents() == {STATIONARY: ANCHOR}
     assert facets.entities[DIRECTIONAL]["parent"] is None
 
@@ -206,13 +253,22 @@ def test_decided_entities_are_skipped_until_the_version_changes(
     loaded = consolidate.FacetsFile.load(path)
     counts = consolidate.run_consolidation(_export(), loaded, again, model="fake")
     assert again.calls == []
-    assert counts["skipped"] == 3
+    assert counts["skipped"] == 5
     assert loaded.parents() == {STATIONARY: ANCHOR}
 
-    monkeypatch.setattr(consolidate, "CONSOLIDATOR_VERSION", "next")
+    # A bump redecides only its own group: the drill and pattern stay decided.
+    monkeypatch.setitem(consolidate.CONSOLIDATOR_VERSIONS, "concept", "next")
     third = FakeLLM({})
-    consolidate.run_consolidation(_export(), loaded, third, model="fake")
-    assert sorted(third.calls[0]) == [ANCHOR, DIRECTIONAL, STATIONARY]
+    counts = consolidate.run_consolidation(_export(), loaded, third, model="fake")
+    assert sorted(sum(third.calls, [])) == [ANCHOR, DIRECTIONAL, STATIONARY]
+    assert counts["pending_by_group"] == {"concept": 3, "drill": 0, "pattern": 0}
+    assert loaded.entities[ANCHOR]["version"] == "next"
+    assert loaded.entities[DRILL]["version"] == "5"
+
+    monkeypatch.setitem(consolidate.CONSOLIDATOR_VERSIONS, "drill", "next")
+    fourth = FakeLLM({})
+    consolidate.run_consolidation(_export(), loaded, fourth, model="fake")
+    assert fourth.calls == [[DRILL]]
 
 
 def test_a_failed_batch_leaves_its_entities_undecided() -> None:
@@ -222,7 +278,7 @@ def test_a_failed_batch_leaves_its_entities_undecided() -> None:
 
     facets = consolidate.FacetsFile()
     counts = consolidate.run_consolidation(_export(), facets, Fails({}), model="fake")
-    assert counts["failed_batches"] == 1
+    assert counts["failed_batches"] == 3  # one per kind group
     assert facets.entities == {}
 
 
@@ -235,6 +291,7 @@ def test_review_groups_facets_under_their_parent() -> None:
     )
     assert "## Anchor (2)" in text
     assert "- Stationary Anchor — a kind of anchor" in text
+    assert text.startswith("# Facet review — versions concept 5, drill 5, pattern 5")
 
 
 # ── the fold ──
@@ -252,11 +309,79 @@ def test_facets_fold_into_the_parent_and_are_listed() -> None:
     assert any(r.to_entity_id == _id(ANCHOR) for r in export.relations)
 
 
-def test_drills_and_patterns_are_never_folded_by_the_model() -> None:
+def test_nothing_folds_across_kind_groups() -> None:
     merges = identity.find_merges(
-        _export(), {DRILL: (ANCHOR, True), STATIONARY: (WHIP, True)}
+        _export(),
+        {DRILL: (ANCHOR, True), STATIONARY: (WHIP, True), WHIP: (DRILL, False)},
     )
     assert not merges
+
+
+def test_a_drill_folds_into_another_drill_as_a_facet() -> None:
+    export, merges = identity.resolve(_with_more(), {WALL_DRILL: (DRILL, True)})
+    assert merges.by_slug == {WALL_DRILL: DRILL}
+    assert [f.slug for f in merges.facets[_id(DRILL)]] == [WALL_DRILL]
+    details = generate.details_by_entity(export, merges)
+    bundle, _ = render_bundle(
+        export, rendered_at=dt.date(2026, 10, 16), details=details
+    )
+    assert "**Anchor Drill Against the Wall**" in bundle["drills/anchor-drill.md"]
+    assert "drills/anchor-drill-against-the-wall.md" not in bundle
+    assert find_broken_links(bundle) == []
+
+
+def test_a_pattern_folds_only_as_another_name() -> None:
+    assert not identity.find_merges(_with_more(), {REVERSE_WHIP: (WHIP, True)})
+    export, merges = identity.resolve(_with_more(), {WHIP_TURN: (WHIP, False)})
+    assert merges.by_slug == {WHIP_TURN: WHIP}
+    assert merges.facets == {}
+    whip = next(e for e in export.entities if e.slug == WHIP)
+    assert "Whip Turn" in whip.aliases
+
+
+def test_each_group_has_its_own_prompt_and_parents() -> None:
+    llm = FakeLLM({})
+    consolidate.run_consolidation(
+        _with_more(), consolidate.FacetsFile(), llm, model="fake"
+    )
+    assert sorted(map(sorted, llm.calls)) == sorted(
+        [
+            [ANCHOR, DIRECTIONAL, STATIONARY],
+            [DRILL, WALL_DRILL],
+            [REVERSE_WHIP, WHIP, WHIP_TURN],
+        ]
+    )
+    system, user = _prompt_for(llm, DRILL)
+    assert system == consolidate.DRILL_PROMPT
+    names = user.split("Candidates", 1)[0]
+    assert "Anchor Drill [1]; Anchor Drill Against the Wall [0]" in names
+    assert "Stationary Anchor" not in names and "Whip" not in names
+    system, user = _prompt_for(llm, WHIP)
+    assert system == consolidate.PATTERN_PROMPT
+    assert "Reverse Whip [0]; Whip [1]; Whip Turn [0]" in user
+
+
+def test_the_model_cannot_fold_across_groups() -> None:
+    llm = FakeLLM({WALL_DRILL: "anchor", REVERSE_WHIP: "anchor drill"})
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_with_more(), facets, llm, model="fake")
+    assert facets.parents() == {}
+
+
+def test_a_pattern_variation_is_refused_and_a_duplicate_folds() -> None:
+    llm = FakeLLM({REVERSE_WHIP: "whip", WHIP_TURN: "whip"}, same=(WHIP_TURN,))
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_with_more(), facets, llm, model="fake")
+    assert facets.folds() == {WHIP_TURN: (WHIP, False)}
+    assert facets.entities[REVERSE_WHIP]["parent"] is None
+    assert "only as the same one" in facets.entities[REVERSE_WHIP]["reason"]
+
+
+def test_a_drill_variation_folds_and_is_listed() -> None:
+    llm = FakeLLM({WALL_DRILL: "Anchor Drill [1]"})
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_with_more(), facets, llm, model="fake")
+    assert facets.folds() == {WALL_DRILL: (DRILL, True)}
 
 
 def test_a_note_keeping_them_apart_outranks_the_model() -> None:

@@ -323,12 +323,24 @@ def test_a_rerun_skips_what_is_linked_and_relinks_on_a_new_version(
     links = link.LinksFile.load(path)
     first = link.run_linking(statements, catalog, links, llm, model="m", batch_size=2)
     links.save(path)
-    assert first == {"statements": 4, "skipped": 0, "linked": 4, "failed_batches": 0}
+    assert first == {
+        "statements": 4,
+        "skipped": 0,
+        "pending": 4,
+        "linked": 4,
+        "failed_batches": 0,
+    }
     assert len(llm.calls) == 2
 
     links = link.LinksFile.load(path)
     second = link.run_linking(statements, catalog, links, llm, model="m")
-    assert second == {"statements": 4, "skipped": 4, "linked": 0, "failed_batches": 0}
+    assert second == {
+        "statements": 4,
+        "skipped": 4,
+        "pending": 0,
+        "linked": 0,
+        "failed_batches": 0,
+    }
     assert len(llm.calls) == 2
 
     with patch.object(link, "LINKER_VERSION", "next"):
@@ -413,7 +425,9 @@ def test_link_mode_runs_without_the_gate_or_config(
         patch.object(main, "link_local", return_value={"linked": 0}) as run,
     ):
         assert main.main(["link", "--sample", "20", "--links-file", str(out)]) == 0
-    run.assert_called_once_with(out.resolve(), facets_path=None, sample=20)
+    run.assert_called_once_with(
+        out.resolve(), facets_path=None, sample=20, dry_run=False
+    )
     assert json.loads(capsys.readouterr().out) == {"linked": 0}
 
 

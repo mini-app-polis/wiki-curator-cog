@@ -8,7 +8,11 @@ of one broader concept.
 
 This pass asks the model, for each concept and technique, whether it is a
 facet of another, broader one already in the corpus, and records the answer
-in a local JSON file with a version watermark, like the linker's. Nothing in
+in a local JSON file with a version watermark, like the linker's. Drills are
+asked the same about other drills; patterns only whether they are another
+name for an existing pattern — a pattern's variation is a figure of its own.
+Each kind group gets its own prompt and sees only its own entries as possible
+parents (:data:`wiki_curator_cog.identity.FOLD_GROUPS`). Nothing in
 the API changes. :mod:`wiki_curator_cog.identity` folds the facets in when the
 wiki is built: the facet's page goes, its statements and references move to
 the broader concept, and the broader page lists it under ``## Details``.
@@ -37,14 +41,22 @@ from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
 
 from . import link
-from .identity import FOLDABLE_KINDS
+from .identity import FOLD_GROUPS, FOLDABLE_KINDS, SAME_ONLY_KINDS
 from .render import WcsWikiExport
 
 LOG = log.get_logger()
 
-#: Bump when the prompt or the rules change in a way that should redecide
-#: every entity; entities decided under an older version are asked again.
-CONSOLIDATOR_VERSION = "5"
+#: One version per kind group (see :data:`GROUPS`). Bump a group's version
+#: when its prompt or rules change in a way that should redecide it: that
+#: group's entities are asked again, and the other groups keep their
+#: decisions — a drill-prompt change does not re-pay for every concept.
+#: Every group starts at "5", the version the concept prompt had when the
+#: groups were split, so no decision already made is asked again.
+CONSOLIDATOR_VERSIONS: dict[str, str] = {
+    "concept": "5",
+    "drill": "5",
+    "pattern": "5",
+}
 
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_WORKERS = 8
@@ -109,6 +121,131 @@ in exactly this shape:
 {"entries": [{"id": "<candidate id>", "reason": "<a few words>", \
 "fold": true, "parent": "<entry name>" or null, "same": false}]}
 """
+
+#: The output contract shared by every group's prompt.
+_DECIDE_AND_OUTPUT = """\
+- The parent must be in the list of entries, without its bracketed count, \
+and must not be the candidate itself. A parent with less support than the \
+candidate is refused.
+- Decide in order: first "reason", a few words a reviewer can check at a \
+glance; then "fold", true only if the reason says the candidate belongs on \
+the parent's page; then "parent" and "same". If the reason says the entry \
+stays standalone, has no close parent, or is its own concept, "fold" is \
+false and "parent" is null.
+- Return every candidate id you were given. Do not invent ids.
+
+Output ONLY valid JSON — no markdown fences, no commentary before or after — \
+in exactly this shape:
+{"entries": [{"id": "<candidate id>", "reason": "<a few words>", \
+"fold": true, "parent": "<entry name>" or null, "same": false}]}
+"""
+
+DRILL_PROMPT = (
+    """\
+You tidy a wiki of West Coast Swing (WCS) drills built automatically from \
+lesson notes. A drill is an exercise: what the dancers do, repeatedly, to \
+train a skill. Extraction created a separate entry for every phrasing, so \
+one exercise is often spread over several entries: "anchor drill", "anchor \
+drill against the wall", "anchor settling exercise" may all be one drill, \
+with variations.
+
+For each candidate drill, decide whether it is a FACET of a broader drill \
+from the list of all drills: the same exercise with a variation, an added \
+constraint, a progression step or a setup detail, which a reader would \
+expect to find as a detail on the broader drill's page. If so, give the \
+broader drill's name exactly as listed. If not, the parent is null and the \
+drill keeps its own page.
+
+Rules:
+- A facet is the same exercise. Training the same skill is not enough: two \
+different exercises for the anchor are two drills. A drill that combines \
+two exercises, or names its own distinct exercise, stays standalone.
+- Choose the most specific broader drill that is still a real, established \
+exercise, usually short.
+- "same" is true when the candidate is another name or phrasing for exactly \
+the same exercise, adding nothing. It is then folded in as another name, \
+with no line of its own. "same" is false when the candidate adds a \
+variation, a constraint, a progression or a specific use.
+- Support is evidence. Every entry carries how many sources teach it and \
+how many statements elsewhere refer to it; every name in the list of drills \
+carries its total in brackets. A drill with one source and almost no \
+references is often a one-off phrasing of a better-known drill: fold it \
+when there clearly is one. A well-supported drill folds only when it is \
+clearly a variation or the same exercise. When unsure, the parent is null: \
+a wrong fold hides a page.
+"""
+    + _DECIDE_AND_OUTPUT
+)
+
+PATTERN_PROMPT = (
+    """\
+You tidy a wiki of West Coast Swing (WCS) patterns built automatically from \
+lesson notes. A pattern is a named figure: sugar push, left side pass, whip. \
+Extraction sometimes created two entries for one figure under different \
+names or spellings: "rocking go" and "rock and go", "left side pass inside \
+turn" and "left side pass with inside turn".
+
+For each candidate pattern, decide only whether it is EXACTLY THE SAME \
+figure as another pattern in the list of all patterns, under another name or \
+spelling. If so, give that pattern's name exactly as listed, with "fold" \
+and "same" both true. Otherwise "fold" is false and the parent is null.
+
+Rules:
+- Only exact duplicates fold. A variation is its own pattern and stays \
+standalone: "whip with inside shootout", "reverse whip" and "basket whip" \
+are not "whip"; "sugar tuck with over-rotation" is not "sugar tuck"; a \
+pattern with or without a turn is not the plain pattern.
+- Of two duplicates, the parent is the better-supported one: every name in \
+the list carries its support in brackets.
+- When unsure, "fold" is false: a wrong fold hides a page.
+"""
+    + _DECIDE_AND_OUTPUT
+)
+
+
+@dataclass(frozen=True)
+class Group:
+    """Kinds decided together: one prompt, one list of possible parents."""
+
+    key: str
+    name: str
+    kinds: frozenset[str]
+    prompt: str
+    #: Only another name for the same thing folds; a facet is refused.
+    same_only: bool = False
+
+    @property
+    def version(self) -> str:
+        return CONSOLIDATOR_VERSIONS[self.key]
+
+
+#: One prompt per fold group, in :data:`FOLD_GROUPS` order.
+_PROMPTS: dict[str, tuple[str, str]] = {
+    "concept": ("concepts and techniques", SYSTEM_PROMPT),
+    "drill": ("drills", DRILL_PROMPT),
+    "pattern": ("patterns", PATTERN_PROMPT),
+}
+
+
+def _group(kinds: frozenset[str]) -> Group:
+    key = next(k for k in _PROMPTS if k in kinds)
+    name, prompt = _PROMPTS[key]
+    return Group(
+        key=key,
+        name=name,
+        kinds=kinds,
+        prompt=prompt,
+        same_only=kinds <= SAME_ONLY_KINDS,
+    )
+
+
+GROUPS: tuple[Group, ...] = tuple(_group(kinds) for kinds in FOLD_GROUPS)
+CONCEPTS: Group = GROUPS[0]
+
+
+def group_of(kind: str) -> Group | None:
+    return next((g for g in GROUPS if kind in g.kinds), None)
+
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -228,9 +365,10 @@ def candidates(
 
 
 def build_messages(
-    batch: Sequence[Candidate], all_names: Sequence[str]
+    batch: Sequence[Candidate], all_names: Sequence[str], group: Group = CONCEPTS
 ) -> list[LLMMessage]:
-    """The full list of entries (the same for every call), then the batch."""
+    """The group's full list of entries (the same for every call in the
+    group), then the batch."""
     user = "\n".join(
         [
             "All entries (possible parents):",
@@ -255,7 +393,7 @@ def build_messages(
         ]
     )
     return [
-        LLMMessage(role="system", content=SYSTEM_PROMPT),
+        LLMMessage(role="system", content=group.prompt),
         LLMMessage(role="user", content=user),
     ]
 
@@ -270,17 +408,21 @@ def decide_batch(
     all_names: Sequence[str],
     parents: link.Catalog,
     supports: dict[str, Support] | None = None,
+    group: Group = CONCEPTS,
 ) -> dict[str, tuple[str | None, bool, str]]:
     """One call: slug → (parent slug or None, same as the parent, reason).
 
     A parent name that matches no foldable entity, or matches the candidate
     itself, counts as standalone, as does any parent without ``"fold": true``.
     So does a parent with less support than
-    the candidate: an established entity is never folded into a thinner one. Ids the model invents are ignored; ids it
-    leaves out stay undecided for the next run.
+    the candidate: an established entity is never folded into a thinner one.
+    In a ``same_only`` group (patterns) a fold that is not ``"same": true``
+    is refused: only exact duplicates fold. ``parents`` holds the group's
+    entities only, so nothing folds across groups. Ids the model invents are
+    ignored; ids it leaves out stay undecided for the next run.
     """
     result = llm.generate_json(
-        messages=build_messages(batch, all_names),
+        messages=build_messages(batch, all_names, group),
         json_schema=RESPONSE_SCHEMA,
         schema_name="facets",
     )
@@ -307,6 +449,9 @@ def decide_batch(
                 reason = f"refused {parent}: less support than this entry"
                 parent = None
         same = parent is not None and item.get("same") is True
+        if parent is not None and group.same_only and not same:
+            reason = f"refused {parent}: {group.name} fold only as the same one"
+            parent = None
         out[slug] = (parent, same, reason)
     return out
 
@@ -316,9 +461,16 @@ def decide_batch(
 
 @dataclass
 class FacetsFile:
-    """Every entity decided so far: its parent, or None for standalone."""
+    """Every entity decided so far: its parent, or None for standalone.
 
-    consolidator_version: str = CONSOLIDATOR_VERSION
+    Each entry carries the version of its group's prompt it was decided
+    under; that is the watermark. The file-level versions are a record of
+    the last run, not the check.
+    """
+
+    consolidator_versions: dict[str, str] = field(
+        default_factory=lambda: dict(CONSOLIDATOR_VERSIONS)
+    )
     model: str = ""
     entities: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -328,7 +480,9 @@ class FacetsFile:
             return cls()
         raw = json.loads(path.read_text())
         return cls(
-            consolidator_version=raw.get("consolidator_version", CONSOLIDATOR_VERSION),
+            consolidator_versions=raw.get(
+                "consolidator_versions", dict(CONSOLIDATOR_VERSIONS)
+            ),
             model=raw.get("model", ""),
             entities=raw.get("entities", {}),
         )
@@ -336,24 +490,32 @@ class FacetsFile:
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "consolidator_version": self.consolidator_version,
+            "consolidator_versions": self.consolidator_versions,
             "model": self.model,
             "entities": dict(sorted(self.entities.items())),
         }
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=1) + "\n")
 
-    def is_decided(self, slug: str) -> bool:
+    def is_decided(self, slug: str, version: str) -> bool:
+        """Decided under ``version`` (its group's current one)."""
         entry = self.entities.get(slug)
-        return entry is not None and entry.get("version") == CONSOLIDATOR_VERSION
+        return entry is not None and entry.get("version") == version
 
     def record(
-        self, slug: str, parent: str | None, reason: str, model: str, same: bool = False
+        self,
+        slug: str,
+        parent: str | None,
+        reason: str,
+        model: str,
+        same: bool = False,
+        version: str | None = None,
     ) -> None:
+        """``version`` is the deciding group's; the concept group's by default."""
         self.entities[slug] = {
             "parent": parent,
             "same": same,
             "reason": reason,
-            "version": CONSOLIDATOR_VERSION,
+            "version": version or CONSOLIDATOR_VERSIONS["concept"],
             "model": model,
             "decided_at": dt.date.today().isoformat(),
         }
@@ -395,29 +557,46 @@ def run_consolidation(
     """Decide every foldable entity not already decided under this version."""
     supports = supports if supports is not None else support(export)
     pool_of = candidates(export, definitions, supports)
-    foldable = [e for e in export.entities if e.kind in FOLDABLE_KINDS]
-    all_names = sorted(
-        {
-            f"{e.canonical_name} [{supports.get(e.slug, Support()).weight}]"
-            for e in foldable
-        },
-        key=str.lower,
-    )
-    parents = link.Catalog(foldable)
 
-    todo = [c for c in pool_of if not facets.is_decided(c.slug)]
+    version_of = {k: g.version for g in GROUPS for k in g.kinds}
+    todo = [c for c in pool_of if not facets.is_decided(c.slug, version_of[c.kind])]
     skipped = len(pool_of) - len(todo)
     if sample is not None:
         todo = todo[:sample]
-    batches = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
+    pending_by_group = {
+        g.key: sum(1 for c in todo if c.kind in g.kinds) for g in GROUPS
+    }
+
+    # Each group is asked separately, with only its own entries as parents.
+    batches: list[tuple[Group, list[str], link.Catalog, list[Candidate]]] = []
+    for group in GROUPS:
+        members = [e for e in export.entities if e.kind in group.kinds]
+        group_todo = [c for c in todo if c.kind in group.kinds]
+        if not group_todo:
+            continue
+        all_names = sorted(
+            {
+                f"{e.canonical_name} [{supports.get(e.slug, Support()).weight}]"
+                for e in members
+            },
+            key=str.lower,
+        )
+        parents = link.Catalog(members)
+        batches += [
+            (group, all_names, parents, group_todo[i : i + batch_size])
+            for i in range(0, len(group_todo), batch_size)
+        ]
     lock = threading.Lock()
     decided = 0
     failed_batches = 0
 
-    def work(batch: list[Candidate]) -> None:
+    def work(
+        job: tuple[Group, list[str], link.Catalog, list[Candidate]],
+    ) -> None:
         nonlocal decided, failed_batches
+        group, all_names, parents, batch = job
         try:
-            results = decide_batch(llm, batch, all_names, parents, supports)
+            results = decide_batch(llm, batch, all_names, parents, supports, group)
         except LLMError as exc:
             with lock:
                 failed_batches += 1
@@ -425,7 +604,7 @@ def run_consolidation(
             return
         with lock:
             for slug, (parent, same, reason) in results.items():
-                facets.record(slug, parent, reason, model, same)
+                facets.record(slug, parent, reason, model, same, group.version)
                 decided += 1
             if on_batch is not None:
                 on_batch()
@@ -434,11 +613,13 @@ def run_consolidation(
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         list(pool.map(work, batches))
 
-    facets.consolidator_version = CONSOLIDATOR_VERSION
+    facets.consolidator_versions = dict(CONSOLIDATOR_VERSIONS)
     facets.model = model
     return {
         "candidates": len(pool_of),
         "skipped": skipped,
+        "pending": len(todo),
+        "pending_by_group": pending_by_group,
         "decided": decided,
         "failed_batches": failed_batches,
         "facets": len(facets.parents()),
@@ -532,7 +713,7 @@ def thin_review_markdown(
     lines = [
         "# Thin entities — private review",
         "",
-        f"{len(thin)} concepts and techniques are taught in one source at most "
+        f"{len(thin)} entries are taught in one source at most "
         "and referred to at most once elsewhere. Some are asides, some are "
         "real ideas the corpus has not caught up with. This file is "
         "regenerated by every `consolidate` run and never published; to give "
@@ -588,7 +769,8 @@ def review_markdown(
             continue
         groups[end].append(slug)
     lines = [
-        f"# Facet review — version {CONSOLIDATOR_VERSION}",
+        "# Facet review — versions "
+        + ", ".join(f"{k} {v}" for k, v in CONSOLIDATOR_VERSIONS.items()),
         "",
         f"{sum(len(v) for v in groups.values())} facets into {len(groups)} pages. "
         "To overrule one, write a note: “X is its own concept, not part of Y” "

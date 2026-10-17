@@ -805,6 +805,7 @@ def run_generation(
     prose.model = model
     return {
         "entities": len(entities),
+        "pending": len(entities),
         "generated": generated,
         "failed": len(failed),
         "failed_slugs": sorted(failed),

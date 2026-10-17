@@ -70,24 +70,33 @@ _LLM_TIMEOUT_SECONDS = 180.0
 _LLM_MAX_RETRIES = 2
 
 
-def llm_from_env() -> tuple[LLMClient, str]:
-    """The client and model name, from ``LLM_PROVIDER`` / ``LLM_MODEL``."""
-    from . import _lenient_json
+def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
+    """The client and model name, from ``LLM_PROVIDER`` / ``LLM_MODEL``.
 
-    _lenient_json.install()
+    The client is metered (:mod:`wiki_curator_cog.usage`): every command's
+    summary reports its calls, tokens and estimated cost. With ``dry_run``
+    no client is built and no API key is needed: calls are counted and
+    measured, never sent.
+    """
+    from . import _lenient_json, usage
+
     provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
     if provider not in _DEFAULT_MODELS:
         raise RuntimeError(
             f"Unsupported LLM_PROVIDER: {provider!r}. Must be one of {sorted(_DEFAULT_MODELS)}."
         )
     model = os.getenv("LLM_MODEL", _DEFAULT_MODELS[provider]).strip()
+    name = f"{provider}/{model}"
+    if dry_run:
+        return usage.DryRunLLM(name), name
+    _lenient_json.install()
     client = build_llm(
         provider=provider,
         model=model,
         timeout_s=_LLM_TIMEOUT_SECONDS,
         max_retries=_LLM_MAX_RETRIES,
     )
-    return client, f"{provider}/{model}"
+    return usage.MeteredLLM(client, name), name
 
 
 Polarity = Literal["assert", "deny"]
@@ -575,6 +584,7 @@ def run_linking(
     return {
         "statements": len(statements),
         "skipped": skipped,
+        "pending": len(todo),
         "linked": linked,
         "failed_batches": failed_batches,
     }

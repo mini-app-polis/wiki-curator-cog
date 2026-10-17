@@ -20,8 +20,10 @@ yet.
 Facets (MINI-93) fold the same way, but keep their name on the broader page:
 a ``facet_of`` relation from a note, or a decision from the consolidation pass
 (:mod:`wiki_curator_cog.consolidate`), moves a narrow entity's content into
-the broader one and lists it under ``## Details``. A note always outranks the
-consolidation pass for the same entity or pair.
+the broader one and lists it under ``## Details``. The pass folds only within
+a kind group (:data:`FOLD_GROUPS`): drills into drills, patterns into patterns
+and only as exact duplicates. A note always outranks the consolidation pass
+for the same entity or pair, and can fold across kinds.
 """
 
 from __future__ import annotations
@@ -38,10 +40,38 @@ ALIAS_KINDS: frozenset[str] = frozenset({"alias_of", "same_as"})
 DISTINCT_KINDS: frozenset[str] = frozenset({"distinct_from", "not_alias_of"})
 #: Relation kinds that fold a narrower entity into a broader one as a detail.
 FACET_KINDS: frozenset[str] = frozenset({"facet_of", "aspect_of", "detail_of"})
-#: Kinds the consolidation pass may fold, and fold into. Drills are exercises
-#: and patterns are figures: they stay their own pages even when they are
-#: about a concept. A note can still fold anything.
-FOLDABLE_KINDS: frozenset[str] = frozenset({"concept", "technique"})
+#: The kinds the consolidation pass folds within: an entity folds only into
+#: one of its own group. Concepts and techniques fold into each other; a drill
+#: is an exercise and folds only into another drill; a pattern is a figure and
+#: folds only into another pattern. Nothing folds across groups — a drill
+#: about the anchor stays a drill. A note can still fold anything.
+FOLD_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"concept", "technique"}),
+    frozenset({"drill"}),
+    frozenset({"pattern"}),
+)
+#: Kinds the pass folds only as another name for the same thing, never as a
+#: facet: a variation of a pattern (a whip with an inside shootout) is a
+#: figure of its own, so only exact duplicates fold.
+SAME_ONLY_KINDS: frozenset[str] = frozenset({"pattern"})
+#: Every kind the consolidation pass decides.
+FOLDABLE_KINDS: frozenset[str] = frozenset().union(*FOLD_GROUPS)
+
+
+def fold_group(kind: str) -> frozenset[str] | None:
+    """The group of kinds ``kind`` may fold into, or None if it never folds."""
+    return next((g for g in FOLD_GROUPS if kind in g), None)
+
+
+def can_fold(child_kind: str, parent_kind: str, listed: bool) -> bool:
+    """Whether the consolidation pass may fold a ``child_kind`` entity into a
+    ``parent_kind`` one — as a listed facet, or (``listed`` False) as another
+    name. Notes are not subject to this.
+    """
+    group = fold_group(child_kind)
+    if group is None or parent_kind not in group:
+        return False
+    return not (listed and child_kind in SAME_ONLY_KINDS)
 
 
 def _kind(raw: str) -> str:
@@ -131,7 +161,7 @@ def find_merges(
             child, parent = by_slug.get(slug), by_slug.get(parent_slug)
             if child is None or parent is None or child.id == parent.id:
                 continue
-            if child.kind not in FOLDABLE_KINDS or parent.kind not in FOLDABLE_KINDS:
+            if not can_fold(child.kind, parent.kind, listed):
                 continue
             if child.id in edges or frozenset((child.id, parent.id)) in latest:
                 continue  # a note has spoken: it outranks the model

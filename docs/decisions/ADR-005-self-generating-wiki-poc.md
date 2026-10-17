@@ -1,7 +1,7 @@
 # ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation); durable half (storage in the API) pending; end-to-end note test (MINI-87) and go/no-go (MINI-88) open
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half (storage in the API) pending; end-to-end note test (MINI-87) and go/no-go (MINI-88) open
 **Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
 **Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29, MINI-83 – MINI-93
 
@@ -148,7 +148,14 @@ cases, caveats and details of one concept. There are far too many to fix by
 hand, so a consolidation pass (`consolidate`) asks the model, for every
 concept and technique, whether it is a facet of a broader one already in the
 corpus, and records the answer in `facets.json` with a version watermark.
-Drills and patterns are never folded by the pass. At build time a facet folds
+The pass folds only within a kind (2026-10-17): concepts and techniques
+into each other; a drill only into another drill — the same exercise with a
+variation, a constraint or a progression, not merely one training the same
+skill; a pattern only into another pattern, and only as an exact duplicate
+(*rocking go* and *rock and go*), since a variation — *reverse whip*,
+*sugar tuck with over-rotation* — is a figure of its own. Each kind gets its
+own prompt and sees only its own kind as possible parents; a drill about the
+anchor stays a drill. Notes can still fold across kinds. At build time a facet folds
 like an alias — its statements, references and links move to the broader
 page — but keeps its name there under `## Details`, as one line with the
 first sentence of its own definition — unless the model judged it the same
@@ -280,7 +287,8 @@ Tracked in Asana under MINI-29.
    relations from the note extraction, merged at build time.
 8. **MINI-93** — facet consolidation: `consolidate` into `facets.json`,
    folded at build time under `## Details`; notes override; extraction
-   stops minting variants.
+   stops minting variants. Extended 2026-10-17 to drills (into drills) and
+   patterns (exact duplicates only).
 
 ## Consequences
 

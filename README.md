@@ -114,7 +114,9 @@ upstream changes; `render-summary.json` lists the merges under `merged`.
 **Facets (MINI-93).** `consolidate` decides, for every concept and technique,
 whether it is a facet of a broader one (*stationary anchor* → *anchor*), and
 writes the decisions to `facets.json` (watermarked; already-decided entities
-are skipped). `render`, `generate` and `link` then fold each facet into its
+are skipped). Drills are asked the same about other drills; patterns only
+whether they are another name for an existing pattern, since a variation is
+its own figure. Nothing folds across kinds, and each kind has its own prompt. `render`, `generate` and `link` then fold each facet into its
 broader page, listed under `## Details`. They pick up `facets.json` from next
 to the `--links` file by default, or take `--facets PATH`. A note's
 `facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
@@ -132,6 +134,26 @@ doppler run --config prd -- uv run python -m wiki_curator_cog.main consolidate \
   --facets-file ../wcs-wiki/.curator/facets.json \
   --prose ../wcs-wiki/.curator/prose.json --workers 16
 ```
+
+### Cost: dry runs and usage
+
+`link`, `generate` and `consolidate` cost money; `render` does not. Each
+prints a `usage` block — calls, input and output tokens, and an estimated
+`cost_usd` — read from the API's own token counts. Add `--dry-run` to see the
+same block before spending: nothing is called or written and no API key is
+needed, and the summary shows how much work is pending (`pending`, and
+`pending_by_group` for `consolidate`). A dry run's calls and input tokens
+come from the real prompts; its output tokens are a rough guess.
+
+```bash
+doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --dry-run
+```
+
+Dollars use a per-model default price; set `LLM_PRICE_INPUT_PER_MTOK` and
+`LLM_PRICE_OUTPUT_PER_MTOK` to override. Version bumps are the expensive
+moves: raising `LINKER_VERSION` or `GENERATOR_VERSION` replays the whole
+corpus. `consolidate` keeps one version per kind group
+(`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
 ### Link locally (ADR-005, MINI-84)
 
