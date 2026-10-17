@@ -53,6 +53,8 @@ from wiki_curator_cog.flow import (
     generate_local,
     link_local,
     render_local,
+    state_import_local,
+    state_verify_local,
 )
 
 LOG = log.get_logger()
@@ -98,12 +100,22 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "mode",
         nargs="?",
         default=None,
-        choices=["export", "render", "link", "generate", "consolidate"],
+        choices=[
+            "export",
+            "render",
+            "link",
+            "generate",
+            "consolidate",
+            "state-import",
+            "state-verify",
+        ],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
             "to RUN_ON_START. 'render' is the local proof-of-concept loop. "
             "'link' runs the linking pass into a local JSON file. "
-            "'consolidate' decides which entities are facets of broader ones."
+            "'consolidate' decides which entities are facets of broader ones. "
+            "'state-import' sends links.json, facets.json and prose.json to "
+            "the API; 'state-verify' checks the API holds exactly what they do."
         ),
     )
     parser.add_argument(
@@ -180,6 +192,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=None,
         help="link / consolidate: statements or entities per LLM call.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help=(
+            "state-import / state-verify: the folder holding links.json, "
+            "facets.json and prose.json (wcs-wiki/.curator)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -313,6 +333,22 @@ def _consolidate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _state(args: argparse.Namespace) -> int:
+    """Import the state files into the API, or verify the API holds them."""
+    if not args.state_dir:
+        LOG.error("state.failed err=--state-dir is required (wcs-wiki/.curator)")
+        return 2
+    state_dir = Path(args.state_dir).expanduser().resolve()
+    if args.mode == "state-import":
+        kwargs = {"chunk": args.batch_size} if args.batch_size else {}
+        summary = state_import_local(state_dir, **kwargs)
+        sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+        return 0
+    summary = state_verify_local(state_dir)
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0 if summary["ok"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one export, a local render or a local linking pass; return the exit code."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
@@ -327,6 +363,8 @@ def main(argv: list[str] | None = None) -> int:
         return _generate(args)
     if args.mode == "consolidate":
         return _consolidate(args)
+    if args.mode in {"state-import", "state-verify"}:
+        return _state(args)
 
     # Before load_config, so a container that is not going to do anything
     # exits cleanly whether or not its secrets are in place.

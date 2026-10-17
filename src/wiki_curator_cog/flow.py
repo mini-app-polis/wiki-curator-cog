@@ -56,7 +56,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import consolidate, generate, identity, link, usage
+from . import consolidate, generate, identity, link, state_store, usage
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -598,6 +598,36 @@ def consolidate_local(
         **counts,
         "usage": usage.usage_of(llm),
     }
+
+
+#: Reading the whole prose document is several megabytes; the client's
+#: default timeout is meant for single-row calls.
+_STATE_TIMEOUT_S = 180.0
+
+
+def _state_client() -> KaianoApiClient:
+    return KaianoApiClient(machine_name=MACHINE_NAME, timeout=_STATE_TIMEOUT_S)
+
+
+def state_import_local(
+    state_dir: Path, *, chunk: int = state_store.DEFAULT_CHUNK
+) -> dict:
+    """Send links.json, facets.json and prose.json to the API (MINI-89).
+
+    This writes to the API the environment points at — production under
+    ``doppler run --config prd``. Upserts only: re-running it is safe, and
+    nothing in the files changes. Run ``state-verify`` afterwards.
+    """
+    summary = state_store.import_state(_state_client(), state_dir, chunk=chunk)
+    LOG.info("state.import %s", summary)
+    return {"state_dir": str(state_dir), **summary}
+
+
+def state_verify_local(state_dir: Path) -> dict:
+    """Whether the API holds exactly what the three files hold. Read-only."""
+    summary = state_store.verify_state(_state_client(), state_dir)
+    LOG.info("state.verify ok=%s", summary["ok"])
+    return {"state_dir": str(state_dir), **summary}
 
 
 def _dry_summary(command: str, llm: Any, counts: dict) -> dict:
