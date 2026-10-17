@@ -29,4 +29,5 @@ links.json
 links-review*.md
 link-summary.json
 prose.json
-prose-review.md
+prose-review*.md
+generate-summary.json

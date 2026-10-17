@@ -130,10 +130,16 @@ class FakeLLM:
         statements = json.loads(
             user.split("New statements (JSON, newest first):\n", 1)[1]
         )
-        base = user.split("Current overview:\n", 1)[1].split("\n\nNew statements", 1)[0]
+        base = user.split("Current definition:\n", 1)[1].split(
+            "\n\nCurrent context", 1
+        )[0]
         self.calls.append({"base": base, "statements": statements})
-        text = f"Overview from {len(statements)} statements."
-        return LLMResult("fake", "fake", {"overview": text}, "")
+        n = len(statements)
+        out = {
+            "definition": f"Definition from {n} statements.",
+            "context": f"Context from {n}.",
+        }
+        return LLMResult("fake", "fake", out, "")
 
 
 def _corpus_and_overlay():
@@ -217,17 +223,17 @@ def test_a_run_integrates_then_skips_until_there_is_something_new(
     anchor = corpus.entities["anchor-step"]
 
     generate.run_generation([anchor], corpus, prose, llm, model="m", today="2026-10-16")
-    assert prose.prose("anchor-step") == "Overview from 1 statements."
+    assert prose.definition("anchor-step") == "Definition from 1 statements."
     assert llm.calls[0]["base"] == "(empty)"
 
     # the capped-out older statement comes next, on top of the first overview
     generate.run_generation([anchor], corpus, prose, llm, model="m", today="2026-10-16")
-    assert llm.calls[1]["base"] == "Overview from 1 statements."
+    assert llm.calls[1]["base"] == "Definition from 1 statements."
     assert [s["date"] for s in llm.calls[1]["statements"]] == ["2025-01-01"]
 
     # nothing left: no call
     result = generate.run_generation([anchor], corpus, prose, llm, model="m")
-    assert result == {"entities": 1, "generated": 0}
+    assert result["generated"] == 0
     assert len(llm.calls) == 2
 
 
@@ -248,9 +254,11 @@ def test_a_new_version_regenerates_from_scratch() -> None:
 # ── the page is the base ──
 
 
-def _write_page(wiki: Path, rel: str, overview: str) -> None:
+def _write_page(wiki: Path, rel: str, overview: str, context: str = "") -> None:
     page = md.Page(frontmatter={"slug": rel})
     page.set_section("Overview", [overview])
+    if context:
+        page.set_section("In practice", [context])
     (wiki / rel).parent.mkdir(parents=True, exist_ok=True)
     (wiki / rel).write_text(md.serialize(page))
 
@@ -282,7 +290,12 @@ def test_a_page_showing_our_own_older_overview_is_not_an_edit(tmp_path: Path) ->
     with patch.object(generate, "MAX_OWN_STATEMENTS", 1):
         generate.run_generation([anchor], corpus, prose, llm, model="m")
     # the page was rendered from that first overview, then generation ran again
-    _write_page(tmp_path, "techniques/anchor-step.md", prose.prose("anchor-step"))
+    _write_page(
+        tmp_path,
+        "techniques/anchor-step.md",
+        prose.definition("anchor-step"),
+        prose.context("anchor-step"),
+    )
 
     generate.run_generation(
         [anchor], corpus, prose, llm, model="m", wiki_repo_path=tmp_path
@@ -330,7 +343,8 @@ def test_generated_prose_renders_as_the_overview() -> None:
     )
 
     page = md.parse(bundle["concepts/connection.md"])
-    assert page.get_section("Overview") == ["Overview from 1 statements."]
+    assert page.get_section("Overview") == ["Definition from 1 statements."]
+    assert page.get_section("In practice") is None  # no context passed
 
 
 def test_generate_local_end_to_end(tmp_path: Path) -> None:
@@ -349,7 +363,7 @@ def test_generate_local_end_to_end(tmp_path: Path) -> None:
 
     assert summary["generated"] == 1
     assert summary["used_links"] is True
-    assert generate.ProseFile.load(prose_path).prose("connection")
+    assert generate.ProseFile.load(prose_path).definition("connection")
     assert (tmp_path / "prose-review.md").exists()
 
 
@@ -365,3 +379,55 @@ def test_generate_mode_passes_its_arguments(
     assert kwargs["entities"] == ["connection", "anchor"]
     assert kwargs["wiki_repo_path"] == tmp_path.resolve()
     assert kwargs["links_path"].name == "links.json"
+
+
+def test_a_failing_entity_is_retried_then_skipped_and_left_pending() -> None:
+    from mini_app_polis.llm.errors import LLMValidationError
+
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+
+    class Flaky(FakeLLM):
+        def generate_json(self, **kwargs: Any) -> LLMResult:
+            user = kwargs["messages"][-1].content
+            if "slug: anchor-step" in user:
+                raise LLMValidationError("bad json")
+            return super().generate_json(**kwargs)
+
+    entities = [corpus.entities["anchor-step"], corpus.entities["stretch"]]
+    result = generate.run_generation(entities, corpus, prose, Flaky(), model="m")
+
+    assert result["failed_slugs"] == ["anchor-step"]
+    assert result["generated"] == 1
+    assert prose.definition("anchor-step") == ""
+    assert prose.integrated("anchor-step") == set()
+    assert prose.definition("stretch")
+
+
+def test_the_prompt_forbids_straight_double_quotes_in_the_text() -> None:
+    assert "never use the straight double-quote character" in generate.SYSTEM_PROMPT
+
+
+def test_definition_comes_first_and_context_renders_under_in_practice() -> None:
+    augmented, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    generate.run_generation(
+        [corpus.entities["connection"]], corpus, prose, FakeLLM(), model="m"
+    )
+    export = generate.apply_prose(augmented, prose)
+
+    bundle, _ = render_bundle(
+        export,
+        rendered_at=dt.date(2026, 10, 16),
+        context=generate.context_by_entity(export, prose),
+    )
+
+    page = md.parse(bundle["concepts/connection.md"])
+    headings = [h for h, _ in page.sections]
+    assert headings[:2] == ["Overview", "In practice"]
+    assert page.get_section("In practice") == ["Context from 1."]
+
+
+def test_the_prompt_asks_for_a_short_definition_and_separate_context() -> None:
+    assert "at most about 40 words" in generate.SYSTEM_PROMPT.replace("\n", " ")
+    assert generate.RESPONSE_SCHEMA["required"] == ["definition", "context"]

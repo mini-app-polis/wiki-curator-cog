@@ -39,6 +39,7 @@ from typing import Any
 from mini_app_polis import logger as log
 from mini_app_polis.llm import LLMMessage
 from mini_app_polis.llm.base import LLMClient
+from mini_app_polis.llm.errors import LLMError
 
 from . import link
 from . import markdown_utils as md
@@ -54,7 +55,12 @@ LOG = log.get_logger()
 
 #: Raised when the prompt changes in a way that should regenerate every page
 #: from scratch. Entities generated under another version start over.
-GENERATOR_VERSION = "1"
+GENERATOR_VERSION = "3"
+
+#: Attempts per entity before it is skipped for this run. A malformed
+#: response is usually a one-off; a second failure is reported, and the
+#: entity stays pending for the next run.
+ATTEMPTS = 2
 
 #: Per call: an entity's own statements, newest first.
 MAX_OWN_STATEMENTS = 120
@@ -234,126 +240,164 @@ class ProseFile:
             return None
         return entry
 
-    def prose(self, slug: str) -> str:
-        """The latest overview for ``slug`` under this version; "" if none."""
+    def definition(self, slug: str) -> str:
+        """The latest definition for ``slug`` under this version; "" if none."""
         entry = self.current(slug)
-        return entry["prose"] if entry else ""
+        return entry.get("definition", "") if entry else ""
+
+    def context(self, slug: str) -> str:
+        """The latest context for ``slug`` under this version; "" if none."""
+        entry = self.current(slug)
+        return entry.get("context", "") if entry else ""
 
     def integrated(self, slug: str) -> set[str]:
         """Statement keys already folded into ``slug``'s overview."""
         entry = self.current(slug)
         return set(entry["integrated"]) if entry else set()
 
-    def written_by_us(self, slug: str, text: str) -> bool:
-        """Whether ``text`` is any overview this pass wrote for ``slug``."""
+    def written_by_us(self, slug: str, definition: str, context: str) -> bool:
+        """Whether this pair is any definition and context this pass wrote."""
         entry = self.entities.get(slug)
         if entry is None:
             return False
         return any(
-            r["by"] == "llm" and r["prose"].strip() == text.strip()
+            r["by"] == "llm"
+            and r.get("definition", r.get("prose", "")).strip() == definition.strip()
+            and r.get("context", "").strip() == context.strip()
             for r in entry.get("revisions", [])
         )
 
 
-def page_overview(wiki_repo_path: Path | None, entity: WcsEntity) -> str:
-    """The ``## Overview`` the entity's page shows now; "" if none or no page."""
+#: The page sections generation owns: the definition comes first on the page,
+#: the context further down.
+DEFINITION_SECTION = "Overview"
+CONTEXT_SECTION = "In practice"
+
+
+def page_prose(wiki_repo_path: Path | None, entity: WcsEntity) -> tuple[str, str]:
+    """The definition and context the entity's page shows now; "" where absent."""
     if wiki_repo_path is None:
-        return ""
+        return "", ""
     from .render import _entity_path  # the renderer owns paths
 
     path = wiki_repo_path / _entity_path(entity)
     if not path.exists():
-        return ""
-    body = md.parse(path.read_text()).get_section("Overview")
-    return "\n".join(body).strip() if body else ""
+        return "", ""
+    page = md.parse(path.read_text())
+
+    def section(name: str) -> str:
+        body = page.get_section(name)
+        return "\n".join(body).strip() if body else ""
+
+    return section(DEFINITION_SECTION), section(CONTEXT_SECTION)
 
 
 def base_for(
     entity: WcsEntity, prose: ProseFile, wiki_repo_path: Path | None, today: str
-) -> str:
-    """The overview to build on: the page as it stands.
+) -> tuple[str, str]:
+    """The definition and context to build on: the page as it stands.
 
-    If the page shows an overview this pass never wrote, someone edited it.
-    The edit is recorded as a revision and becomes the base. Otherwise the
-    latest generated overview is the base — the page may simply not have
-    been rendered since.
+    If the page shows prose this pass never wrote, someone edited it. The
+    edit is recorded as a revision and becomes the base. Otherwise the
+    latest generated prose is the base — the page may simply not have been
+    rendered since.
     """
-    on_page = page_overview(wiki_repo_path, entity)
-    if on_page and not prose.written_by_us(entity.slug, on_page):
+    definition, context = page_prose(wiki_repo_path, entity)
+    if (definition or context) and not prose.written_by_us(
+        entity.slug, definition, context
+    ):
         entry = prose.entities.setdefault(
             entity.slug,
             {
                 "entity_id": str(entity.id),
                 "generator_version": GENERATOR_VERSION,
-                "prose": "",
+                "definition": "",
+                "context": "",
                 "integrated": [],
                 "revisions": [],
             },
         )
         entry.setdefault("revisions", []).append(
-            {"by": "page", "at": today, "prose": on_page}
+            {"by": "page", "at": today, "definition": definition, "context": context}
         )
-        return on_page
-    return prose.prose(entity.slug)
+        return definition, context
+    return prose.definition(entity.slug), prose.context(entity.slug)
 
 
 # ── The model ──
 
 SYSTEM_PROMPT = """\
-You maintain one page of a West Coast Swing (WCS) wiki built from lesson \
-notes. You are given the page's current overview (possibly empty) and new \
-statements from lessons and notes. Return the updated overview.
+You write two short pieces for one page of a West Coast Swing (WCS) wiki: \
+its definition and its context. Further down, the page already lists every \
+teacher's detailed notes, mistakes and related pages, so neither piece \
+repeats them.
 
-What the overview is: a clear, descriptive explanation of the concept, \
-technique, pattern or drill, synthesised from what the sources say — what it \
-is, how it is done or used, what it depends on, common mistakes, and how it \
-relates to other ideas. It sits above detailed per-teacher evidence on the \
-same page, so it summarises; it does not list every statement.
+definition — the first section of the page. A simple definition, like a \
+good glossary entry: one or two plain sentences, at most about 40 words, \
+saying what it is. No citations, no links, no history, no advice, no \
+qualifications.
+
+context — optional, shown lower on the page under "In practice". Only the \
+few points a dancer most needs beyond the definition: how it works or is \
+done, the key thing people get wrong and what is right instead, how it \
+connects to the bigger ideas. At most about 120 words. Leave it as an empty \
+string when there is nothing worth adding — common for thin entities.
+
+You are given the current definition and context (possibly empty) and new \
+statements from lessons and notes. Return the updated pair.
+
+Voice: an experienced dancer explaining to another dancer. Synthesise in \
+your own words; do not paraphrase lesson by lesson or recount who said what. \
+Short sentences, everyday language, no hedging, no filler. Shorter is better.
 
 Rules:
-- Keep what the current overview says unless a new statement contradicts or \
-refines it. You are revising, not starting over.
-- Newer statements win. When a newer statement contradicts an older claim, \
-state the newer position; where the change itself is informative, say so \
-briefly ("earlier lessons described X; more recent ones teach Y").
-- When teachers genuinely disagree, present both positions, attributed by \
-name. Do not adjudicate.
+- Keep what the current text says unless new statements contradict it or \
+add something that matters; you are revising, not starting over. Most new \
+statements will not change a good definition.
+- Newer statements win. If a newer one contradicts an older idea, state the \
+newer idea; mention the change only if it is itself worth knowing.
+- Name a teacher only when teachers genuinely disagree.
 - Statements with role "refers" are about another entity and mention this \
-one. Use them to describe how this idea shows up in, and connects to, the \
-rest of the dance, linking the other entity exactly as given in "about" \
-(e.g. [[techniques/anchor-step]]).
-- Cite sources inline with the exact source link given, e.g. \
-"... ([[sources/2026-03-01-anchor-step]])". Every substantive claim cites at \
-least one source. Never invent a source.
-- Never invent facts, techniques or quotes. If the statements are thin, \
-write a short overview. One to four short paragraphs; length follows the \
-material.
-- Descriptive voice, present tense, no headings, no bullet lists, no \
-preamble. Do not mention "statements", "sources say" or this process.
+one; use them to understand how this idea shows up in the dance. In the \
+context only, link at most two of the most important, exactly as given in \
+"about" (e.g. [[techniques/anchor-step]]).
+- In the context only, cite sparingly: at most three citations, each the \
+exact source link given, e.g. ([[sources/2026-03-01-anchor-step]]). Never \
+invent a source, fact or quote.
+- No headings, no bullet lists, no preamble. Do not mention statements, \
+sources, lessons or this process.
 
 Output ONLY valid JSON — no markdown fences, no commentary before or after — \
 in exactly this shape:
-{"overview": "<markdown text>"}
+{"definition": "<one or two sentences>", "context": "<short markdown or empty>"}
+Inside the text never use the straight double-quote character ("); use \
+curly quotes (“ ”) or single quotes instead, so the JSON stays valid.
 """
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["overview"],
-    "properties": {"overview": {"type": "string"}},
+    "required": ["definition", "context"],
+    "properties": {
+        "definition": {"type": "string"},
+        "context": {"type": "string"},
+    },
 }
 
 
 def build_messages(
-    entity: WcsEntity, base: str, evidence: Sequence[Evidence]
+    entity: WcsEntity, base: tuple[str, str], evidence: Sequence[Evidence]
 ) -> list[LLMMessage]:
-    """The entity, its current overview and the new evidence."""
+    """The entity, its current definition and context, and the new evidence."""
     user = "\n".join(
         [
             f"Entity: {entity.canonical_name} (kind: {entity.kind}, slug: {entity.slug})",
             "",
-            "Current overview:",
-            base.strip() or "(empty)",
+            "Current definition:",
+            base[0].strip() or "(empty)",
+            "",
+            "Current context:",
+            base[1].strip() or "(empty)",
             "",
             "New statements (JSON, newest first):",
             json.dumps([e.as_prompt() for e in evidence], ensure_ascii=False, indent=1),
@@ -433,9 +477,10 @@ def generate_one(
     result = llm.generate_json(
         messages=build_messages(entity, base, evidence),
         json_schema=RESPONSE_SCHEMA,
-        schema_name="overview",
+        schema_name="prose",
     )
-    text = str(result.output_json.get("overview", "")).strip()
+    definition = str(result.output_json.get("definition", "")).strip()
+    context = str(result.output_json.get("context", "")).strip()
     entry = prose.entities.get(entity.slug)
     if entry is None or entry.get("generator_version") != GENERATOR_VERSION:
         history = entry.get("revisions", []) if entry else []
@@ -447,7 +492,8 @@ def generate_one(
             "generator_version": GENERATOR_VERSION,
             "model": model,
             "generated_at": today,
-            "prose": text,
+            "definition": definition,
+            "context": context,
             "integrated": sorted(
                 set(entry.get("integrated", [])) | {e.key for e in evidence}
             ),
@@ -459,7 +505,8 @@ def generate_one(
             "at": today,
             "model": model,
             "statements": len(evidence),
-            "prose": text,
+            "definition": definition,
+            "context": context,
         }
     )
     return True
@@ -475,36 +522,70 @@ def run_generation(
     wiki_repo_path: Path | None = None,
     today: str | None = None,
     on_entity: Any = None,
-) -> dict[str, int]:
-    """Generate each entity in turn; ``on_entity`` runs after each, to save."""
+) -> dict[str, Any]:
+    """Generate each entity in turn; ``on_entity`` runs after each, to save.
+
+    One entity's bad response does not end the run: it is retried, then
+    skipped and named in ``failed``, and stays pending — its statements are
+    not marked integrated — so the next run tries it again.
+    """
     day = today or dt.date.today().isoformat()
     generated = 0
+    failed: list[str] = []
     for i, entity in enumerate(entities, 1):
-        if generate_one(
-            llm,
-            entity,
-            corpus,
-            prose,
-            model=model,
-            wiki_repo_path=wiki_repo_path,
-            today=day,
-        ):
-            generated += 1
+        for attempt in range(1, ATTEMPTS + 1):
+            try:
+                if generate_one(
+                    llm,
+                    entity,
+                    corpus,
+                    prose,
+                    model=model,
+                    wiki_repo_path=wiki_repo_path,
+                    today=day,
+                ):
+                    generated += 1
+                break
+            except LLMError as exc:
+                LOG.warning(
+                    "generate.entity_failed slug=%s attempt=%s/%s err=%s",
+                    entity.slug,
+                    attempt,
+                    ATTEMPTS,
+                    exc,
+                )
+                if attempt == ATTEMPTS:
+                    failed.append(entity.slug)
         if on_entity is not None:
             on_entity()
         LOG.info("generate.entity done=%s/%s slug=%s", i, len(entities), entity.slug)
     prose.generator_version = GENERATOR_VERSION
     prose.model = model
-    return {"entities": len(entities), "generated": generated}
+    return {
+        "entities": len(entities),
+        "generated": generated,
+        "failed": len(failed),
+        "failed_slugs": failed,
+    }
 
 
 def apply_prose(export: WcsWikiExport, prose: ProseFile) -> WcsWikiExport:
-    """The export with each entity's generated overview in ``overview_md``."""
+    """The export with each entity's generated definition in ``overview_md``."""
     entities = []
     for e in export.entities:
-        text = prose.prose(e.slug)
+        text = prose.definition(e.slug)
         entities.append(e.model_copy(update={"overview_md": text}) if text else e)
     return export.model_copy(update={"entities": entities})
+
+
+def context_by_entity(export: WcsWikiExport, prose: ProseFile) -> dict[uuid.UUID, str]:
+    """Each entity's generated context, for the page's ``## In practice``."""
+    out: dict[uuid.UUID, str] = {}
+    for e in export.entities:
+        text = prose.context(e.slug)
+        if text:
+            out[e.id] = text
+    return out
 
 
 def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
@@ -521,7 +602,9 @@ def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
             f"_{last.get('statements', '?')} statements integrated this run; "
             f"{len(entry['integrated'])} in total._",
             "",
-            entry["prose"] or "_(empty)_",
+            f"**Definition.** {entry.get('definition') or '_(empty)_'}",
+            "",
+            f"**In practice.** {entry.get('context') or '_(none)_'}",
             "",
         ]
     return "\n".join(lines)

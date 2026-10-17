@@ -125,9 +125,11 @@ Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
 ### Generate overviews locally (ADR-005, MINI-86)
 
 Generation, local half: for each entity, an LLM is given the page's current
-overview and the statements not yet integrated into it — the entity's own,
-plus the statements that refer to it from `links.json` — and returns the
-updated overview, newest statements winning. Results go to `prose.json`
+definition and context and the statements not yet integrated — the entity's
+own, plus the statements that refer to it from `links.json` — and returns an
+updated **definition** (the page's first section: one or two plain sentences)
+and optional **context** (a short "In practice" section below it), newest
+statements winning. Results go to `prose.json`
 (also the watermark: an entity with nothing new costs no call), with a
 readable `prose-review.md` beside it. Nothing goes to the API.
 

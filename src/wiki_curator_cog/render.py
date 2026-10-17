@@ -520,6 +520,7 @@ def render_entity_page(
     *,
     rendered_at: dt.date,
     overlay: LinkOverlay | None = None,
+    context: str = "",
 ) -> str:
     """Render one entity's Markdown page.
 
@@ -550,6 +551,8 @@ def render_entity_page(
 
     if entity.overview_md.strip():
         page.set_section("Overview", [entity.overview_md.strip()])
+    if context.strip():
+        page.set_section("In practice", [context.strip()])
 
     by_teacher = _group_by_instructor(
         attributions=attributions,
@@ -1110,6 +1113,7 @@ def render_bundle(
     rendered_at: dt.date | None = None,
     existing_log: str = "",
     overlay: LinkOverlay | None = None,
+    context: dict[uuid.UUID, str] | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
     """Render the full wiki bundle. Keys are repo-relative paths.
 
@@ -1142,7 +1146,11 @@ def render_bundle(
     for entity in sorted(export.entities, key=lambda e: e.slug):
         path = _entity_path(entity)
         bundle[path] = render_entity_page(
-            entity, indexes, rendered_at=when, overlay=overlay
+            entity,
+            indexes,
+            rendered_at=when,
+            overlay=overlay,
+            context=(context or {}).get(entity.id, ""),
         )
         if not indexes.attributions_by_entity.get(entity.id):
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")

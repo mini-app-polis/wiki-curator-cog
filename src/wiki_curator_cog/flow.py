@@ -254,17 +254,22 @@ def render_local(
         }
 
     prose_summary: dict | None = None
+    context = None
     if prose_path is not None:
         if not prose_path.exists():
             raise RuntimeError(f"prose file not found: {prose_path}")
         prose = generate.ProseFile.load(prose_path)
         export = generate.apply_prose(export, prose)
+        context = generate.context_by_entity(export, prose)
         prose_summary = {
             "file": str(prose_path),
-            "overviews": sum(1 for e in export.entities if e.overview_md.strip()),
+            "definitions": sum(1 for e in export.entities if e.overview_md.strip()),
+            "contexts": len(context),
         }
 
-    bundle, stats = render_bundle(export, rendered_at=dt.date.today(), overlay=overlay)
+    bundle, stats = render_bundle(
+        export, rendered_at=dt.date.today(), overlay=overlay, context=context
+    )
     bundle.pop("log.md", None)
 
     stale = list_stale_derived_paths(wiki_repo_path, set(bundle))

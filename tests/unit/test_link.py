@@ -323,12 +323,12 @@ def test_a_rerun_skips_what_is_linked_and_relinks_on_a_new_version(
     links = link.LinksFile.load(path)
     first = link.run_linking(statements, catalog, links, llm, model="m", batch_size=2)
     links.save(path)
-    assert first == {"statements": 4, "skipped": 0, "linked": 4}
+    assert first == {"statements": 4, "skipped": 0, "linked": 4, "failed_batches": 0}
     assert len(llm.calls) == 2
 
     links = link.LinksFile.load(path)
     second = link.run_linking(statements, catalog, links, llm, model="m")
-    assert second == {"statements": 4, "skipped": 4, "linked": 0}
+    assert second == {"statements": 4, "skipped": 4, "linked": 0, "failed_batches": 0}
     assert len(llm.calls) == 2
 
     with patch.object(link, "LINKER_VERSION", "next"):
@@ -580,3 +580,26 @@ def test_render_mode_passes_the_links_file(
     run.assert_called_once_with(
         tmp_path.resolve(), (tmp_path / "l.json").resolve(), None
     )
+
+
+def test_a_failed_batch_is_skipped_and_retried_next_run(catalog: link.Catalog) -> None:
+    from mini_app_polis.llm.errors import LLMValidationError
+
+    statements = link.collect_statements(_export())
+
+    class FailsFirst(FakeLLM):
+        def generate_json(self, **kwargs: Any) -> LLMResult:
+            if not self.calls:
+                self.calls.append([])
+                raise LLMValidationError("bad json")
+            return super().generate_json(**kwargs)
+
+    links = link.LinksFile()
+    llm = FailsFirst({})
+    first = link.run_linking(statements, catalog, links, llm, model="m", batch_size=2)
+    assert first["failed_batches"] == 1
+    assert first["linked"] == 2
+
+    second = link.run_linking(statements, catalog, links, llm, model="m", batch_size=2)
+    assert second["linked"] == 2
+    assert second["skipped"] == 2

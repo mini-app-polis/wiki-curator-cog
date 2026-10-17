@@ -41,6 +41,7 @@ from typing import Any, Literal
 from mini_app_polis import logger as log
 from mini_app_polis.llm import LLMMessage, build_llm
 from mini_app_polis.llm.base import LLMClient
+from mini_app_polis.llm.errors import LLMError
 
 from .render import LinkOverlay, WcsEntity, WcsWikiExport
 
@@ -517,7 +518,7 @@ def run_linking(
     model: str,
     batch_size: int = DEFAULT_BATCH_SIZE,
     on_batch: Any = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Link every statement not already linked; record into ``links``.
 
     ``on_batch`` is called after each batch, so the caller can save progress
@@ -526,9 +527,19 @@ def run_linking(
     todo = [s for s in statements if not links.is_linked(s)]
     skipped = len(statements) - len(todo)
     linked = 0
+    failed_batches = 0
     for start in range(0, len(todo), batch_size):
         batch = todo[start : start + batch_size]
-        results = link_batch(llm, batch, catalog, links.proposed_names())
+        try:
+            results = link_batch(llm, batch, catalog, links.proposed_names())
+        except LLMError as exc:
+            # One bad response does not end a long run: the batch stays
+            # unlinked and the next run picks it up.
+            failed_batches += 1
+            LOG.warning(
+                "link.batch_failed start=%s size=%s err=%s", start, len(batch), exc
+            )
+            continue
         for statement in batch:
             if statement.key in results:
                 links.record(statement, results[statement.key], model)
@@ -543,7 +554,12 @@ def run_linking(
         )
     links.linker_version = LINKER_VERSION
     links.model = model
-    return {"statements": len(statements), "skipped": skipped, "linked": linked}
+    return {
+        "statements": len(statements),
+        "skipped": skipped,
+        "linked": linked,
+        "failed_batches": failed_batches,
+    }
 
 
 # ── Review ──

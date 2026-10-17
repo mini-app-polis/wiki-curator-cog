@@ -138,6 +138,11 @@ stands — including any human edits — plus the statements added since that
 page was last integrated. It decides what to keep, merge, revise or mark
 superseded. Newer evidence wins.
 
+- **A definition first, context separately** (2026-10-16). The page's first
+  section is a plain definition — one or two sentences, no citations. What a
+  dancer needs beyond it (how it is done, the key mistake, connections) is a
+  short, separately rendered "In practice" section. Both are deliberately
+  brief: the evidence below carries the detail.
 - **The LLM owns the prose only.** `## By teacher`, `## Sources`, `## Related`
   and `## Referenced by` stay mechanically rendered from the data, so links and
   attribution cannot drift through repeated rewrites.
