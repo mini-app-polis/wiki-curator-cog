@@ -155,26 +155,30 @@ moves: raising `LINKER_VERSION` or `GENERATOR_VERSION` replays the whole
 corpus. `consolidate` keeps one version per kind group
 (`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
-### Moving the state to the API (ADR-006, MINI-89)
+### Where the state lives: the API (ADR-006, MINI-89, MINI-94)
 
-`links.json`, `facets.json` and `prose.json` were paid for in model calls, so
-they move to the API by import, never by relinking or regenerating. The API
-keeps them keyed as the files are (statement keys, entity slugs), so every
-watermark holds.
+The three passes' state — `links.json`, `facets.json`, `prose.json` — is held
+by the API. `render`, `link`, `generate` and `consolidate` read it from there
+(`--state api`, the default) and write back the entries a run changed as it
+goes, in batches, with a final flush. The files are kept as a cache in the
+same layout, so the reviews, git history and Obsidian keep working, and they
+are checked: if a file and the API disagree, the command stops before reading
+or writing anything. That happens when a run's last write never arrived; run
+`state-verify`, and if the file is the one to keep, `state-import`.
+`--state files` uses the files alone, as before.
 
 ```bash
-# writes to the API the config points at: production under --config prd
-doppler run --config prd -- uv run python -m wiki_curator_cog.main state-import \
-  --state-dir ../wcs-wiki/.curator
 # read-only; exits 1 unless the API holds exactly what the files hold
 doppler run --config prd -- uv run python -m wiki_curator_cog.main state-verify \
   --state-dir ../wcs-wiki/.curator
+# send the files to the API (production under --config prd); safe to re-run
+doppler run --config prd -- uv run python -m wiki_curator_cog.main state-import \
+  --state-dir ../wcs-wiki/.curator
 ```
 
-The import refuses to send a field the API does not store, goes up in chunks
-(`--batch-size`, default 250) and is safe to re-run. The files stay in git
-until the curator reads and writes the API instead (MINI-94); until then, a
-paid local run means importing again.
+The import refuses a field the API does not store, goes up in chunks
+(`--batch-size`, default 250), and is safe to repeat. A run's writes refuse
+unknown fields the same way, and a refused write stops the run.
 
 ### Link locally (ADR-005, MINI-84)
 

@@ -1,0 +1,174 @@
+"""The API as the curator's state store (MINI-94, part 1).
+
+Read from the API, write back what changed, keep the files as a checked
+cache — and never let either side silently overwrite the other.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+import wiki_curator_cog.flow as flow
+import wiki_curator_cog.main as main
+from wiki_curator_cog import link, state_backend, state_store
+
+from .test_link import FakeLLM, _ref
+from .test_link import _export as _link_export
+from .test_state_store import KEY, FakeApi, _write_files
+
+FILES = ("links.json", "facets.json", "prose.json")
+
+
+@pytest.fixture
+def seeded(tmp_path: Path) -> tuple[FakeApi, Path, Path]:
+    """An API holding the fixture files, and a separate empty cache folder."""
+    src = tmp_path / "src"
+    src.mkdir()
+    _write_files(src)
+    api = FakeApi()
+    state_store.import_state(api, src)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    return api, src, cache
+
+
+def test_a_read_from_the_api_saves_the_files_byte_for_byte(seeded) -> None:
+    api, src, cache = seeded
+    store = state_backend.ApiState(api)
+    files = state_backend.FileState()
+    for name in ("links", "facets", "prose"):
+        from_api = getattr(store, name)(cache / f"{name}.json")
+        from_file = getattr(files, name)(src / f"{name}.json")
+        store.save(from_api, cache / f"{name}.json", final=True)
+        files.save(from_file, src / f"{name}.json")
+        assert (cache / f"{name}.json").read_bytes() == (
+            src / f"{name}.json"
+        ).read_bytes()
+    assert api.posts == {"links": 1, "facets": 1, "prose": 1}  # the import
+
+
+def test_an_unchanged_run_sends_nothing(seeded) -> None:
+    api, src, _ = seeded
+    store = state_backend.ApiState(api)
+    links = store.links(src / "links.json")
+    store.save(links, src / "links.json", final=True)
+    assert api.posts["links"] == 1
+
+
+def test_a_file_that_disagrees_with_the_api_stops_everything(seeded) -> None:
+    api, src, _ = seeded
+    raw = json.loads((src / "prose.json").read_text())
+    raw["entities"]["anchor"]["definition"] = "Paid for, never sent."
+    (src / "prose.json").write_text(json.dumps(raw))
+    with pytest.raises(state_backend.StateMismatchError, match="1 changed"):
+        state_backend.ApiState(api).prose(src / "prose.json")
+    assert json.loads((src / "prose.json").read_text()) == raw  # untouched
+
+
+def test_only_changed_entries_are_sent_and_only_when_due(
+    seeded, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    api, _, cache = seeded
+    monkeypatch.setattr(state_backend, "FLUSH_SECONDS", 3600.0)
+    store = state_backend.ApiState(api)
+    facets = store.facets(cache / "facets.json")
+    assert facets is not None
+    facets.entities["anchor"]["reason"] = "revised"
+
+    store.save(facets, cache / "facets.json")  # below the batch size: waits
+    assert api.posts["facets"] == 1
+    store.save(facets, cache / "facets.json", final=True)
+    assert api.posts["facets"] == 2
+    assert api.docs["facets"]["entities"]["anchor"]["reason"] == "revised"
+    assert state_store.verify_state(api, cache, only=("facets",))["ok"] is True
+
+
+def test_a_full_batch_is_sent_mid_run(seeded, monkeypatch: pytest.MonkeyPatch) -> None:
+    api, _, cache = seeded
+    monkeypatch.setattr(state_backend, "FLUSH_ENTRIES", 1)
+    monkeypatch.setattr(state_backend, "FLUSH_SECONDS", 3600.0)
+    store = state_backend.ApiState(api)
+    facets = store.facets(cache / "facets.json")
+    assert facets is not None
+    facets.entities["anchor"]["reason"] = "revised"
+    store.save(facets, cache / "facets.json")
+    assert api.posts["facets"] == 2
+
+
+def test_a_refused_write_stops_the_run_with_the_file_written(seeded) -> None:
+    api, _, cache = seeded
+    store = state_backend.ApiState(api)
+    prose = store.prose(cache / "prose.json")
+    assert prose is not None
+    prose.entities["anchor"]["definition"] = "New."
+
+    def refuse(doc):
+        raise RuntimeError("503")
+
+    api.put_wcs_wiki_prose = refuse  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="503"):
+        store.save(prose, cache / "prose.json", final=True)
+    saved = json.loads((cache / "prose.json").read_text())
+    assert saved["entities"]["anchor"]["definition"] == "New."
+    # and the next read refuses until the file is imported
+    with pytest.raises(state_backend.StateMismatchError):
+        state_backend.ApiState(api).prose(cache / "prose.json")
+
+
+def test_an_unknown_field_is_never_sent(seeded) -> None:
+    api, _, cache = seeded
+    store = state_backend.ApiState(api)
+    links = store.links(cache / "links.json")
+    assert links is not None
+    links.statements[KEY]["tokens"] = 12
+    with pytest.raises(state_store.UnknownFieldsError, match="tokens"):
+        store.save(links, cache / "links.json", final=True)
+    assert api.posts["links"] == 1
+
+
+def test_saving_needs_a_read_first(seeded) -> None:
+    api, _, cache = seeded
+    with pytest.raises(RuntimeError, match="not read from the API"):
+        state_backend.ApiState(api).save(link.LinksFile(), cache / "links.json")
+
+
+def test_a_link_run_writes_its_references_to_the_api(tmp_path: Path) -> None:
+    api = FakeApi()
+    path = tmp_path / "links.json"
+    statements = link.collect_statements(_link_export())
+    attribution = next(s for s in statements if s.kind == "attribution")
+    llm = FakeLLM({attribution.key: [_ref("connection")]})
+
+    with (
+        patch.object(flow, "_fetch_export", return_value=_link_export()),
+        patch.object(link, "llm_from_env", return_value=(llm, "fake/model")),
+    ):
+        summary = flow.link_local(path, state=state_backend.ApiState(api))
+
+    assert summary["linked"] == 4
+    stored = api.docs["links"]["statements"]
+    assert set(stored) == {s.key for s in statements}
+    assert [r["target_slug"] for r in stored[attribution.key]["references"]] == [
+        "connection"
+    ]
+    assert state_store.verify_state(api, tmp_path, only=("links",))["ok"] is True
+
+
+def test_the_api_is_the_default_store(tmp_path: Path) -> None:
+    sentinel = object()
+    with (
+        patch.object(main, "api_state", return_value=sentinel),
+        patch.object(main, "link_local", return_value={}) as run,
+    ):
+        main.main(["link", "--links-file", str(tmp_path / "l.json")])
+    assert run.call_args.kwargs["state"] is sentinel
+
+    with patch.object(main, "link_local", return_value={}) as run:
+        main.main(
+            ["link", "--links-file", str(tmp_path / "l.json"), "--state", "files"]
+        )
+    assert "state" not in run.call_args.kwargs

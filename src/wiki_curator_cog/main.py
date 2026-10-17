@@ -48,6 +48,7 @@ from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
 from wiki_curator_cog.flow import (
     REPO,
+    api_state,
     consolidate_local,
     export_run,
     generate_local,
@@ -194,6 +195,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="link / consolidate: statements or entities per LLM call.",
     )
     parser.add_argument(
+        "--state",
+        choices=["api", "files"],
+        default="api",
+        help=(
+            "render / link / generate / consolidate: where links, facets and "
+            "prose are read from and written to. 'api' (the default) reads "
+            "the API and writes back what a run changed, keeping the files "
+            "as a checked cache; 'files' uses the files alone."
+        ),
+    )
+    parser.add_argument(
         "--state-dir",
         default=None,
         help=(
@@ -249,11 +261,17 @@ def _facets_path(facets: str | None, links: str | None) -> Path | None:
     return None
 
 
+def _store(args: argparse.Namespace) -> dict:
+    """``state=`` for a local command: the API unless --state files."""
+    return {"state": api_state()} if args.state == "api" else {}
+
+
 def _render(
     wiki_repo_path_raw: str,
     links: str | None = None,
     prose: str | None = None,
     facets: str | None = None,
+    store: dict | None = None,
 ) -> int:
     """The local loop: render into a clone, print what it found.
 
@@ -269,7 +287,11 @@ def _render(
     links_path = Path(links).expanduser().resolve() if links else None
     prose_path = Path(prose).expanduser().resolve() if prose else None
     summary = render_local(
-        wiki_repo_path, links_path, prose_path, _facets_path(facets, links)
+        wiki_repo_path,
+        links_path,
+        prose_path,
+        _facets_path(facets, links),
+        **(store or {}),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 1 if summary["broken_links"]["count"] else 0
@@ -286,6 +308,7 @@ def _link(args: argparse.Namespace) -> int:
         Path(args.links_file).expanduser().resolve(),
         facets_path=_facets_path(args.facets, args.links_file),
         **kwargs,
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -305,6 +328,7 @@ def _generate(args: argparse.Namespace) -> int:
         facets_path=_facets_path(args.facets, links),
         dry_run=args.dry_run,
         **({"workers": args.workers} if args.workers is not None else {}),
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -326,8 +350,9 @@ def _consolidate(args: argparse.Namespace) -> int:
     summary = consolidate_local(
         facets_file,
         prose_path=Path(args.prose).expanduser().resolve() if args.prose else None,
-        links_path=links if links.exists() else None,
+        links_path=links if (links.exists() or args.state == "api") else None,
         **kwargs,
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -355,7 +380,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.mode == "render":
         return _render(
-            os.getenv("WIKI_REPO_PATH", ""), args.links, args.prose, args.facets
+            os.getenv("WIKI_REPO_PATH", ""),
+            args.links,
+            args.prose,
+            args.facets,
+            _store(args),
         )
     if args.mode == "link":
         return _link(args)
