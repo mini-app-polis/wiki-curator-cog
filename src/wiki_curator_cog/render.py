@@ -527,12 +527,13 @@ def render_entity_page(
     rendered_at: dt.date,
     overlay: LinkOverlay | None = None,
     context: str = "",
-    details: Sequence[tuple[str, str]] = (),
+    details: Sequence[tuple[Any, ...]] = (),
 ) -> str:
     """Render one entity's Markdown page.
 
-    ``details`` are the facets folded into this entity (MINI-93): each a name
-    and a one-line gist, listed under ``## Details``.
+    ``details`` are the facets folded into this entity (MINI-93): each a name,
+    a one-line gist and optionally a nesting depth, listed under
+    ``## Details``.
 
     With an ``overlay`` the page also gets ``## Mentions`` (what its
     statements refer to) and ``## Referenced by`` (every entity that refers to
@@ -564,13 +565,12 @@ def render_entity_page(
     if context.strip():
         page.set_section("In practice", [context.strip()])
     if details:
-        page.set_section(
-            "Details",
-            [
-                f"- **{name}** — {gist}" if gist else f"- **{name}**"
-                for name, gist in details
-            ],
-        )
+        lines = []
+        for name, gist, *rest in details:
+            indent = "  " * (rest[0] if rest else 0)
+            item = f"**{name}** — {gist}" if gist else f"**{name}**"
+            lines.append(f"{indent}- {item}")
+        page.set_section("Details", lines)
 
     by_teacher = _group_by_instructor(
         attributions=attributions,
@@ -1136,7 +1136,7 @@ def render_bundle(
     existing_log: str = "",
     overlay: LinkOverlay | None = None,
     context: dict[uuid.UUID, str] | None = None,
-    details: dict[uuid.UUID, list[tuple[str, str]]] | None = None,
+    details: dict[uuid.UUID, list[tuple[Any, ...]]] | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
     """Render the full wiki bundle. Keys are repo-relative paths.
 

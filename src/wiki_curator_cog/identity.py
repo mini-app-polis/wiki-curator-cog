@@ -57,6 +57,10 @@ class Facet:
     #: The facet's own overview from the export, the gist's fallback when no
     #: generated definition exists.
     overview: str = ""
+    #: The nearest listed facet it folded through on the way to the page
+    #: (``stationary anchor`` → ``anchor in place`` → ``anchor``), so
+    #: ``## Details`` can nest it there; None when it folded directly.
+    under: str | None = None
 
 
 @dataclass
@@ -148,8 +152,14 @@ def find_merges(
             merges.by_id[start] = current
             if edges[start][1]:
                 e = entities[start]
+                via = next((n for n in seen[1:-1] if edges[n][1]), None)
                 merges.facets.setdefault(current, []).append(
-                    Facet(slug=e.slug, name=e.canonical_name, overview=e.overview_md)
+                    Facet(
+                        slug=e.slug,
+                        name=e.canonical_name,
+                        overview=e.overview_md,
+                        under=entities[via].slug if via is not None else None,
+                    )
                 )
     for facets in merges.facets.values():
         facets.sort(key=lambda f: f.name.lower())

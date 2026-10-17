@@ -142,6 +142,7 @@ class FakeLLM:
             "entries": [
                 {
                     "id": i,
+                    "fold": self.parents.get(i) is not None,
                     "parent": self.parents.get(i),
                     "same": i in self.same,
                     "reason": "test",
@@ -303,7 +304,7 @@ def test_details_list_each_facet_with_its_gist_and_links_follow() -> None:
     prose = generate.ProseFile()
     details = generate.details_by_entity(export, merges, prose)
     assert details == {
-        _id(ANCHOR): [("Stationary Anchor", "An anchor that stays in place.")]
+        _id(ANCHOR): [("Stationary Anchor", "An anchor that stays in place.", 0)]
     }
 
     bundle, _ = render_bundle(
@@ -343,7 +344,12 @@ def test_a_null_or_missing_field_costs_only_that_entry() -> None:
         def generate_json(self, **kwargs):
             out = {
                 "entries": [
-                    {"id": STATIONARY, "parent": "anchor", "reason": None},
+                    {
+                        "id": STATIONARY,
+                        "fold": True,
+                        "parent": "anchor",
+                        "reason": None,
+                    },
                     {"id": DIRECTIONAL},
                 ]
             }
@@ -458,3 +464,50 @@ def test_review_shows_evidence_and_lists_thin_entries_with_no_home() -> None:
     assert "- Stationary Anchor `1s/0r`" in text
     assert "## Thin and standalone (1)" in text
     assert "- Directional `0s/0r`" in text
+
+
+def test_a_parent_without_an_explicit_fold_is_standalone() -> None:
+    class Contradicts(FakeLLM):
+        def generate_json(self, **kwargs):
+            out = {
+                "entries": [
+                    {"id": STATIONARY, "reason": "keep standalone", "parent": "anchor"},
+                    {"id": DIRECTIONAL, "fold": False, "parent": "anchor"},
+                ]
+            }
+            return LLMResult(provider="f", model="f", output_json=out, raw_text="")
+
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_export(), facets, Contradicts({}), model="fake")
+    assert facets.parents() == {}
+
+
+def test_a_facet_folded_through_another_nests_under_it() -> None:
+    export, merges = identity.resolve(
+        _export(), {STATIONARY: (DIRECTIONAL, True), DIRECTIONAL: (ANCHOR, True)}
+    )
+    by_slug = {f.slug: f for f in merges.facets[_id(ANCHOR)]}
+    assert by_slug[STATIONARY].under == DIRECTIONAL
+    assert by_slug[DIRECTIONAL].under is None
+
+    details = generate.details_by_entity(export, merges)[_id(ANCHOR)]
+    assert [(name, depth) for name, _, depth in details] == [
+        ("Anchor with Directional Intent", 0),
+        ("Stationary Anchor", 1),
+    ]
+    bundle, _ = render_bundle(
+        export, rendered_at=dt.date(2026, 10, 16), details={_id(ANCHOR): details}
+    )
+    assert (
+        "\n  - **Stationary Anchor** — An anchor that stays in place."
+        in bundle["concepts/anchor.md"]
+    )
+
+
+def test_a_facet_through_an_alias_is_not_nested() -> None:
+    _, merges = identity.resolve(
+        _export(), {STATIONARY: (DIRECTIONAL, True), DIRECTIONAL: (ANCHOR, False)}
+    )
+    assert [(f.slug, f.under) for f in merges.facets[_id(ANCHOR)]] == [
+        (STATIONARY, None)
+    ]

@@ -923,24 +923,42 @@ def _gist(text: str) -> str:
 
 def details_by_entity(
     export: WcsWikiExport, merges: Any, prose: ProseFile | None = None
-) -> dict[uuid.UUID, list[tuple[str, str]]]:
-    """Each broad entity's facets, as (name, gist) for ``## Details``.
+) -> dict[uuid.UUID, list[tuple[str, str, int]]]:
+    """Each broad entity's facets, as (name, gist, depth) for ``## Details``.
 
     The gist is the first sentence of the facet's generated definition, or
     of its own overview when it has none. Links in it are repaired, so one
-    pointing at a folded page follows it to the broad page.
+    pointing at a folded page follows it to the broad page. A facet that
+    folded through another facet is nested under it (depth 1, 2, …), so a
+    long list reads as a few groups: ``frame limits`` with its limits under
+    it, rather than a hundred lines at one level.
     """
     if not merges or not getattr(merges, "facets", None):
         return {}
     pages = PageIndex.from_export(export, merges)
-    out: dict[uuid.UUID, list[tuple[str, str]]] = {}
+    out: dict[uuid.UUID, list[tuple[str, str, int]]] = {}
     for entity_id, facets in merges.facets.items():
-        rows = []
+        on_page = {f.slug for f in facets}
+        children: dict[str | None, list[Any]] = {}
         for f in facets:
+            children.setdefault(f.under if f.under in on_page else None, []).append(f)
+        rows: list[tuple[str, str, int]] = []
+        stack: list[tuple[Any, int]] = [
+            (f, 0) for f in _by_name(children.get(None, []), reverse=True)
+        ]
+        while stack:
+            f, depth = stack.pop()
             text = (prose.definition(f.slug) if prose is not None else "") or f.overview
-            rows.append((f.name, pages.repair(_gist(text))))
+            rows.append((f.name, pages.repair(_gist(text)), depth))
+            stack += [
+                (c, depth + 1) for c in _by_name(children.get(f.slug, []), reverse=True)
+            ]
         out[entity_id] = rows
     return out
+
+
+def _by_name(facets: Iterable[Any], *, reverse: bool = False) -> list[Any]:
+    return sorted(facets, key=lambda f: f.name.lower(), reverse=reverse)
 
 
 def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:

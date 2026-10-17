@@ -44,7 +44,7 @@ LOG = log.get_logger()
 
 #: Bump when the prompt or the rules change in a way that should redecide
 #: every entity; entities decided under an older version are asked again.
-CONSOLIDATOR_VERSION = "4"
+CONSOLIDATOR_VERSION = "5"
 
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_WORKERS = 8
@@ -97,13 +97,17 @@ or the same idea. Prefer well-supported parents.
 and must not be the candidate itself. A parent with less support than the \
 candidate is refused. When unsure about a well-supported entry, the parent is null: a wrong fold \
 hides a page.
-- "reason" is a few words a reviewer can check at a glance.
+- Decide in order: first "reason", a few words a reviewer can check at a \
+glance; then "fold", true only if the reason says the candidate belongs on \
+the parent's page; then "parent" and "same". If the reason says the entry \
+stays standalone, has no close parent, or is its own concept, "fold" is \
+false and "parent" is null.
 - Return every candidate id you were given. Do not invent ids.
 
 Output ONLY valid JSON — no markdown fences, no commentary before or after — \
 in exactly this shape:
-{"entries": [{"id": "<candidate id>", "parent": "<entry name>" or null, \
-"same": false, "reason": "<a few words>"}]}
+{"entries": [{"id": "<candidate id>", "reason": "<a few words>", \
+"fold": true, "parent": "<entry name>" or null, "same": false}]}
 """
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -270,7 +274,8 @@ def decide_batch(
     """One call: slug → (parent slug or None, same as the parent, reason).
 
     A parent name that matches no foldable entity, or matches the candidate
-    itself, counts as standalone. So does a parent with less support than
+    itself, counts as standalone, as does any parent without ``"fold": true``.
+    So does a parent with less support than
     the candidate: an established entity is never folded into a thinner one. Ids the model invents are ignored; ids it
     leaves out stay undecided for the next run.
     """
@@ -290,7 +295,9 @@ def decide_batch(
         raw = item.get("parent")
         reason = str(item.get("reason") or "").strip()
         parent: str | None = None
-        if isinstance(raw, str) and raw.strip():
+        # A parent counts only with an explicit fold: a model that names a
+        # parent while its reason says "standalone" has not decided to fold.
+        if item.get("fold") is True and isinstance(raw, str) and raw.strip():
             hit = parents.find(link.api_slugify(_COUNT.sub("", raw)))
             if hit is not None and hit.slug != slug:
                 parent = hit.slug

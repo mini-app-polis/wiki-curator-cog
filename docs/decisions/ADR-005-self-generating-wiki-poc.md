@@ -162,7 +162,11 @@ folded wherever there is a plausible home; an established one folds only when
 it clearly is a facet. An entity is never folded into one with less support,
 which also keeps a well-taught technique from disappearing into a thinner
 page. Thin entities left with no home are listed in the review as candidates
-for a note. Notes outrank the pass: a note's
+for a note. The model states its reason first and must set an explicit
+`fold`: a parent named alongside a reason saying "standalone" is ignored.
+A facet folded through another facet nests under it in `## Details`, so a
+hub like *frame* reads as a few groups rather than a hundred flat lines.
+Notes outrank the pass: a note's
 `facet_of`, `alias_of` or `distinct_from` for the same entity or pair wins, so
 "X is its own concept" splits it back out on the next build. The extraction
 prompt now names the concept rather than the point made about it, so new
