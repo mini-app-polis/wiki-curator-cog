@@ -54,9 +54,11 @@ from wiki_curator_cog.flow import (
     generate_local,
     link_local,
     render_local,
+    run_job,
     state_import_local,
     state_verify_local,
 )
+from wiki_curator_cog.units import JobError
 
 LOG = log.get_logger()
 
@@ -109,6 +111,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "consolidate",
             "state-import",
             "state-verify",
+            "job",
         ],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
@@ -116,7 +119,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "'link' runs the linking pass into a local JSON file. "
             "'consolidate' decides which entities are facets of broader ones. "
             "'state-import' sends links.json, facets.json and prose.json to "
-            "the API; 'state-verify' checks the API holds exactly what they do."
+            "the API; 'state-verify' checks the API holds exactly what they do. "
+            "'job' runs one worker job (--job JSON) as the wiki-jobs worker would."
         ),
     )
     parser.add_argument(
@@ -192,6 +196,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=None,
         help="link / consolidate: statements or entities per LLM call.",
+    )
+    parser.add_argument(
+        "--job",
+        default=None,
+        help=(
+            'job: one worker job as JSON, e.g. \'{"job": "link", "source_id": '
+            '"..."}\', \'{"job": "generate", "entity": "anchor"}\' or '
+            '\'{"job": "consolidate", "entities": ["..."]}\'.'
+        ),
     )
     parser.add_argument(
         "--state",
@@ -381,6 +394,35 @@ def _consolidate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _job(args: argparse.Namespace) -> int:
+    """One worker job, locally: its result and the jobs that would follow."""
+    try:
+        job = json.loads(args.job or "")
+    except json.JSONDecodeError:
+        LOG.error("job.failed err=--job must be a JSON object")
+        return 2
+    state_dir = _state_dir(args)
+    if state_dir is None:
+        raise NoStateFolderError(
+            "no state folder: set WIKI_REPO_PATH (its .curator folder) or pass "
+            "--state-dir"
+        )
+    wiki = os.getenv("WIKI_REPO_PATH", "").strip()
+    try:
+        summary = run_job(
+            job,
+            state_dir,
+            wiki_repo_path=Path(wiki).expanduser().resolve() if wiki else None,
+            dry_run=args.dry_run,
+            **_store(args),
+        )
+    except JobError as exc:
+        LOG.error("job.failed err=%s", exc)
+        return 2
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
 def _state(args: argparse.Namespace) -> int:
     """Import the state files into the API, or verify the API holds them."""
     state_dir = _state_dir(args)
@@ -423,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
             return _generate(args)
         if args.mode == "consolidate":
             return _consolidate(args)
+        if args.mode == "job":
+            return _job(args)
     except NoStateFolderError as exc:
         LOG.error("%s.failed err=%s", args.mode, exc)
         return 2

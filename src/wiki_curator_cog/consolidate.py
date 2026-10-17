@@ -553,10 +553,17 @@ def run_consolidation(
     workers: int = DEFAULT_WORKERS,
     on_batch: Any = None,
     sample: int | None = None,
+    only: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Decide every foldable entity not already decided under this version."""
+    """Decide every foldable entity not already decided under this version.
+
+    ``only`` limits the run to those slugs (one job's new entities); the
+    possible parents are still the whole corpus.
+    """
     supports = supports if supports is not None else support(export)
     pool_of = candidates(export, definitions, supports)
+    if only is not None:
+        pool_of = [c for c in pool_of if c.slug in only]
 
     version_of = {k: g.version for g in GROUPS for k in g.kinds}
     todo = [c for c in pool_of if not facets.is_decided(c.slug, version_of[c.kind])]

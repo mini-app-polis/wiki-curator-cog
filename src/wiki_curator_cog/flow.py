@@ -56,7 +56,16 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import consolidate, generate, identity, link, state_backend, state_store, usage
+from . import (
+    consolidate,
+    generate,
+    identity,
+    link,
+    state_backend,
+    state_store,
+    units,
+    usage,
+)
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -630,6 +639,60 @@ _STATE_TIMEOUT_S = 180.0
 
 def _state_client() -> KaianoApiClient:
     return KaianoApiClient(machine_name=MACHINE_NAME, timeout=_STATE_TIMEOUT_S)
+
+
+def run_job(
+    job: dict,
+    state_dir: Path,
+    *,
+    state: state_backend.FileState | None = None,
+    wiki_repo_path: Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Run one worker job locally, as the wiki-jobs worker would (MINI-94).
+
+    The same :func:`wiki_curator_cog.units.handle` the worker calls, against
+    the production export and the given state store. With ``dry_run`` the
+    model is not called and nothing is written; the summary shows the calls
+    the job would make.
+    """
+    units.validate(job)
+    export = _fetch_export()
+    _require_corpus(export)
+    store = _state(state)
+    llm, model = link.llm_from_env(dry_run=dry_run)
+    if dry_run:
+        store = _NoWrites(store)
+    ctx = units.build_context(
+        export,
+        store,
+        units.StatePaths.under(state_dir),
+        llm=llm,
+        model=model,
+        wiki_repo_path=wiki_repo_path,
+    )
+    result = units.handle(job, ctx)
+    return {**result, "dry_run": dry_run, "usage": usage.usage_of(llm)}
+
+
+class _NoWrites(state_backend.FileState):
+    """A store that reads through to another and writes nothing: dry runs."""
+
+    def __init__(self, inner: state_backend.FileState) -> None:
+        self._inner = inner
+        self.name = f"{inner.name} (dry run)"
+
+    def links(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        return self._inner.links(path, required=required)
+
+    def facets(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        return self._inner.facets(path, required=required)
+
+    def prose(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        return self._inner.prose(path, required=required)
+
+    def save(self, obj, path: Path, *, final: bool = False) -> None:  # type: ignore[no-untyped-def]
+        return None
 
 
 def api_state() -> state_backend.ApiState:

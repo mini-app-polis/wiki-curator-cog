@@ -94,6 +94,19 @@ the case of a run whose last write never arrived — so neither side
 overwrites the other. `--state files` keeps the file-only behaviour. The
 per-unit functions for the worker are part 2.
 
+**MINI-94, part 2 (2026-10-17): one unit per job.** `units.handle(job, ctx)`
+runs `link` (one source's statements), `consolidate` (named entities) or
+`generate` (one entity) against a `RunContext` built once per invocation —
+the export with its folds applied, the state store, the model — and returns
+the follow-on jobs for the API to enqueue, rather than enqueuing them
+itself: `link` names `consolidate` for the source's undecided entities and
+`generate` for every entity it taught or referred to; `consolidate` names
+`generate` for each page that gained a fold. The table above is what the
+dispatch implements. Each unit is a no-op under its watermark. `materialise`
+joins with the page documents (MINI-96). The units read and write whole
+state documents for now; per-entry reads are an API change to make if the
+worker's reads prove slow.
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /

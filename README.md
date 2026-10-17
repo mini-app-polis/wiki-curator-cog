@@ -182,6 +182,24 @@ The import refuses a field the API does not store, goes up in chunks
 (`--batch-size`, default 250), and is safe to repeat. A run's writes refuse
 unknown fields the same way, and a refused write stops the run.
 
+### One job at a time (ADR-006, MINI-94)
+
+`units.handle` is the body of the wiki-jobs worker (MINI-95): one job in, its
+result and the jobs that should follow out. `link` takes one source;
+`consolidate` takes named entities; `generate` takes one entity. Each is a
+no-op when its watermark says there is nothing new, so a retried or
+duplicated message costs nothing. The `job` command runs one locally, against
+production and the state store — the way to see what one new note costs:
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main job \
+  --job '{"job": "link", "source_id": "<source uuid>"}' --dry-run
+```
+
+The result's `next` lists the follow-on jobs (`consolidate` for the source's
+undecided entities, `generate` for every page it touched). The command does
+not run them; run each the same way, or let the worker's dispatch do it.
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
