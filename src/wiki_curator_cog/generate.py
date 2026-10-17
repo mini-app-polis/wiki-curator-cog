@@ -425,10 +425,30 @@ def build_messages(
 
 def pending(entity: WcsEntity, corpus: Corpus, prose: ProseFile) -> list[Evidence]:
     """This entity's evidence not yet integrated, capped, newest first."""
+    return _pending(entity, corpus, prose)[0]
+
+
+def _pending(
+    entity: WcsEntity, corpus: Corpus, prose: ProseFile
+) -> tuple[list[Evidence], set[str]]:
+    """The evidence to send, and the statement keys a successful call covers.
+
+    Statements *about* the entity are sent newest first, capped; any that do
+    not fit wait for the next run, so all of them are eventually read.
+
+    Statements that only *mention* it are different: a hub like *connection*
+    is mentioned by well over a thousand, and its 81st mention adds nothing
+    the newest 80 did not. So the newest are sent and every pending mention
+    is covered — marked integrated — at once. Without this a hub needed
+    dozens of runs to converge, each re-touching the same few entities.
+    """
     done = prose.integrated(entity.slug)
     own = [e for e in corpus.own.get(entity.slug, []) if e.key not in done]
     refers = [e for e in corpus.referring.get(entity.slug, []) if e.key not in done]
-    return _newest(own, MAX_OWN_STATEMENTS) + _newest(refers, MAX_REFERRING_STATEMENTS)
+    sent_own = _newest(own, MAX_OWN_STATEMENTS)
+    sent_refers = _newest(refers, MAX_REFERRING_STATEMENTS)
+    covered = {e.key for e in sent_own} | {e.key for e in refers}
+    return sent_own + sent_refers, covered
 
 
 def choose_entities(
@@ -489,7 +509,7 @@ def generate_one(
     """
     guard = lock if lock is not None else contextlib.nullcontext()
     with guard:
-        evidence = pending(entity, corpus, prose)
+        evidence, covered = _pending(entity, corpus, prose)
         if not evidence:
             return False
         base = base_for(entity, prose, wiki_repo_path, today)
@@ -501,7 +521,16 @@ def generate_one(
     definition = str(result.output_json.get("definition", "")).strip()
     context = str(result.output_json.get("context", "")).strip()
     with guard:
-        _record(prose, entity, evidence, definition, context, model=model, today=today)
+        _record(
+            prose,
+            entity,
+            evidence,
+            definition,
+            context,
+            model=model,
+            today=today,
+            covered=covered,
+        )
     return True
 
 
@@ -514,6 +543,7 @@ def _record(
     *,
     model: str,
     today: str,
+    covered: set[str] | None = None,
 ) -> None:
     entry = prose.entities.get(entity.slug)
     if entry is None or entry.get("generator_version") != GENERATOR_VERSION:
@@ -529,7 +559,9 @@ def _record(
             "definition": definition,
             "context": context,
             "integrated": sorted(
-                set(entry.get("integrated", [])) | {e.key for e in evidence}
+                set(entry.get("integrated", []))
+                | {e.key for e in evidence}
+                | (covered or set())
             ),
         }
     )

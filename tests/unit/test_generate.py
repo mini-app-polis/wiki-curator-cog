@@ -461,3 +461,29 @@ def test_parallel_generation_matches_sequential() -> None:
     for e in entities:
         assert parallel.definition(e.slug) == sequential.definition(e.slug)
         assert parallel.integrated(e.slug) == sequential.integrated(e.slug)
+
+
+def test_all_pending_mentions_are_covered_but_own_statements_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    augmented, corpus = _corpus_and_overlay()
+    monkeypatch.setattr(generate, "MAX_OWN_STATEMENTS", 1)
+    monkeypatch.setattr(generate, "MAX_REFERRING_STATEMENTS", 0)
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+
+    # stretch: one own statement (a definition) and one mention; the mention
+    # is not sent (cap 0) but is covered by the call.
+    generate.run_generation([corpus.entities["stretch"]], corpus, prose, llm, model="m")
+    sent = [s["id"] for s in llm.calls[0]["statements"]]
+    integrated = prose.integrated("stretch")
+    mention = corpus.referring["stretch"][0].key
+    assert mention not in sent
+    assert mention in integrated
+
+    # anchor-step: two own statements, cap 1 — the second waits for next run
+    generate.run_generation(
+        [corpus.entities["anchor-step"]], corpus, prose, llm, model="m"
+    )
+    assert len(prose.integrated("anchor-step")) == 1
+    assert generate.pending(corpus.entities["anchor-step"], corpus, prose)
