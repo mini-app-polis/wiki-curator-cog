@@ -1,3 +1,10 @@
+## [2.3.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.1...v2.3.2) (2026-10-17)
+
+
+### Bug Fixes
+
+* import without a git binary, so the Lambda worker loads (MINI-95) ([94086c5](https://github.com/mini-app-polis/wiki-curator-cog/commit/94086c511421273ffe11d11ffba0ad87f2f2a84c))
+
 ## [2.3.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.0...v2.3.1) (2026-10-17)
 
 
