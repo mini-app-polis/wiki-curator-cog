@@ -1,9 +1,9 @@
 # ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges); durable half (storage in the API) pending
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation); durable half (storage in the API) pending; end-to-end note test (MINI-87) and go/no-go (MINI-88) open
 **Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
-**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29 and MINI-83 – MINI-90
+**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29, MINI-83 – MINI-93
 
 ## Context
 
@@ -268,6 +268,10 @@ Tracked in Asana under MINI-29.
      merged with it;
    - a note declaring two names the same merges their pages, and a later
      note saying they differ splits them again;
+   - a note's `facet_of` / `distinct_from` overrides the consolidation pass
+     (e.g. *anchor step* split back out of *anchor*);
+   - a note giving a thin entity context (from `thin-review.md`) reaches
+     its page;
    - a newer note overrides an older edit;
    - nothing new means no LLM calls and nothing to commit;
    - rebuild from scratch works, including a public-only variant.
