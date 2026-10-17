@@ -24,3 +24,14 @@ dist/
 
 # Railway IaC SDK, installed by CI from .railway/package-lock.json
 .railway/node_modules/
+render-summary.json
+links.json
+links-review*.md
+link-summary.json
+prose.json
+prose-review*.md
+generate-summary.json
+facets.json
+facets-review*.md
+thin-review.md
+consolidate-summary.json

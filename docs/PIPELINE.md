@@ -1,6 +1,6 @@
 # Pipeline architecture
 
-`wiki-curator-cog` consumes the canonical WCS entity graph from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The structured data is produced by `transcription-cog` running an LLM-based extraction over raw transcripts; the curator runs no LLM at runtime and renders the already-structured export deterministically.
+`wiki-curator-cog` consumes the canonical WCS entity graph from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The structured data is produced by `transcription-cog` running an LLM-based extraction over raw transcripts; the `export` run renders the already-structured export deterministically. Since ADR-005 the local modes `link`, `consolidate` and `generate` add LLM passes (references between entities, facet folding, page prose) whose results live in `wcs-wiki/.curator/` and are applied by `render`; see the README.
 
 ## Flow diagram
 
@@ -37,6 +37,11 @@ Drive transcript drop
 ```
 
 ## Two-layer wiki architecture
+
+> **Superseded in part by ADR-005 (local half built 2026-10-16).** The split returns in a different
+> form: mechanically rendered evidence sections, plus LLM-owned prose that is
+> integrated per entity from new statements and the current page, stored and
+> versioned in the API. The description below is the current renderer.
 
 Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 

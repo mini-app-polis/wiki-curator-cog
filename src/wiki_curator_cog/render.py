@@ -11,7 +11,7 @@ import datetime as dt
 import re
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -85,6 +85,38 @@ class RenderStats:
     #: wiki; these are for the run report and are read by nobody unless
     #: something is wrong.
     dropped: list[tuple[str, str]] = field(default_factory=list)
+
+
+#: A page referenced by more entities than this shows only the count. Past a
+#: few dozen the list stops being navigation — *connection* is referenced by
+#: hundreds of pages. (Kaiano, 2026-10-16.)
+REFERENCED_BY_LINK_LIMIT = 25
+
+
+@dataclass(frozen=True)
+class LinkOverlay:
+    """References from the linking pass, already resolved (ADR-005).
+
+    Built by :func:`wiki_curator_cog.link.build_overlay`. Each pair of
+    entities has been settled newest-wins, so a pair a later statement denied
+    is simply absent. Counts are the number of statements asserting the pair.
+    """
+
+    #: subject id → {target id: statements}, for a page's ``## Mentions``.
+    mentions: dict[uuid.UUID, dict[uuid.UUID, int]] = field(default_factory=dict)
+    #: target id → {subject id: statements}, for a page's ``## Referenced by``.
+    referenced_by: dict[uuid.UUID, dict[uuid.UUID, int]] = field(default_factory=dict)
+
+
+def _counted_links(counts: dict[uuid.UUID, int], indexes: ExportIndexes) -> list[str]:
+    """Wiki-links, most-referenced first, with a count where it is above one."""
+    rows: list[tuple[int, str, str]] = []
+    for other_id, n in counts.items():
+        other = indexes.entities_by_id.get(other_id)
+        if other is not None:
+            suffix = f" ({n})" if n > 1 else ""
+            rows.append((-n, other.slug, f"- {_entity_link(other)}{suffix}"))
+    return [line for _, _, line in sorted(rows)]
 
 
 @dataclass(frozen=True)
@@ -493,8 +525,20 @@ def render_entity_page(
     indexes: ExportIndexes,
     *,
     rendered_at: dt.date,
+    overlay: LinkOverlay | None = None,
+    context: str = "",
+    details: Sequence[tuple[Any, ...]] = (),
 ) -> str:
-    """Render one entity's Markdown page."""
+    """Render one entity's Markdown page.
+
+    ``details`` are the facets folded into this entity (MINI-93): each a name,
+    a one-line gist and optionally a nesting depth, listed under
+    ``## Details``.
+
+    With an ``overlay`` the page also gets ``## Mentions`` (what its
+    statements refer to) and ``## Referenced by`` (every entity that refers to
+    it, through the linking pass or a relation pointing here).
+    """
     attributions = indexes.attributions_by_entity.get(entity.id, [])
     definitions = indexes.definitions_by_entity.get(entity.id, [])
     relations = indexes.relations_by_entity.get(entity.id, [])
@@ -518,6 +562,15 @@ def render_entity_page(
 
     if entity.overview_md.strip():
         page.set_section("Overview", [entity.overview_md.strip()])
+    if context.strip():
+        page.set_section("In practice", [context.strip()])
+    if details:
+        lines = []
+        for name, gist, *rest in details:
+            indent = "  " * (rest[0] if rest else 0)
+            item = f"**{name}** — {gist}" if gist else f"**{name}**"
+            lines.append(f"{indent}- {item}")
+        page.set_section("Details", lines)
 
     by_teacher = _group_by_instructor(
         attributions=attributions,
@@ -575,6 +628,27 @@ def render_entity_page(
             related_lines.append(line)
         if related_lines:
             page.set_section("Related", related_lines)
+
+    if overlay is not None:
+        mentions = _counted_links(overlay.mentions.get(entity.id, {}), indexes)
+        if mentions:
+            page.set_section("Mentions", mentions)
+        incoming = dict(overlay.referenced_by.get(entity.id, {}))
+        for relation in relations:
+            if (
+                relation.to_entity_id == entity.id
+                and relation.from_entity_id != entity.id
+            ):
+                incoming[relation.from_entity_id] = (
+                    incoming.get(relation.from_entity_id, 0) + 1
+                )
+        referenced_by = _counted_links(incoming, indexes)
+        if len(referenced_by) > REFERENCED_BY_LINK_LIMIT:
+            page.set_section(
+                "Referenced by", [f"Referenced by {len(referenced_by)} pages."]
+            )
+        elif referenced_by:
+            page.set_section("Referenced by", referenced_by)
 
     return md.serialize(page)
 
@@ -1060,8 +1134,15 @@ def render_bundle(
     *,
     rendered_at: dt.date | None = None,
     existing_log: str = "",
+    overlay: LinkOverlay | None = None,
+    context: dict[uuid.UUID, str] | None = None,
+    details: dict[uuid.UUID, list[tuple[Any, ...]]] | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
-    """Render the full wiki bundle. Keys are repo-relative paths."""
+    """Render the full wiki bundle. Keys are repo-relative paths.
+
+    ``overlay`` adds the linking pass's references to entity pages; the
+    export should already carry any entities the overlay introduced.
+    """
     when = rendered_at or dt.date.today()
     indexes = build_indexes(export)
     bundle: dict[str, str] = {}
@@ -1087,7 +1168,14 @@ def render_bundle(
 
     for entity in sorted(export.entities, key=lambda e: e.slug):
         path = _entity_path(entity)
-        bundle[path] = render_entity_page(entity, indexes, rendered_at=when)
+        bundle[path] = render_entity_page(
+            entity,
+            indexes,
+            rendered_at=when,
+            overlay=overlay,
+            context=(context or {}).get(entity.id, ""),
+            details=(details or {}).get(entity.id, ()),
+        )
         if not indexes.attributions_by_entity.get(entity.id):
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")
 
@@ -1111,6 +1199,77 @@ def render_bundle(
     )
 
     return bundle, stats
+
+
+#: An Obsidian wiki-link: ``[[target]]``, ``[[target|label]]`` or
+#: ``[[target#heading]]``. Group 1 is the target path, without ``.md``.
+_WIKI_LINK_RE = re.compile(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+
+
+def _page_key(path: str) -> str:
+    return path[:-3] if path.endswith(".md") else path
+
+
+def find_broken_links(
+    bundle: dict[str, str],
+    *,
+    existing_paths: Iterable[str] = (),
+) -> list[tuple[str, str]]:
+    """Every wiki-link in the bundle whose target is not a page.
+
+    A target is a page if the bundle renders it or it already exists in the
+    wiki repo outside the derived layer (``README.md``, ``CLAUDE.md``).
+    Returns ``(page, target)`` pairs in page order, one per occurrence.
+
+    The renderers only ever link to what they render, so today this should
+    come back empty; it exists so that stays true as references grow
+    (ADR-005: every referenced concept has a page).
+    """
+    known = {_page_key(p) for p in bundle} | {_page_key(p) for p in existing_paths}
+    broken: list[tuple[str, str]] = []
+    for path in sorted(bundle):
+        for match in _WIKI_LINK_RE.finditer(bundle[path]):
+            target = match.group(1).strip()
+            if _page_key(target) not in known:
+                broken.append((path, target))
+    return broken
+
+
+def corpus_quality(export: WcsWikiExport, indexes: ExportIndexes) -> dict[str, Any]:
+    """How developed the corpus is, entity by entity.
+
+    For reading, not for gating: a thin page is expected and is fed by more
+    material, not flagged (ADR-005).
+
+    - ``thin``: no attribution and no definition — a page with a name and,
+      at most, links.
+    - ``single_source``: everything said about it comes from one source.
+    - ``isolated``: no relation in either direction.
+    """
+    by_kind: dict[str, int] = defaultdict(int)
+    thin: list[str] = []
+    single_source: list[str] = []
+    isolated: list[str] = []
+    for entity in sorted(export.entities, key=lambda e: e.slug):
+        by_kind[entity.kind] += 1
+        attributions = indexes.attributions_by_entity.get(entity.id, [])
+        definitions = indexes.definitions_by_entity.get(entity.id, [])
+        if not attributions and not definitions:
+            thin.append(entity.slug)
+        else:
+            source_ids = {a.source_id for a in attributions} | {
+                d.source_id for d in definitions
+            }
+            if len(source_ids) == 1:
+                single_source.append(entity.slug)
+        if not indexes.relations_by_entity.get(entity.id):
+            isolated.append(entity.slug)
+    return {
+        "entities_by_kind": dict(sorted(by_kind.items())),
+        "thin": {"count": len(thin), "slugs": thin},
+        "single_source": {"count": len(single_source), "slugs": single_source},
+        "isolated": {"count": len(isolated), "slugs": isolated},
+    }
 
 
 DERIVED_GLOBS: tuple[str, ...] = (

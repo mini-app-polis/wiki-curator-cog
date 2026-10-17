@@ -18,6 +18,13 @@ Triggered manually. One wake is one run: the process renders once and exits. The
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
+> **Direction (ADR-005, planned):** the cog is becoming a self-generating wiki.
+> An LLM will maintain each entity's prose by integrating new statements —
+> lessons and correction notes alike, newer winning — into the current page,
+> human edits included, with the prose and its revisions owned by the API.
+> Until that code lands, the "no LLM at runtime" and "deterministic" statements
+> below describe the current renderer, not the plan. Tracked as MINI-29.
+
 ---
 
 ## Architecture
@@ -76,6 +83,121 @@ uv run check-doppler-keys                  # every required .env.example name is
 ```bash
 uv run pytest
 ```
+
+### Render locally (no commit, no push)
+
+The proof-of-concept loop (ADR-005). Writes into your existing clone and
+stops — no commit, no push, no run report, and `log.md` is left alone — then
+prints a JSON summary: pages written and removed, broken links, dropped
+references, and how developed each entity is (thin, single-source, isolated).
+Exits 1 if any link has no page, after writing, so the result can be read.
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > render-summary.json
+```
+
+To see the linking pass's references on the pages, overlay a links file
+(from `link`, below). New concepts it proposes get pages, every entity page
+gains `## Mentions` and `## Referenced by`, and per pair the newest statement
+wins — a later denial removes a link:
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json > render-summary.json
+```
+
+**Identity fixes.** If a note says two names are the same thing (an
+`alias_of` relation), every local mode builds with them merged: the
+preferred entity absorbs the other's content and lists its name as an alias,
+and the other page goes. A newer `distinct_from` splits them again. Nothing
+upstream changes; `render-summary.json` lists the merges under `merged`.
+
+**Facets (MINI-93).** `consolidate` decides, for every concept and technique,
+whether it is a facet of a broader one (*stationary anchor* → *anchor*), and
+writes the decisions to `facets.json` (watermarked; already-decided entities
+are skipped). Drills are asked the same about other drills; patterns only
+whether they are another name for an existing pattern, since a variation is
+its own figure. Nothing folds across kinds, and each kind has its own prompt. `render`, `generate` and `link` then fold each facet into its
+broader page, listed under `## Details`. They pick up `facets.json` from next
+to the `--links` file by default, or take `--facets PATH`. A note's
+`facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
+see what was folded where. Each entity's support (sources taught in,
+references from elsewhere, read from `links.json` beside the facets file or
+`--links`) guides the call: thin entities fold readily, nothing folds into a
+less-supported page, and thin entities with no home are listed at the end of
+the review. `thin-review.md`, written beside the facets file, lists every thin
+entity — what was said, which source, and where it ended up — for a private
+scan; give one weight with a note. A rerun with nothing new to decide makes no
+model calls, so it is a free way to refresh both reviews.
+
+```bash
+doppler run --config prd -- uv run python -m wiki_curator_cog.main consolidate \
+  --facets-file ../wcs-wiki/.curator/facets.json \
+  --prose ../wcs-wiki/.curator/prose.json --workers 16
+```
+
+### Cost: dry runs and usage
+
+`link`, `generate` and `consolidate` cost money; `render` does not. Each
+prints a `usage` block — calls, input and output tokens, and an estimated
+`cost_usd` — read from the API's own token counts. Add `--dry-run` to see the
+same block before spending: nothing is called or written and no API key is
+needed, and the summary shows how much work is pending (`pending`, and
+`pending_by_group` for `consolidate`). A dry run's calls and input tokens
+come from the real prompts; its output tokens are a rough guess.
+
+```bash
+doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --dry-run
+```
+
+Dollars use a per-model default price; set `LLM_PRICE_INPUT_PER_MTOK` and
+`LLM_PRICE_OUTPUT_PER_MTOK` to override. Version bumps are the expensive
+moves: raising `LINKER_VERSION` or `GENERATOR_VERSION` replays the whole
+corpus. `consolidate` keeps one version per kind group
+(`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
+
+### Link locally (ADR-005, MINI-84)
+
+The linking pass, local half: reads the export, asks an LLM which concepts
+each statement mentions, and writes the references to `links.json` — never to
+the API. `links.json` is also the watermark: a statement already linked under
+the current linker version is skipped on the next run. A readable
+`links-review.md` is written next to it for the statements that run covered.
+Both are git-ignored; keep `links.json`, since it holds what the calls cost.
+
+```bash
+# a reproducible sample of 20, spread across statement kinds
+doppler run --config prd -- uv run python -m wiki_curator_cog.main link --sample 20
+```
+
+Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
+`LLM_MODEL` overrides the model.
+
+### Generate overviews locally (ADR-005, MINI-86)
+
+Generation, local half: for each entity, an LLM is given the page's current
+definition and context and the statements not yet integrated — the entity's
+own, plus the statements that refer to it from `links.json` — and returns an
+updated **definition** (the page's first section: one or two plain sentences)
+and optional **context** (a short "In practice" section below it), newest
+statements winning. Results go to `prose.json`
+(also the watermark: an entity with nothing new costs no call), with a
+readable `prose-review.md` beside it. Nothing goes to the API.
+
+```bash
+# named entities, or --sample N for a reproducible spread across kinds
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --entity connection --entity anchor-step
+
+# then put the overviews on the pages (with the link overlay)
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json --prose prose.json > render-summary.json
+```
+
+`--workers N` runs N model calls at once (default 4 for `generate`, 1 for
+`link`); the files are still written one entity or batch at a time. The
+limit is the account's rate limit — rate-limited calls are retried.
+
+The page is the base: if an overview was edited on the page, the next run
+builds on the edit rather than replacing it. Editing is optional —
+corrections normally arrive as notes.
 
 ### Run an export locally
 

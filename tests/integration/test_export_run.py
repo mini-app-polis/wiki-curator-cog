@@ -27,12 +27,12 @@ import respx
 
 import wiki_curator_cog.flow as flow
 
-from ..unit.export_builders import WcsEntity, WcsWikiExport
+from ..unit.export_builders import WcsEntity, WcsSource, WcsWikiExport
 from .conftest import API_KEY, STALE_PAGE, remote_files, remote_head, serve_export
 
 
 def _corpus():
-    """One concept: enough to render a page and the indexes around it."""
+    """One concept and one source: the least a render will write over the wiki."""
     return WcsWikiExport(
         entities=[
             WcsEntity(
@@ -42,6 +42,18 @@ def _corpus():
                 kind="concept",
                 overview_md="Neutral overview of anchor step.",
                 status="draft",
+            )
+        ],
+        sources=[
+            WcsSource(
+                id=uuid.uuid5(uuid.NAMESPACE_DNS, "source-anchor-step"),
+                transcript_id=uuid.uuid5(uuid.NAMESPACE_DNS, "transcript-anchor-step"),
+                title="Anchor Step",
+                session_date=dt.date(2026, 1, 1),
+                session_type="private_lesson",
+                visibility="private",
+                is_default_visible=False,
+                created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
             )
         ],
         exported_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
@@ -113,6 +125,23 @@ def test_running_the_same_corpus_again_commits_and_reports_nothing(
     assert summary["committed"] is False
     assert remote_head(origin) == head
     assert len(_notified(api)) == reports
+
+
+def test_an_empty_export_leaves_the_remote_alone(
+    origin: Path, run_env: Path, api: respx.MockRouter
+) -> None:
+    """An empty corpus would render as "delete every page"; it is refused."""
+    serve_export(api, WcsWikiExport(exported_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC)))
+    before = remote_head(origin)
+
+    with pytest.raises(flow.EmptyExportError):
+        flow.export_run(run_id="run-1")
+
+    assert remote_head(origin) == before
+    assert STALE_PAGE in remote_files(origin)
+    reports = _notified(api)
+    assert len(reports) == 1
+    assert "export_failed" in reports[0]
 
 
 def test_a_run_that_cannot_fetch_the_corpus_leaves_the_remote_alone(

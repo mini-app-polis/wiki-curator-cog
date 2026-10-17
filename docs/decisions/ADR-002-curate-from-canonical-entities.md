@@ -2,6 +2,7 @@
 
 **Date:** 2026-05-19
 **Status:** Accepted — partially superseded by ADR-003 (bucketed source directories) and ADR-004 (Prefect deployment shape)
+**Amendment (2026-10-16):** ADR-005 partially supersedes this ADR. The cog will generate entity prose: an LLM integrates new statements into the current page, and the cog writes the result to the API, which owns the prose and its revisions. "It does not synthesize" and "the polish pass … doesn't write markdown" no longer describe the plan. Prose living on canonical rows, not in markdown, stands.
 **Supersedes (partially):** ADR-001 (Architecture and scope)
 **Related:** `api-kaianolevine-com` ADR-0002 (WCS entity substrate), ADR-0004 (rebuild from scratch)
 

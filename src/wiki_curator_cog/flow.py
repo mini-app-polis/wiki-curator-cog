@@ -49,17 +49,25 @@ from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
+from typing import Any
 
 from mini_app_polis import logger as log
 from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
+from . import consolidate, generate, identity, link, usage
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
 from .git_ops import WikiRepo
-from .render import list_stale_derived_paths, render_bundle
+from .render import (
+    build_indexes,
+    corpus_quality,
+    find_broken_links,
+    list_stale_derived_paths,
+    render_bundle,
+)
 
 LOG = log.get_logger()
 
@@ -84,6 +92,29 @@ def _fetch_export() -> WcsWikiExportItem:
     ``wcs.corpus.read`` and nothing more: reading is not administering.
     """
     return KaianoApiClient.from_env(MACHINE_NAME).export_wcs_wiki()
+
+
+class EmptyExportError(RuntimeError):
+    """The export holds no entities or no sources; nothing is written."""
+
+
+def _require_corpus(export: WcsWikiExportItem) -> None:
+    """Refuse an export with no entities or no sources, before anything is written.
+
+    Every derived page is rewritten from the export and every page it does
+    not produce is removed, so an empty export renders as "delete the whole
+    wiki". An empty corpus is far likelier to mean the wrong environment or a
+    broken API than a corpus that was emptied on purpose — the first local
+    render against a dev API with no data removed 1829 pages from the working
+    tree. If the corpus ever is emptied on purpose, deleting the wiki is a
+    decision to make by hand, not a side effect of a render.
+    """
+    if not export.entities or not export.sources:
+        raise EmptyExportError(
+            f"export has {len(export.entities)} entities and "
+            f"{len(export.sources)} sources; refusing to render over the wiki. "
+            "Check which API this run is pointed at."
+        )
 
 
 def _write_bundle(wiki_repo_path: Path, bundle: dict[str, str]) -> list[Path]:
@@ -115,6 +146,7 @@ def _export(config: Config) -> dict:
     wiki_repo = WikiRepo(config)
 
     export = _fetch_export()
+    _require_corpus(export)
     log_path = config.wiki_repo_path / "log.md"
     existing_log = log_path.read_text() if log_path.exists() else ""
 
@@ -169,6 +201,432 @@ def _export(config: Config) -> dict:
         "dropped": list(stats.dropped),
     }
     LOG.info("export.complete %s", summary)
+    return summary
+
+
+def _existing_markdown(wiki_repo_path: Path) -> set[str]:
+    return {
+        str(p.relative_to(wiki_repo_path))
+        for p in wiki_repo_path.rglob("*.md")
+        if ".git" not in p.relative_to(wiki_repo_path).parts
+    }
+
+
+def _facet_parents(facets_path: Path | None) -> dict[str, tuple[str, bool]] | None:
+    """The folds from the facets file, or None when there is none."""
+    if facets_path is None:
+        return None
+    if not facets_path.exists():
+        raise RuntimeError(f"facets file not found: {facets_path}")
+    return consolidate.FacetsFile.load(facets_path).folds()
+
+
+def render_local(
+    wiki_repo_path: Path,
+    links_path: Path | None = None,
+    prose_path: Path | None = None,
+    facets_path: Path | None = None,
+) -> dict:
+    """Render into an existing local clone. No clone, commit, push or report.
+
+    The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
+    Obsidian or ``git diff``, change something, run it again. Nothing leaves
+    the machine except the export GET, so it needs the API key and nothing
+    else — no GH_TOKEN, and no Discord message per iteration.
+
+    ``log.md`` is not touched: a local iteration is not an event in the
+    wiki's history. Stale derived pages are removed from the working tree,
+    as an export would, so ``git status`` shows exactly what an export would
+    commit.
+    """
+    if not (wiki_repo_path / "CLAUDE.md").exists():
+        raise RuntimeError(
+            f"WIKI_REPO_PATH does not look like a wcs-wiki clone "
+            f"(no CLAUDE.md found): {wiki_repo_path}"
+        )
+
+    export = _fetch_export()
+    _require_corpus(export)
+    export, merges = identity.resolve(export, _facet_parents(facets_path))
+
+    overlay = None
+    overlay_summary: dict | None = None
+    if links_path is not None:
+        if not links_path.exists():
+            raise RuntimeError(f"links file not found: {links_path}")
+        export, overlay, ostats = link.build_overlay(
+            export, link.LinksFile.load(links_path), merges
+        )
+        overlay_summary = {
+            "file": str(links_path),
+            "statements": ostats.statements,
+            "pairs": ostats.pairs,
+            "denied_pairs": ostats.denied_pairs,
+            "proposed_pages": ostats.proposed_pages,
+        }
+
+    prose_summary: dict | None = None
+    context = None
+    prose = None
+    if prose_path is not None:
+        if not prose_path.exists():
+            raise RuntimeError(f"prose file not found: {prose_path}")
+        prose = generate.ProseFile.load(prose_path)
+        export = generate.apply_prose(export, prose, merges)
+        context = generate.context_by_entity(export, prose, merges)
+        prose_summary = {
+            "file": str(prose_path),
+            "definitions": sum(1 for e in export.entities if e.overview_md.strip()),
+            "contexts": len(context),
+        }
+
+    details = generate.details_by_entity(export, merges, prose)
+    bundle, stats = render_bundle(
+        export,
+        rendered_at=dt.date.today(),
+        overlay=overlay,
+        context=context,
+        details=details,
+    )
+    bundle.pop("log.md", None)
+
+    stale = list_stale_derived_paths(wiki_repo_path, set(bundle))
+    for path in stale:
+        path.unlink(missing_ok=True)
+    written = _write_bundle(wiki_repo_path, bundle)
+
+    broken = find_broken_links(
+        bundle, existing_paths=_existing_markdown(wiki_repo_path)
+    )
+    summary = {
+        "wiki_repo_path": str(wiki_repo_path),
+        "entities": stats.entity_count,
+        "sources": stats.source_count,
+        "instructors": stats.instructor_count,
+        "pages_rendered": len(written),
+        "pages_removed": [str(p.relative_to(wiki_repo_path)) for p in stale],
+        "broken_links": {
+            "count": len(broken),
+            "links": [{"page": page, "target": target} for page, target in broken],
+        },
+        "dropped": [{"reason": r, "reference": ref} for r, ref in stats.dropped],
+        "quality": corpus_quality(export, build_indexes(export)),
+        "links": overlay_summary,
+        "prose": prose_summary,
+        "merged": {
+            old: new
+            for old, new in sorted(merges.by_slug.items())
+            if not any(f.slug == old for fs in merges.facets.values() for f in fs)
+        },
+        "facets": {
+            "file": str(facets_path) if facets_path else None,
+            "folded": sum(len(fs) for fs in merges.facets.values()),
+            "into_pages": len(merges.facets),
+        },
+    }
+    LOG.info(
+        "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",
+        len(written),
+        len(stale),
+        len(broken),
+        len(stats.dropped),
+    )
+    return summary
+
+
+def link_local(
+    links_path: Path,
+    *,
+    sample: int | None = None,
+    batch_size: int = link.DEFAULT_BATCH_SIZE,
+    workers: int = 1,
+    facets_path: Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Run the linking pass locally: references to a JSON file, nothing to the API.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
+
+    ADR-005 / MINI-84, local half. Reads the export (read-only), links every
+    statement not already in ``links_path`` under the current linker version
+    — or a reproducible sample of ``sample`` of them — and saves after every
+    batch, so a run cut short keeps what it paid for. Writes a readable
+    review next to the links file covering the statements this run was asked
+    about.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+    # Link against the merged corpus, so a merged-away name resolves to its
+    # preferred entity rather than being proposed as a new concept.
+    export, _ = identity.resolve(export, _facet_parents(facets_path))
+
+    statements = link.collect_statements(export)
+    chosen = (
+        link.sample_statements(statements, sample) if sample is not None else statements
+    )
+    catalog = link.Catalog(export.entities)
+    links = link.LinksFile.load(links_path)
+    llm, model = link.llm_from_env(dry_run=dry_run)
+
+    LOG.info(
+        "link.start statements=%s chosen=%s catalog=%s model=%s file=%s",
+        len(statements),
+        len(chosen),
+        len(catalog),
+        model,
+        links_path,
+    )
+    counts = link.run_linking(
+        chosen,
+        catalog,
+        links,
+        llm,
+        model=model,
+        batch_size=batch_size,
+        on_batch=None if dry_run else (lambda: links.save(links_path)),
+        workers=workers,
+    )
+    if dry_run:
+        return _dry_summary("link", llm, counts)
+    links.save(links_path)
+
+    keys = [s.key for s in chosen]
+    review_path = links_path.with_name(links_path.stem + "-review.md")
+    review_path.write_text(link.review_markdown(links, keys))
+
+    summary = {
+        "links_file": str(links_path),
+        "review_file": str(review_path),
+        "linker_version": link.LINKER_VERSION,
+        "model": model,
+        "statements_in_corpus": len(statements),
+        **counts,
+        **link.summarize(links, keys),
+        "usage": usage.usage_of(llm),
+    }
+    LOG.info(
+        "link.complete linked=%s skipped=%s references=%s new=%s",
+        counts["linked"],
+        counts["skipped"],
+        summary["references"],
+        len(summary["new_concepts"]),
+    )
+    return summary
+
+
+def generate_local(
+    prose_path: Path,
+    *,
+    links_path: Path | None = None,
+    wiki_repo_path: Path | None = None,
+    entities: list[str] | None = None,
+    sample: int | None = None,
+    workers: int = generate.DEFAULT_WORKERS,
+    condense: bool = False,
+    facets_path: Path | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Run generation locally: overviews to a JSON file, nothing to the API.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
+
+    With ``condense``, no new evidence is integrated: only pages whose prose
+    has outgrown the fixed shape are rewritten to fit it.
+
+    ADR-005 / MINI-86, local half. Reads the export (read-only) and, when
+    given, the links file — for the concepts it proposed and the statements
+    that refer to each entity. ``wiki_repo_path`` is where the current pages
+    are read from, so an overview edited on the page becomes the base. Saves
+    after every entity, and writes a readable review next to the prose file.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+
+    export, merges = identity.resolve(export, _facet_parents(facets_path))
+    overlay = None
+    links = None
+    if links_path is not None and links_path.exists():
+        links = link.LinksFile.load(links_path)
+        export, overlay, _ = link.build_overlay(export, links, merges)
+
+    corpus = generate.build_corpus(export, overlay, links, merges)
+    prose = generate.ProseFile.load(prose_path)
+    if condense:
+        llm, model = link.llm_from_env(dry_run=dry_run)
+        counts = generate.run_condense(
+            corpus,
+            prose,
+            llm,
+            model=model,
+            workers=workers,
+            on_entity=None if dry_run else (lambda: prose.save(prose_path)),
+        )
+        if dry_run:
+            return _dry_summary("condense", llm, counts)
+        prose.save(prose_path)
+        review_path = prose_path.with_name(prose_path.stem + "-review.md")
+        review_path.write_text(generate.review_markdown(prose, counts["slugs"]))
+        LOG.info(
+            "condense.complete over_shape=%s condensed=%s",
+            counts["over_shape"],
+            counts["condensed"],
+        )
+        return {
+            "prose_file": str(prose_path),
+            "review_file": str(review_path),
+            "model": model,
+            **counts,
+            "usage": usage.usage_of(llm),
+        }
+
+    chosen = generate.choose_entities(
+        corpus, prose, slugs=entities or (), sample=sample
+    )
+    llm, model = link.llm_from_env(dry_run=dry_run)
+
+    LOG.info(
+        "generate.start entities=%s model=%s file=%s links=%s",
+        len(chosen),
+        model,
+        prose_path,
+        links_path if links is not None else None,
+    )
+    counts = generate.run_generation(
+        chosen,
+        corpus,
+        prose,
+        llm,
+        model=model,
+        wiki_repo_path=wiki_repo_path,
+        on_entity=None if dry_run else (lambda: prose.save(prose_path)),
+        workers=workers,
+    )
+    if dry_run:
+        return _dry_summary("generate", llm, counts)
+    prose.save(prose_path)
+
+    slugs = [e.slug for e in chosen]
+    review_path = prose_path.with_name(prose_path.stem + "-review.md")
+    review_path.write_text(generate.review_markdown(prose, slugs))
+    summary = {
+        "prose_file": str(prose_path),
+        "review_file": str(review_path),
+        "generator_version": generate.GENERATOR_VERSION,
+        "model": model,
+        "used_links": links is not None,
+        **counts,
+        "slugs": slugs,
+        "usage": usage.usage_of(llm),
+    }
+    LOG.info("generate.complete %s", counts)
+    return summary
+
+
+def consolidate_local(
+    facets_path: Path,
+    *,
+    prose_path: Path | None = None,
+    links_path: Path | None = None,
+    sample: int | None = None,
+    batch_size: int = consolidate.DEFAULT_BATCH_SIZE,
+    workers: int = consolidate.DEFAULT_WORKERS,
+    dry_run: bool = False,
+) -> dict:
+    """Decide which entities are facets of broader ones: to a JSON file.
+
+    With ``dry_run``, nothing is called and nothing is written: the summary
+    says how many calls a real run would make and what they would cost.
+
+    MINI-93, local half. Runs on the corpus after the notes' alias merges, so
+    a merged-away name is not decided twice. With ``prose_path``, the model
+    sees each entity's generated definition. Saves after every batch, and
+    writes a review grouped by broader page next to the facets file.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+    export, merges = identity.resolve(export)
+
+    links = None
+    if links_path is not None and links_path.exists():
+        links = link.LinksFile.load(links_path)
+    supports = consolidate.support(export, links, merges)
+
+    definitions = None
+    if prose_path is not None and prose_path.exists():
+        prose = generate.ProseFile.load(prose_path)
+        definitions = {e.slug: prose.definition(e.slug) for e in export.entities}
+
+    facets = consolidate.FacetsFile.load(facets_path)
+    llm, model = link.llm_from_env(dry_run=dry_run)
+    LOG.info("consolidate.start model=%s file=%s", model, facets_path)
+    counts = consolidate.run_consolidation(
+        export,
+        facets,
+        llm,
+        model=model,
+        definitions=definitions,
+        supports=supports,
+        batch_size=batch_size,
+        workers=workers,
+        sample=sample,
+        on_batch=None if dry_run else (lambda: facets.save(facets_path)),
+    )
+    if dry_run:
+        return _dry_summary("consolidate", llm, counts)
+    facets.save(facets_path)
+
+    names = {e.slug: e.canonical_name for e in export.entities}
+    review_path = facets_path.with_name(facets_path.stem + "-review.md")
+    review_path.write_text(consolidate.review_markdown(facets, names, supports))
+    thin_path = facets_path.with_name("thin-review.md")
+    thin_path.write_text(
+        consolidate.thin_review_markdown(export, facets, supports, definitions)
+    )
+    LOG.info("consolidate.complete %s", counts)
+    return {
+        "facets_file": str(facets_path),
+        "review_file": str(review_path),
+        "thin_review_file": str(thin_path),
+        "consolidator_versions": dict(consolidate.CONSOLIDATOR_VERSIONS),
+        "model": model,
+        "used_links": links is not None,
+        "thin_entities": sum(
+            1 for c in consolidate.candidates(export, None, supports) if c.support.thin
+        ),
+        **counts,
+        "usage": usage.usage_of(llm),
+    }
+
+
+def _dry_summary(command: str, llm: Any, counts: dict) -> dict:
+    """What a real run would do: the work it found, the calls, the cost.
+
+    Counts that depend on the model's answers (decided, linked, generated)
+    are left out — a dry run gets no answers.
+    """
+    found = {
+        k: v
+        for k, v in counts.items()
+        if k
+        in {
+            "statements",
+            "skipped",
+            "pending",
+            "pending_by_group",
+            "candidates",
+            "entities",
+            "over_shape",
+        }
+    }
+    summary = {
+        "dry_run": True,
+        "command": command,
+        **found,
+        "usage": usage.usage_of(llm),
+    }
+    LOG.info("%s.dry_run %s", command, summary)
     return summary
 
 
