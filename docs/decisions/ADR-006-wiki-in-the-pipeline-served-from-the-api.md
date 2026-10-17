@@ -71,6 +71,20 @@ New tables in `api-kaianolevine-com`, the durable half of ADR-005:
 A one-time import loads today's `links.json`, `facets.json` and `prose.json`,
 so the work already paid for carries over.
 
+**As built (2026-10-17).** The state tables hold the files field for field,
+keyed as the files are — statement keys and entity slugs, no foreign keys
+into the substrate — so the import is lossless and every watermark holds:
+`wcs_wiki_statements` / `wcs_wiki_references`, `wcs_wiki_facets`,
+`wcs_wiki_prose` / `wcs_wiki_prose_revisions`, and a header row per document.
+Concepts the linker proposed stay in these tables by slug; they get no
+entity row, so the notes UI never sees them. `GET` / `POST
+/v1/wcs/wiki/state/{links,facets,prose}` read whole documents and upsert
+entries, under `wcs.corpus.read` and a new `wcs.wiki.write` (role
+`wiki-writer`, held by the curator). The curator's `state-import` sends the
+files in chunks and `state-verify` compares them, entry by entry, with what
+the API returns; on the real files the round trip was exact. Page documents
+wait for their schema (MINI-96).
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /

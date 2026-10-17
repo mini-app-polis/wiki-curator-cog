@@ -155,6 +155,27 @@ moves: raising `LINKER_VERSION` or `GENERATOR_VERSION` replays the whole
 corpus. `consolidate` keeps one version per kind group
 (`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
+### Moving the state to the API (ADR-006, MINI-89)
+
+`links.json`, `facets.json` and `prose.json` were paid for in model calls, so
+they move to the API by import, never by relinking or regenerating. The API
+keeps them keyed as the files are (statement keys, entity slugs), so every
+watermark holds.
+
+```bash
+# writes to the API the config points at: production under --config prd
+doppler run --config prd -- uv run python -m wiki_curator_cog.main state-import \
+  --state-dir ../wcs-wiki/.curator
+# read-only; exits 1 unless the API holds exactly what the files hold
+doppler run --config prd -- uv run python -m wiki_curator_cog.main state-verify \
+  --state-dir ../wcs-wiki/.curator
+```
+
+The import refuses to send a field the API does not store, goes up in chunks
+(`--batch-size`, default 250) and is safe to re-run. The files stay in git
+until the curator reads and writes the API instead (MINI-94); until then, a
+paid local run means importing again.
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
