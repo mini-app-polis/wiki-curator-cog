@@ -6,6 +6,7 @@ exits; there is no resident loop and nothing to dispatch.
     python -m wiki_curator_cog.main          # what Railway's start command runs
     python -m wiki_curator_cog.main export   # a run asked for on purpose
     python -m wiki_curator_cog.main render   # local only: no commit, push or report
+    python -m wiki_curator_cog.main link --sample 20   # local linking pass to a file
 
 **Those two are not quite the same thing, and the difference is the point.**
 Starting the container is how a run is triggered today, which means every
@@ -45,7 +46,7 @@ from mini_app_polis.environment import Environment, current_environment
 
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
-from wiki_curator_cog.flow import REPO, export_run, render_local
+from wiki_curator_cog.flow import REPO, export_run, link_local, render_local
 
 LOG = log.get_logger()
 
@@ -90,11 +91,29 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "mode",
         nargs="?",
         default=None,
-        choices=["export", "render"],
+        choices=["export", "render", "link"],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
-            "to RUN_ON_START. 'render' is the local proof-of-concept loop."
+            "to RUN_ON_START. 'render' is the local proof-of-concept loop. "
+            "'link' runs the linking pass into a local JSON file."
         ),
+    )
+    parser.add_argument(
+        "--links-file",
+        default="links.json",
+        help="link: the references file, and the watermark (default links.json).",
+    )
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="link: link a reproducible sample of N statements instead of all.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=None,
+        help="link: statements per LLM call.",
     )
     return parser.parse_args(argv)
 
@@ -136,12 +155,24 @@ def _render(wiki_repo_path_raw: str) -> int:
     return 1 if summary["broken_links"]["count"] else 0
 
 
+def _link(args: argparse.Namespace) -> int:
+    """The local linking pass: references to a file, a summary to stdout."""
+    kwargs: dict = {"sample": args.sample}
+    if args.batch_size is not None:
+        kwargs["batch_size"] = args.batch_size
+    summary = link_local(Path(args.links_file).expanduser().resolve(), **kwargs)
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Run one export, or one local render, and return the process exit code."""
+    """Run one export, a local render or a local linking pass; return the exit code."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.mode == "render":
         return _render(os.getenv("WIKI_REPO_PATH", ""))
+    if args.mode == "link":
+        return _link(args)
 
     # Before load_config, so a container that is not going to do anything
     # exits cleanly whether or not its secrets are in place.

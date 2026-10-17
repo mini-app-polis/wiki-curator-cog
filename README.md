@@ -96,6 +96,23 @@ Exits 1 if any link has no page, after writing, so the result can be read.
 WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > render-summary.json
 ```
 
+### Link locally (ADR-005, MINI-84)
+
+The linking pass, local half: reads the export, asks an LLM which concepts
+each statement mentions, and writes the references to `links.json` — never to
+the API. `links.json` is also the watermark: a statement already linked under
+the current linker version is skipped on the next run. A readable
+`links-review.md` is written next to it for the statements that run covered.
+Both are git-ignored; keep `links.json`, since it holds what the calls cost.
+
+```bash
+# a reproducible sample of 20, spread across statement kinds
+doppler run --config prd -- uv run python -m wiki_curator_cog.main link --sample 20
+```
+
+Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
+`LLM_MODEL` overrides the model.
+
 ### Run an export locally
 
 `WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the

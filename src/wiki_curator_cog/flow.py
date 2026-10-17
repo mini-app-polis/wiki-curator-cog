@@ -55,6 +55,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
+from . import link
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -262,6 +263,74 @@ def render_local(wiki_repo_path: Path) -> dict:
         len(stale),
         len(broken),
         len(stats.dropped),
+    )
+    return summary
+
+
+def link_local(
+    links_path: Path,
+    *,
+    sample: int | None = None,
+    batch_size: int = link.DEFAULT_BATCH_SIZE,
+) -> dict:
+    """Run the linking pass locally: references to a JSON file, nothing to the API.
+
+    ADR-005 / MINI-84, local half. Reads the export (read-only), links every
+    statement not already in ``links_path`` under the current linker version
+    — or a reproducible sample of ``sample`` of them — and saves after every
+    batch, so a run cut short keeps what it paid for. Writes a readable
+    review next to the links file covering the statements this run was asked
+    about.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+
+    statements = link.collect_statements(export)
+    chosen = (
+        link.sample_statements(statements, sample) if sample is not None else statements
+    )
+    catalog = link.Catalog(export.entities)
+    links = link.LinksFile.load(links_path)
+    llm, model = link.llm_from_env()
+
+    LOG.info(
+        "link.start statements=%s chosen=%s catalog=%s model=%s file=%s",
+        len(statements),
+        len(chosen),
+        len(catalog),
+        model,
+        links_path,
+    )
+    counts = link.run_linking(
+        chosen,
+        catalog,
+        links,
+        llm,
+        model=model,
+        batch_size=batch_size,
+        on_batch=lambda: links.save(links_path),
+    )
+    links.save(links_path)
+
+    keys = [s.key for s in chosen]
+    review_path = links_path.with_name(links_path.stem + "-review.md")
+    review_path.write_text(link.review_markdown(links, keys))
+
+    summary = {
+        "links_file": str(links_path),
+        "review_file": str(review_path),
+        "linker_version": link.LINKER_VERSION,
+        "model": model,
+        "statements_in_corpus": len(statements),
+        **counts,
+        **link.summarize(links, keys),
+    }
+    LOG.info(
+        "link.complete linked=%s skipped=%s references=%s new=%s",
+        counts["linked"],
+        counts["skipped"],
+        summary["references"],
+        len(summary["new_concepts"]),
     )
     return summary
 
