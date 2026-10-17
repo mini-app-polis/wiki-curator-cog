@@ -1,7 +1,7 @@
 # ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
-**Status:** Proposed — direction agreed with Kaiano; to be built after the ADR-005 proof of concept (MINI-87, MINI-88)
+**Status:** Accepted — steps 1–3 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch behind a flag seeded off (MINI-95). Page documents and visibility (MINI-96), the site's /wiki pages (MINI-97) and retiring the Railway service are open
 **Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
 **Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time); Asana MINI-89, MINI-94 – MINI-99
 
