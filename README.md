@@ -14,16 +14,17 @@ upstream data produces the same bundle and the second run commits nothing —
 which is why the trigger is allowed to be crude. The three-mode split this
 README used to document was retired by ADR-002 and ADR-004.
 
-Triggered manually. One wake is one run: the process renders once and exits. The direction of travel is a run per source change, asked for by `api-kaianolevine-com`; nothing is built for that yet (ADR-004).
+The `export` run is triggered manually on Railway: one wake renders once and exits. Per-source work is now the wiki-jobs worker's (below, ADR-006): the API enqueues a job when a source is composed, and the Railway service retires once the worker has run on real lessons.
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
-> **Direction (ADR-005, planned):** the cog is becoming a self-generating wiki.
-> An LLM will maintain each entity's prose by integrating new statements —
-> lessons and correction notes alike, newer winning — into the current page,
-> human edits included, with the prose and its revisions owned by the API.
-> Until that code lands, the "no LLM at runtime" and "deterministic" statements
-> below describe the current renderer, not the plan. Tracked as MINI-29.
+> **The self-generating wiki (ADR-005, ADR-006).** LLM passes link
+> statements to the concepts they mention, fold narrow entities into broader
+> ones, and maintain each entity's prose by integrating new statements into
+> the page as it stands. Their state — and what it cost — is held by the API.
+> They run locally (`link`, `consolidate`, `generate`, `job`) and as the
+> wiki-jobs Lambda worker. The "deterministic" statements below describe the
+> `render` step, which applies that state but calls no model.
 
 ---
 
@@ -288,7 +289,7 @@ Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surf
 
 **The curator does not invent content.** Every wiki claim traces to an upstream source. The schema in `wcs-wiki/CLAUDE.md` is the operating manual; this cog implements it.
 
-**Deterministic by design.** No LLM calls at runtime. Given the same upstream export, the same input produces the same output. The only LLM step in the pipeline is upstream in `transcription-cog`.
+**A deterministic render over model-written state.** `render` and `export` call no model: given the same export and the same state (references, facets, prose), they produce the same pages. The model calls are in `link`, `consolidate` and `generate` — locally or in the worker — each watermarked, so a re-run pays only for what is new.
 
 **Idempotency.** The render is a pure function of the export it fetched: every page is rewritten each run, derived pages no longer produced are removed, and an unchanged corpus yields an unchanged tree with nothing to commit. There is no per-item skip to get wrong, which is what lets a redundant run cost time rather than correctness.
 
@@ -296,4 +297,4 @@ Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surf
 
 **Single-instance concurrency.** Each run is its own process with its own clone, so there is no shared working tree to race on, and Railway will not start the service again while a previous start is `Active`. Two overlapping runs could still race on the push, where git rejects the loser non-fast-forward (ADR-004).
 
-**Read-only against upstream.** The curator only calls `GET` endpoints for note content. The only `POST` is to `/v1/evaluations` for pipeline-evaluation findings.
+**Read-only against the corpus.** The curator reads note content with `GET` only. It writes its own state (`/v1/wcs/wiki/state/*`), asks for follow-on jobs (`/v1/wcs/wiki/jobs`), and posts pipeline-evaluation findings (`/v1/evaluations`).

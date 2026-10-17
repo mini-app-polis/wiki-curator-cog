@@ -1,7 +1,7 @@
 # ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half (storage in the API) pending; end-to-end note test (MINI-87) and go/no-go (MINI-88) open
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half built 2026-10-17 under ADR-006 (state in the API, MINI-89/94; worker, MINI-95); end-to-end note test (MINI-87) and go/no-go (MINI-88) open
 **Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
 **Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29, MINI-83 – MINI-93
 

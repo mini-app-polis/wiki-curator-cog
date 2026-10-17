@@ -1,6 +1,6 @@
 # Pipeline architecture
 
-`wiki-curator-cog` consumes the canonical WCS entity graph from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The structured data is produced by `transcription-cog` running an LLM-based extraction over raw transcripts; the `export` run renders the already-structured export deterministically. Since ADR-005 the local modes `link`, `consolidate` and `generate` add LLM passes (references between entities, facet folding, page prose) whose results live in `wcs-wiki/.curator/` and are applied by `render`; see the README.
+`wiki-curator-cog` consumes the canonical WCS entity graph from `api-kaianolevine-com` (HTTP API, read-only) and produces a markdown knowledge base in the `wcs-wiki` repo. The structured data is produced by `transcription-cog` running an LLM-based extraction over raw transcripts; the `export` run renders the already-structured export deterministically. Since ADR-005 the passes `link`, `consolidate` and `generate` add LLM work (references between entities, facet folding, page prose) whose state is held by the API (ADR-006) and applied by `render`. They run locally and as the wiki-jobs Lambda worker, which the API feeds a job per composed source; see the README.
 
 ## Flow diagram
 
