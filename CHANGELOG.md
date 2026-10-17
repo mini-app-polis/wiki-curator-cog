@@ -1,3 +1,20 @@
+# [2.3.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.2.0...v2.3.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.4.0 ([882ea35](https://github.com/mini-app-polis/wiki-curator-cog/commit/882ea35c9b296e76ec1d5ab8bc075d4d335f6f32))
+* **deps:** bump miniapppolis-common-utils to 6.4.0 ([eded63c](https://github.com/mini-app-polis/wiki-curator-cog/commit/eded63c65d550f4733ce1c2115f50d7f6c14a07a))
+* follow-on jobs only for new links, generate in chunks (MINI-94) ([1f270fd](https://github.com/mini-app-polis/wiki-curator-cog/commit/1f270fd0e99a3fa479eba7b177fe4c1ca5f071b0))
+* one state folder for every command, never the current directory ([0eae5cc](https://github.com/mini-app-polis/wiki-curator-cog/commit/0eae5cc6771bc9ebb104394968ebb5c03d338f55))
+
+
+### Features
+
+* one unit of work per job — link, consolidate, generate (MINI-94) ([96248e3](https://github.com/mini-app-polis/wiki-curator-cog/commit/96248e3eeb171cf8a56e808b5c85c6de3b03eaf3))
+* the API is the curator's state store (MINI-94) ([d8985a1](https://github.com/mini-app-polis/wiki-curator-cog/commit/d8985a1fa5887d05d979fd3b5741b4c4d4f30afa))
+* wiki-jobs Lambda worker and its deploy (MINI-95) ([8e42b36](https://github.com/mini-app-polis/wiki-curator-cog/commit/8e42b365ed84cb3c46a9249f055cf2787bc3230f))
+
 # [2.2.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.1.0...v2.2.0) (2026-10-17)
 
 
