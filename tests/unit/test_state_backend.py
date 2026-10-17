@@ -172,3 +172,69 @@ def test_the_api_is_the_default_store(tmp_path: Path) -> None:
             ["link", "--links-file", str(tmp_path / "l.json"), "--state", "files"]
         )
     assert "state" not in run.call_args.kwargs
+
+
+# ── One state folder for every command ──
+
+
+def test_every_command_takes_its_files_from_the_state_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    curator = (tmp_path / ".curator").resolve()
+    with (
+        patch.object(main, "api_state", return_value=object()),
+        patch.object(main, "generate_local", return_value={}) as gen,
+        patch.object(main, "consolidate_local", return_value={}) as con,
+        patch.object(main, "link_local", return_value={}) as lnk,
+        patch.object(
+            main, "render_local", return_value={"broken_links": {"count": 0}}
+        ) as ren,
+    ):
+        assert main.main(["generate", "--dry-run"]) == 0
+        assert main.main(["consolidate"]) == 0
+        assert main.main(["link"]) == 0
+        assert main.main(["render"]) == 0
+
+    assert gen.call_args.args[0] == curator / "prose.json"
+    assert gen.call_args.kwargs["links_path"] == curator / "links.json"
+    assert gen.call_args.kwargs["facets_path"] == curator / "facets.json"
+    assert con.call_args.args[0] == curator / "facets.json"
+    assert con.call_args.kwargs["prose_path"] == curator / "prose.json"
+    assert lnk.call_args.args[0] == curator / "links.json"
+    assert ren.call_args.args[1:4] == (
+        curator / "links.json",
+        curator / "prose.json",
+        curator / "facets.json",
+    )
+
+
+def test_a_command_that_writes_state_will_not_guess_where(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("WIKI_REPO_PATH", raising=False)
+    with (
+        patch.object(main, "api_state", return_value=object()),
+        patch.object(main, "generate_local", side_effect=AssertionError("ran")),
+        patch.object(main, "link_local", side_effect=AssertionError("ran")),
+        patch.object(main, "consolidate_local", side_effect=AssertionError("ran")),
+    ):
+        assert main.main(["generate"]) == 2
+        assert main.main(["link"]) == 2
+        assert main.main(["consolidate"]) == 2
+
+
+def test_a_file_flag_still_overrides_one_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with (
+        patch.object(main, "api_state", return_value=object()),
+        patch.object(main, "generate_local", return_value={}) as gen,
+    ):
+        main.main(["generate", "--prose-file", str(tmp_path / "other.json")])
+    assert gen.call_args.args[0] == (tmp_path / "other.json").resolve()
+    assert (
+        gen.call_args.kwargs["links_path"]
+        == (tmp_path / ".curator" / "links.json").resolve()
+    )
