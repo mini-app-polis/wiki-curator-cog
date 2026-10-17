@@ -53,6 +53,7 @@ from wiki_curator_cog.flow import (
     export_run,
     generate_local,
     link_local,
+    materialise_local,
     render_local,
     run_job,
     state_import_local,
@@ -112,6 +113,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "state-import",
             "state-verify",
             "job",
+            "materialise",
         ],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
@@ -120,7 +122,9 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
             "'consolidate' decides which entities are facets of broader ones. "
             "'state-import' sends links.json, facets.json and prose.json to "
             "the API; 'state-verify' checks the API holds exactly what they do. "
-            "'job' runs one worker job (--job JSON) as the wiki-jobs worker would."
+            "'job' runs one worker job (--job JSON) as the wiki-jobs worker would. "
+            "'materialise' builds page documents (every page, or --entity) "
+            "and stores them in the API; no model call."
         ),
     )
     parser.add_argument(
@@ -171,7 +175,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--entity",
         action="append",
         default=None,
-        help="generate: an entity slug to generate; repeat for several.",
+        help=(
+            "generate / materialise: an entity slug to generate or "
+            "materialise; repeat for several."
+        ),
     )
     parser.add_argument(
         "--sample",
@@ -232,7 +239,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help=(
             "link / generate / consolidate: make no model calls and write "
             "nothing; print how many calls a real run would make, their "
-            "tokens and an estimated cost. Needs no API key."
+            "tokens and an estimated cost. Needs no API key. materialise: "
+            "build the documents and store none."
         ),
     )
     return parser.parse_args(argv)
@@ -423,6 +431,21 @@ def _job(args: argparse.Namespace) -> int:
     return 0
 
 
+def _materialise(args: argparse.Namespace) -> int:
+    """Page documents for every page, or the named ones, into the API."""
+    state_dir = _state_dir(args)
+    if state_dir is None:
+        raise NoStateFolderError(
+            "no state folder: set WIKI_REPO_PATH (its .curator folder) or pass "
+            "--state-dir"
+        )
+    summary = materialise_local(
+        state_dir, entities=args.entity, dry_run=args.dry_run, **_store(args)
+    )
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
 def _state(args: argparse.Namespace) -> int:
     """Import the state files into the API, or verify the API holds them."""
     state_dir = _state_dir(args)
@@ -467,6 +490,8 @@ def main(argv: list[str] | None = None) -> int:
             return _consolidate(args)
         if args.mode == "job":
             return _job(args)
+        if args.mode == "materialise":
+            return _materialise(args)
     except NoStateFolderError as exc:
         LOG.error("%s.failed err=%s", args.mode, exc)
         return 2

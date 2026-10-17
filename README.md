@@ -14,7 +14,7 @@ upstream data produces the same bundle and the second run commits nothing —
 which is why the trigger is allowed to be crude. The three-mode split this
 README used to document was retired by ADR-002 and ADR-004.
 
-The `export` run is triggered manually on Railway: one wake renders once and exits. Per-source work is now the wiki-jobs worker's (below, ADR-006): the API enqueues a job when a source is composed, and the Railway service retires once the worker has run on real lessons.
+The `export` run is triggered manually on Railway: one wake renders once and exits. It renders the bare export only — no links, folds or generated prose — so it shows none of the worker's work. Per-source work is the wiki-jobs worker's (below, ADR-006): the API enqueues a job when a source is composed, and each page ends as a document stored in the API (`materialise`, MINI-96). The Railway service and its git push retire next: the wcs-wiki repo stays only as a local export written by `render` from the same page documents (MINI-99).
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
@@ -187,7 +187,7 @@ unknown fields the same way, and a refused write stops the run.
 
 `units.handle` is the body of the wiki-jobs worker (MINI-95): one job in, its
 result and the jobs that should follow out. `link` takes one source;
-`consolidate` and `generate` take named entities. Each is a
+`consolidate`, `generate` and `materialise` take named entities. Each is a
 no-op when its watermark says there is nothing new, so a retried or
 duplicated message costs nothing. The `job` command runs one locally, against
 production and the state store — the way to see what one new note costs:
@@ -199,8 +199,29 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 
 The result's `next` lists the follow-on jobs (`consolidate` for the source's
 undecided entities, `generate` — in chunks of entities — for every page its
-newly linked statements touched; a repeated job touches none). The command does
-not run them; run each the same way, or let the worker's dispatch do it.
+newly linked statements touched, a repeated job touching none; `materialise`
+for every page a `generate` was asked about). The command does not run them;
+run each the same way, or let the worker's dispatch do it.
+
+### Page documents (ADR-006, MINI-96)
+
+`materialise` builds each entity page as a structured document — definition,
+In practice, Details, statements by teacher with their citations, Mentions,
+Referenced by — and stores it in the API (`POST /v1/wcs/wiki/pages`), which
+serves it filtered to the sources each reader can see. It calls no model.
+Folded names lose their pages when the page they folded into is written.
+Links in the text are neutral (`[[slug|label]]`, `[[source:<uuid>|label]]`),
+for each reader to turn into its own URLs. `render` writes the repo's markdown
+from the same documents (`pages.page_markdown`), so the export and the API
+show one page model.
+
+Every page at once — the backfill, and the way to rebuild the documents after
+the page logic changes; `--entity` for named pages, `--dry-run` to build
+without storing:
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main materialise
+```
 
 ### The worker (ADR-006, MINI-95)
 
