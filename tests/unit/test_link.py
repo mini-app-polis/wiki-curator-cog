@@ -413,7 +413,7 @@ def test_link_mode_runs_without_the_gate_or_config(
         patch.object(main, "link_local", return_value={"linked": 0}) as run,
     ):
         assert main.main(["link", "--sample", "20", "--links-file", str(out)]) == 0
-    run.assert_called_once_with(out.resolve(), sample=20)
+    run.assert_called_once_with(out.resolve(), facets_path=None, sample=20)
     assert json.loads(capsys.readouterr().out) == {"linked": 0}
 
 
@@ -578,7 +578,7 @@ def test_render_mode_passes_the_links_file(
     ) as run:
         assert main.main(["render", "--links", str(tmp_path / "l.json")]) == 0
     run.assert_called_once_with(
-        tmp_path.resolve(), (tmp_path / "l.json").resolve(), None
+        tmp_path.resolve(), (tmp_path / "l.json").resolve(), None, None
     )
 
 

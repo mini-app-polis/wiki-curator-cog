@@ -140,6 +140,23 @@ evidence. Newest wins, so a later note saying they differ splits them again —
 nothing is destroyed, which a repoint-and-delete could not promise. The API's
 admin endpoints remain an escape hatch, not the path.
 
+**Facets fold automatically** (2026-10-16, MINI-93). Extraction minted an
+entity for every phrasing — *anchor*, *anchor with directional intent*,
+*anchoring to reset hand connection*, *stationary anchor* — so one idea was
+spread over dozens of thin pages. These are not aliases but facets: narrower
+cases, caveats and details of one concept. There are far too many to fix by
+hand, so a consolidation pass (`consolidate`) asks the model, for every
+concept and technique, whether it is a facet of a broader one already in the
+corpus, and records the answer in `facets.json` with a version watermark.
+Drills and patterns are never folded by the pass. At build time a facet folds
+like an alias — its statements, references and links move to the broader
+page — but keeps its name there under `## Details`, as one line with the
+first sentence of its own definition. Notes outrank the pass: a note's
+`facet_of`, `alias_of` or `distinct_from` for the same entity or pair wins, so
+"X is its own concept" splits it back out on the next build. The extraction
+prompt now names the concept rather than the point made about it, so new
+lessons add detail to *anchor* instead of minting a new variant.
+
 ### Generation integrates; it does not rebuild
 
 An LLM maintains each entity's prose. Its input is the current page as it
@@ -242,6 +259,9 @@ Tracked in Asana under MINI-29.
 6. **MINI-88** — full-corpus run; time, cost and quality recorded; go/no-go.
 7. **MINI-90** — identity fixes through notes: `alias_of` / `distinct_from`
    relations from the note extraction, merged at build time.
+8. **MINI-93** — facet consolidation: `consolidate` into `facets.json`,
+   folded at build time under `## Details`; notes override; extraction
+   stops minting variants.
 
 ## Consequences
 

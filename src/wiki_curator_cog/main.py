@@ -48,6 +48,7 @@ from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
 from wiki_curator_cog.flow import (
     REPO,
+    consolidate_local,
     export_run,
     generate_local,
     link_local,
@@ -97,11 +98,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "mode",
         nargs="?",
         default=None,
-        choices=["export", "render", "link", "generate"],
+        choices=["export", "render", "link", "generate", "consolidate"],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
             "to RUN_ON_START. 'render' is the local proof-of-concept loop. "
-            "'link' runs the linking pass into a local JSON file."
+            "'link' runs the linking pass into a local JSON file. "
+            "'consolidate' decides which entities are facets of broader ones."
+        ),
+    )
+    parser.add_argument(
+        "--facets-file",
+        default="facets.json",
+        help="consolidate: the facet decisions, and the watermark (default facets.json).",
+    )
+    parser.add_argument(
+        "--facets",
+        default=None,
+        help=(
+            "render / generate / link: the facets file from `consolidate`. "
+            "Default: facets.json next to the --links file, when it exists."
         ),
     )
     parser.add_argument(
@@ -121,7 +136,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--prose",
         default=None,
-        help="render: put the overviews from this prose file (from `generate`) on the pages.",
+        help=(
+            "render: put the overviews from this prose file (from `generate`) on "
+            "the pages; consolidate: show the model each entity's definition."
+        ),
     )
     parser.add_argument(
         "--prose-file",
@@ -143,22 +161,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--sample",
         type=int,
         default=None,
-        help="link: link a reproducible sample of N statements instead of all.",
+        help=(
+            "link: a reproducible sample of N statements; generate: N entities; "
+            "consolidate: the first N undecided entities."
+        ),
     )
     parser.add_argument(
         "--workers",
         type=int,
         default=None,
         help=(
-            "link / generate: model calls in flight at once "
-            "(default: 1 for link, 4 for generate)."
+            "link / generate / consolidate: model calls in flight at once "
+            "(default: 1 for link, 4 for generate, 8 for consolidate)."
         ),
     )
     parser.add_argument(
         "--batch-size",
         type=int,
         default=None,
-        help="link: statements per LLM call.",
+        help="link / consolidate: statements or entities per LLM call.",
     )
     return parser.parse_args(argv)
 
@@ -183,8 +204,27 @@ def _auto_run_enabled() -> bool:
     return current_environment() is Environment.PRODUCTION
 
 
+def _facets_path(facets: str | None, links: str | None) -> Path | None:
+    """--facets, else facets.json beside the links file if it is there.
+
+    Picking it up by default keeps render, generate and link on the same
+    folds: a generate run that forgot the flag would otherwise rewrite every
+    facet as its own page again.
+    """
+    if facets:
+        return Path(facets).expanduser().resolve()
+    if links:
+        sibling = Path(links).expanduser().resolve().with_name("facets.json")
+        if sibling.exists():
+            return sibling
+    return None
+
+
 def _render(
-    wiki_repo_path_raw: str, links: str | None = None, prose: str | None = None
+    wiki_repo_path_raw: str,
+    links: str | None = None,
+    prose: str | None = None,
+    facets: str | None = None,
 ) -> int:
     """The local loop: render into a clone, print what it found.
 
@@ -199,7 +239,9 @@ def _render(
     wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
     links_path = Path(links).expanduser().resolve() if links else None
     prose_path = Path(prose).expanduser().resolve() if prose else None
-    summary = render_local(wiki_repo_path, links_path, prose_path)
+    summary = render_local(
+        wiki_repo_path, links_path, prose_path, _facets_path(facets, links)
+    )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 1 if summary["broken_links"]["count"] else 0
 
@@ -211,7 +253,11 @@ def _link(args: argparse.Namespace) -> int:
         kwargs["batch_size"] = args.batch_size
     if args.workers is not None:
         kwargs["workers"] = args.workers
-    summary = link_local(Path(args.links_file).expanduser().resolve(), **kwargs)
+    summary = link_local(
+        Path(args.links_file).expanduser().resolve(),
+        facets_path=_facets_path(args.facets, args.links_file),
+        **kwargs,
+    )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
 
@@ -227,7 +273,24 @@ def _generate(args: argparse.Namespace) -> int:
         entities=args.entity,
         sample=args.sample,
         condense=args.condense,
+        facets_path=_facets_path(args.facets, links),
         **({"workers": args.workers} if args.workers is not None else {}),
+    )
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
+def _consolidate(args: argparse.Namespace) -> int:
+    """Local facet consolidation: decisions to a file, a summary to stdout."""
+    kwargs: dict = {"sample": args.sample}
+    if args.batch_size is not None:
+        kwargs["batch_size"] = args.batch_size
+    if args.workers is not None:
+        kwargs["workers"] = args.workers
+    summary = consolidate_local(
+        Path(args.facets_file).expanduser().resolve(),
+        prose_path=Path(args.prose).expanduser().resolve() if args.prose else None,
+        **kwargs,
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -238,11 +301,15 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.mode == "render":
-        return _render(os.getenv("WIKI_REPO_PATH", ""), args.links, args.prose)
+        return _render(
+            os.getenv("WIKI_REPO_PATH", ""), args.links, args.prose, args.facets
+        )
     if args.mode == "link":
         return _link(args)
     if args.mode == "generate":
         return _generate(args)
+    if args.mode == "consolidate":
+        return _consolidate(args)
 
     # Before load_config, so a container that is not going to do anything
     # exits cleanly whether or not its secrets are in place.

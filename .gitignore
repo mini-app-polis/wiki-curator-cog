@@ -31,3 +31,6 @@ link-summary.json
 prose.json
 prose-review*.md
 generate-summary.json
+facets.json
+facets-review*.md
+consolidate-summary.json

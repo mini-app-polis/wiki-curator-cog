@@ -158,12 +158,20 @@ class PageIndex:
     paths: frozenset[str]
 
     @classmethod
-    def from_export(cls, export: WcsWikiExport) -> PageIndex:
-        """Entity and source pages as the renderer will write them."""
+    def from_export(cls, export: WcsWikiExport, merges: Any = None) -> PageIndex:
+        """Entity and source pages as the renderer will write them.
+
+        With ``merges``, a slug folded away (alias or facet) points at the page
+        it was folded into, so old links follow it there.
+        """
         from .render import _entity_path  # the renderer owns paths
 
         indexes = build_indexes(export)
         path_by_slug = {e.slug: _entity_path(e)[:-3] for e in export.entities}
+        if merges:
+            for old, new in merges.by_slug.items():
+                if new in path_by_slug and old not in path_by_slug:
+                    path_by_slug[old] = path_by_slug[new]
         sources = {f"sources/{slug}" for slug in indexes.source_slug_by_id.values()}
         return cls(path_by_slug, frozenset(path_by_slug.values()) | sources)
 
@@ -228,7 +236,9 @@ def build_corpus(
             text=s.text,
         )
 
-    corpus = Corpus(entities=corpus_entities, pages=PageIndex.from_export(export))
+    corpus = Corpus(
+        entities=corpus_entities, pages=PageIndex.from_export(export, merges)
+    )
     for s in statements:
         corpus.own.setdefault(s.subject_slug, []).append(evidence(s, "about"))
 
@@ -864,14 +874,16 @@ def run_condense(
     }
 
 
-def apply_prose(export: WcsWikiExport, prose: ProseFile) -> WcsWikiExport:
+def apply_prose(
+    export: WcsWikiExport, prose: ProseFile, merges: Any = None
+) -> WcsWikiExport:
     """The export with each entity's generated definition in ``overview_md``.
 
     Links in the prose are repaired against the pages this export renders,
     so prose stored before a repair, or before a merge moved a page, still
     renders with no broken links.
     """
-    pages = PageIndex.from_export(export)
+    pages = PageIndex.from_export(export, merges)
     entities = []
     for e in export.entities:
         text = pages.repair(prose.definition(e.slug))
@@ -879,14 +891,55 @@ def apply_prose(export: WcsWikiExport, prose: ProseFile) -> WcsWikiExport:
     return export.model_copy(update={"entities": entities})
 
 
-def context_by_entity(export: WcsWikiExport, prose: ProseFile) -> dict[uuid.UUID, str]:
+def context_by_entity(
+    export: WcsWikiExport, prose: ProseFile, merges: Any = None
+) -> dict[uuid.UUID, str]:
     """Each entity's generated context, for the page's ``## In practice``."""
-    pages = PageIndex.from_export(export)
+    pages = PageIndex.from_export(export, merges)
     out: dict[uuid.UUID, str] = {}
     for e in export.entities:
         text = pages.repair(prose.context(e.slug))
         if text:
             out[e.id] = text
+    return out
+
+
+#: The longest gist a facet gets under ``## Details``, in words.
+DETAIL_MAX_WORDS = 30
+
+
+def _gist(text: str) -> str:
+    """The first sentence of ``text``, capped at :data:`DETAIL_MAX_WORDS`."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    m = _SENTENCE_END.search(text)
+    first = text[: m.end()].strip() if m else text
+    words = first.split()
+    if len(words) > DETAIL_MAX_WORDS:
+        first = " ".join(words[:DETAIL_MAX_WORDS]).rstrip(",;:") + "…"
+    return first
+
+
+def details_by_entity(
+    export: WcsWikiExport, merges: Any, prose: ProseFile | None = None
+) -> dict[uuid.UUID, list[tuple[str, str]]]:
+    """Each broad entity's facets, as (name, gist) for ``## Details``.
+
+    The gist is the first sentence of the facet's generated definition, or
+    of its own overview when it has none. Links in it are repaired, so one
+    pointing at a folded page follows it to the broad page.
+    """
+    if not merges or not getattr(merges, "facets", None):
+        return {}
+    pages = PageIndex.from_export(export, merges)
+    out: dict[uuid.UUID, list[tuple[str, str]]] = {}
+    for entity_id, facets in merges.facets.items():
+        rows = []
+        for f in facets:
+            text = (prose.definition(f.slug) if prose is not None else "") or f.overview
+            rows.append((f.name, pages.repair(_gist(text))))
+        out[entity_id] = rows
     return out
 
 

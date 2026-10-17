@@ -55,7 +55,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import generate, identity, link
+from . import consolidate, generate, identity, link
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -211,10 +211,20 @@ def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     }
 
 
+def _facet_parents(facets_path: Path | None) -> dict[str, str] | None:
+    """slug → parent slug from the facets file, or None when there is none."""
+    if facets_path is None:
+        return None
+    if not facets_path.exists():
+        raise RuntimeError(f"facets file not found: {facets_path}")
+    return consolidate.FacetsFile.load(facets_path).parents()
+
+
 def render_local(
     wiki_repo_path: Path,
     links_path: Path | None = None,
     prose_path: Path | None = None,
+    facets_path: Path | None = None,
 ) -> dict:
     """Render into an existing local clone. No clone, commit, push or report.
 
@@ -236,7 +246,7 @@ def render_local(
 
     export = _fetch_export()
     _require_corpus(export)
-    export, merges = identity.resolve(export)
+    export, merges = identity.resolve(export, _facet_parents(facets_path))
 
     overlay = None
     overlay_summary: dict | None = None
@@ -256,20 +266,26 @@ def render_local(
 
     prose_summary: dict | None = None
     context = None
+    prose = None
     if prose_path is not None:
         if not prose_path.exists():
             raise RuntimeError(f"prose file not found: {prose_path}")
         prose = generate.ProseFile.load(prose_path)
-        export = generate.apply_prose(export, prose)
-        context = generate.context_by_entity(export, prose)
+        export = generate.apply_prose(export, prose, merges)
+        context = generate.context_by_entity(export, prose, merges)
         prose_summary = {
             "file": str(prose_path),
             "definitions": sum(1 for e in export.entities if e.overview_md.strip()),
             "contexts": len(context),
         }
 
+    details = generate.details_by_entity(export, merges, prose)
     bundle, stats = render_bundle(
-        export, rendered_at=dt.date.today(), overlay=overlay, context=context
+        export,
+        rendered_at=dt.date.today(),
+        overlay=overlay,
+        context=context,
+        details=details,
     )
     bundle.pop("log.md", None)
 
@@ -296,7 +312,16 @@ def render_local(
         "quality": corpus_quality(export, build_indexes(export)),
         "links": overlay_summary,
         "prose": prose_summary,
-        "merged": dict(sorted(merges.by_slug.items())),
+        "merged": {
+            old: new
+            for old, new in sorted(merges.by_slug.items())
+            if not any(f.slug == old for fs in merges.facets.values() for f in fs)
+        },
+        "facets": {
+            "file": str(facets_path) if facets_path else None,
+            "folded": sum(len(fs) for fs in merges.facets.values()),
+            "into_pages": len(merges.facets),
+        },
     }
     LOG.info(
         "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",
@@ -314,6 +339,7 @@ def link_local(
     sample: int | None = None,
     batch_size: int = link.DEFAULT_BATCH_SIZE,
     workers: int = 1,
+    facets_path: Path | None = None,
 ) -> dict:
     """Run the linking pass locally: references to a JSON file, nothing to the API.
 
@@ -328,7 +354,7 @@ def link_local(
     _require_corpus(export)
     # Link against the merged corpus, so a merged-away name resolves to its
     # preferred entity rather than being proposed as a new concept.
-    export, _ = identity.resolve(export)
+    export, _ = identity.resolve(export, _facet_parents(facets_path))
 
     statements = link.collect_statements(export)
     chosen = (
@@ -390,6 +416,7 @@ def generate_local(
     sample: int | None = None,
     workers: int = generate.DEFAULT_WORKERS,
     condense: bool = False,
+    facets_path: Path | None = None,
 ) -> dict:
     """Run generation locally: overviews to a JSON file, nothing to the API.
 
@@ -405,7 +432,7 @@ def generate_local(
     export = _fetch_export()
     _require_corpus(export)
 
-    export, merges = identity.resolve(export)
+    export, merges = identity.resolve(export, _facet_parents(facets_path))
     overlay = None
     links = None
     if links_path is not None and links_path.exists():
@@ -477,6 +504,59 @@ def generate_local(
     }
     LOG.info("generate.complete %s", counts)
     return summary
+
+
+def consolidate_local(
+    facets_path: Path,
+    *,
+    prose_path: Path | None = None,
+    sample: int | None = None,
+    batch_size: int = consolidate.DEFAULT_BATCH_SIZE,
+    workers: int = consolidate.DEFAULT_WORKERS,
+) -> dict:
+    """Decide which entities are facets of broader ones: to a JSON file.
+
+    MINI-93, local half. Runs on the corpus after the notes' alias merges, so
+    a merged-away name is not decided twice. With ``prose_path``, the model
+    sees each entity's generated definition. Saves after every batch, and
+    writes a review grouped by broader page next to the facets file.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+    export, _ = identity.resolve(export)
+
+    definitions = None
+    if prose_path is not None and prose_path.exists():
+        prose = generate.ProseFile.load(prose_path)
+        definitions = {e.slug: prose.definition(e.slug) for e in export.entities}
+
+    facets = consolidate.FacetsFile.load(facets_path)
+    llm, model = link.llm_from_env()
+    LOG.info("consolidate.start model=%s file=%s", model, facets_path)
+    counts = consolidate.run_consolidation(
+        export,
+        facets,
+        llm,
+        model=model,
+        definitions=definitions,
+        batch_size=batch_size,
+        workers=workers,
+        sample=sample,
+        on_batch=lambda: facets.save(facets_path),
+    )
+    facets.save(facets_path)
+
+    names = {e.slug: e.canonical_name for e in export.entities}
+    review_path = facets_path.with_name(facets_path.stem + "-review.md")
+    review_path.write_text(consolidate.review_markdown(facets, names))
+    LOG.info("consolidate.complete %s", counts)
+    return {
+        "facets_file": str(facets_path),
+        "review_file": str(review_path),
+        "consolidator_version": consolidate.CONSOLIDATOR_VERSION,
+        "model": model,
+        **counts,
+    }
 
 
 def record_summary(report: RunReport, summary: dict) -> None:

@@ -111,6 +111,21 @@ preferred entity absorbs the other's content and lists its name as an alias,
 and the other page goes. A newer `distinct_from` splits them again. Nothing
 upstream changes; `render-summary.json` lists the merges under `merged`.
 
+**Facets (MINI-93).** `consolidate` decides, for every concept and technique,
+whether it is a facet of a broader one (*stationary anchor* → *anchor*), and
+writes the decisions to `facets.json` (watermarked; already-decided entities
+are skipped). `render`, `generate` and `link` then fold each facet into its
+broader page, listed under `## Details`. They pick up `facets.json` from next
+to the `--links` file by default, or take `--facets PATH`. A note's
+`facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
+see what was folded where.
+
+```bash
+doppler run --config prd -- uv run python -m wiki_curator_cog.main consolidate \
+  --facets-file ../wcs-wiki/.curator/facets.json \
+  --prose ../wcs-wiki/.curator/prose.json --workers 16
+```
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts

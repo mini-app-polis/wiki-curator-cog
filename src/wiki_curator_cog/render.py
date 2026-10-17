@@ -11,7 +11,7 @@ import datetime as dt
 import re
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -527,8 +527,12 @@ def render_entity_page(
     rendered_at: dt.date,
     overlay: LinkOverlay | None = None,
     context: str = "",
+    details: Sequence[tuple[str, str]] = (),
 ) -> str:
     """Render one entity's Markdown page.
+
+    ``details`` are the facets folded into this entity (MINI-93): each a name
+    and a one-line gist, listed under ``## Details``.
 
     With an ``overlay`` the page also gets ``## Mentions`` (what its
     statements refer to) and ``## Referenced by`` (every entity that refers to
@@ -559,6 +563,14 @@ def render_entity_page(
         page.set_section("Overview", [entity.overview_md.strip()])
     if context.strip():
         page.set_section("In practice", [context.strip()])
+    if details:
+        page.set_section(
+            "Details",
+            [
+                f"- **{name}** — {gist}" if gist else f"- **{name}**"
+                for name, gist in details
+            ],
+        )
 
     by_teacher = _group_by_instructor(
         attributions=attributions,
@@ -1124,6 +1136,7 @@ def render_bundle(
     existing_log: str = "",
     overlay: LinkOverlay | None = None,
     context: dict[uuid.UUID, str] | None = None,
+    details: dict[uuid.UUID, list[tuple[str, str]]] | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
     """Render the full wiki bundle. Keys are repo-relative paths.
 
@@ -1161,6 +1174,7 @@ def render_bundle(
             rendered_at=when,
             overlay=overlay,
             context=(context or {}).get(entity.id, ""),
+            details=(details or {}).get(entity.id, ()),
         )
         if not indexes.attributions_by_entity.get(entity.id):
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")
