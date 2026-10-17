@@ -634,3 +634,29 @@ def test_parallel_linking_links_everything_once(catalog: link.Catalog) -> None:
     assert sorted(k for call in llm.calls for k in call) == sorted(
         s.key for s in statements
     )
+
+
+def test_referenced_by_lists_up_to_the_limit_then_shows_a_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wiki_curator_cog import render
+    from wiki_curator_cog.render import render_bundle
+
+    links = _links_with(
+        ("anchor-step", "2026-03-01", [("connection", None, "assert")]),
+        ("wall-drill", "2026-03-02", [("connection", None, "assert")]),
+    )
+    augmented, overlay, _ = link.build_overlay(_export(), links)
+
+    listed, _ = render_bundle(
+        augmented, rendered_at=dt.date(2026, 10, 16), overlay=overlay
+    )
+    assert "[[techniques/anchor-step]]" in listed["concepts/connection.md"]
+
+    monkeypatch.setattr(render, "REFERENCED_BY_LINK_LIMIT", 1)
+    counted, _ = render_bundle(
+        augmented, rendered_at=dt.date(2026, 10, 16), overlay=overlay
+    )
+    page = counted["concepts/connection.md"]
+    assert "Referenced by 2 pages." in page
+    assert "[[techniques/anchor-step]]" not in page

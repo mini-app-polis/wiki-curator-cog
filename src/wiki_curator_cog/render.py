@@ -87,6 +87,12 @@ class RenderStats:
     dropped: list[tuple[str, str]] = field(default_factory=list)
 
 
+#: A page referenced by more entities than this shows only the count. Past a
+#: few dozen the list stops being navigation — *connection* is referenced by
+#: hundreds of pages. (Kaiano, 2026-10-16.)
+REFERENCED_BY_LINK_LIMIT = 25
+
+
 @dataclass(frozen=True)
 class LinkOverlay:
     """References from the linking pass, already resolved (ADR-005).
@@ -625,7 +631,11 @@ def render_entity_page(
                     incoming.get(relation.from_entity_id, 0) + 1
                 )
         referenced_by = _counted_links(incoming, indexes)
-        if referenced_by:
+        if len(referenced_by) > REFERENCED_BY_LINK_LIMIT:
+            page.set_section(
+                "Referenced by", [f"Referenced by {len(referenced_by)} pages."]
+            )
+        elif referenced_by:
             page.set_section("Referenced by", referenced_by)
 
     return md.serialize(page)
