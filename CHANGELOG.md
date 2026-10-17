@@ -1,3 +1,15 @@
+# [2.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.3...v2.4.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.5.0 ([0e8af65](https://github.com/mini-app-polis/wiki-curator-cog/commit/0e8af656676435fd89115e60574ef13f4d31a48f))
+
+
+### Features
+
+* materialise page documents into the API; render markdown from them (MINI-96) ([a5be955](https://github.com/mini-app-polis/wiki-curator-cog/commit/a5be955df3220c607fa648ae58f6d11b136f9a10))
+
 ## [2.3.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.2...v2.3.3) (2026-10-17)
 
 
