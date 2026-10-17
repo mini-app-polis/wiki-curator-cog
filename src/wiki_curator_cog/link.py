@@ -49,7 +49,7 @@ LOG = log.get_logger()
 #: Raised whenever the prompt, schema or resolution rules change in a way that
 #: should relink every statement. Statements linked under another version are
 #: linked again.
-LINKER_VERSION = "2"
+LINKER_VERSION = "3"
 
 #: Statements per LLM call. Statements are short, so the fixed instructions
 #: dominate a small batch; 50 keeps a call cheap to retry and the run to about
@@ -297,12 +297,20 @@ Rules:
 - Include foundational concepts whenever the statement is genuinely about \
 them, even if it names a specific variant: "consistent stretch weight in the \
 connected hand" refers to stretch and to connection. Name the general concept, \
-not a paraphrase of the sentence. Foundational concepts include, among others: \
+not a paraphrase of the sentence. Examples of foundational concepts: \
 connection, leading, following, frame, posture, stretch, compression, anchor, \
-timing, rhythm, musicality, phrasing, weight transfer, momentum, slot.
-- Leading and following are concepts too: a statement about what a leader \
-asks, signals or initiates refers to leading; one about how a follower \
-responds, waits or travels refers to following.
+timing, rhythm, musicality, phrasing, weight transfer, momentum, slot. These \
+are examples, not a vocabulary: never swap a specific concept for one of \
+them. "Contrabody position", "center of gravity", "tempo" and "rotation" stay \
+as they are, listed alongside any general concept the statement also \
+discusses.
+- Leading is the act of the leader asking or signalling something of the \
+follower. Following is the act of the follower reacting to what the leader \
+asks. Not everything a follower does is following: a follower's own choice, \
+styling or body technique that is not a reaction to the lead does not refer \
+to following.
+- Two ideas get two names, never one combined name: "free arm" and \
+"styling", not "free arm styling".
 - Patterns and techniques named in the text count, including ones the \
 subject is built from: "right side pass with underarm turn" refers to right \
 side pass and to underarm turn. Never list the subject itself.
