@@ -85,6 +85,44 @@ files in chunks and `state-verify` compares them, entry by entry, with what
 the API returns; on the real files the round trip was exact. Page documents
 wait for their schema (MINI-96).
 
+**MINI-94, part 1 (2026-10-17): the API is the store.** The local commands
+read each state document from the API and write back changed entries in
+batches during a run, with a final flush; the files remain as a cache in
+their old layout (byte-identical on the real state), checked against the API
+on every read. A disagreement stops the command before it reads or writes —
+the case of a run whose last write never arrived — so neither side
+overwrites the other. `--state files` keeps the file-only behaviour. The
+per-unit functions for the worker are part 2.
+
+**MINI-94, part 2 (2026-10-17): one unit per job.** `units.handle(job, ctx)`
+runs `link` (one source's statements), `consolidate` or `generate` (named
+entities) against a `RunContext` built once per invocation —
+the export with its folds applied, the state store, the model — and returns
+the follow-on jobs for the API to enqueue, rather than enqueuing them
+itself: `link` names `consolidate` for the source's undecided entities and
+`generate` for every entity its newly linked statements taught or referred
+to, so a repeated job asks for nothing; `consolidate` names `generate` for
+each page that gained a fold. Follow-on generation goes in chunks of
+entities, one job each, rather than a message per entity: every invocation
+reads the export and the state, and a no-op still pays for that read. The table above is what the
+dispatch implements. Each unit is a no-op under its watermark. `materialise`
+joins with the page documents (MINI-96). The units read and write whole
+state documents for now; per-entry reads are an API change to make if the
+worker's reads prove slow.
+
+**MINI-95 (2026-10-17): the queue and the worker.** `wiki-curator-jobs.fifo`,
+one message group, reserved concurrency 1: jobs never run side by side, so
+two cannot pay for one entity or race on a document. Messages are
+`{"type": "wiki.job", "version": 1, "payload": <job>}`. The API enqueues a
+`link` after composing a source — behind `flags.wcs.wiki_jobs_enabled`,
+seeded off (migration 055), because every job costs model calls — and
+`POST /v1/wcs/wiki/jobs` (scope `wcs.wiki.write`) enqueues the follow-ons
+the worker posts back, keeping the API the only producer. The worker
+(`worker.lambda_handler`) reads state into a fresh temporary folder per
+invocation, sends a job's follow-ons before it counts as done, and returns
+failed records to the queue. The Railway service and its git-push render are
+not retired yet: that waits until the worker has run on real lessons.
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /

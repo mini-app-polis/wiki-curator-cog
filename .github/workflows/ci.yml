@@ -41,6 +41,8 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -77,6 +79,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
+
+      # semantic-release tags the release commit it leaves at HEAD. No tag
+      # there means the push carried nothing releasable, and nothing new
+      # needs deploying.
+      - name: Record the release tag
+        id: released
+        run: echo "tag=$(git tag --points-at HEAD --list 'v*' | head -n1)" >> "$GITHUB_OUTPUT"
+
+  # The wiki-jobs worker (ADR-006, MINI-95), deployed here as a job: a release
+  # published with GITHUB_TOKEN starts no workflows, so `on: release` would
+  # never fire and the Lambda would drift behind main.
+  deploy:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    permissions:
+      id-token: write
+      contents: read
+    uses: mini-app-polis/.github/.github/workflows/lambda-deploy.yml@v3
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+      # These three match this cog's block in mini-app-polis/infra cogs.tf; the
+      # deploy refuses a function whose architecture differs.
+      handler: wiki_curator_cog.worker.lambda_handler
+      architecture: arm64
+      python-version: "3.11"
+      role-arn: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      region: ${{ vars.AWS_REGION }}
+      function-name: ${{ vars.AWS_FUNCTION_NAME }}
 
   # Conformance is graded when the repository changes, and this is where
   # that is said. The evaluation runs after this job ends, so what the job

@@ -33,8 +33,11 @@ MODELS = {
 
 class FakeApi:
     def __init__(self) -> None:
+        # As the API answers before anything is written: empty headers.
         self.docs: dict[str, dict[str, Any]] = {
-            name: {key: {}} for name, (_, key) in MODELS.items()
+            "links": {"linker_version": "", "model": "", "statements": {}},
+            "facets": {"consolidator_versions": {}, "model": "", "entities": {}},
+            "prose": {"generator_version": "", "model": "", "entities": {}},
         }
         self.posts: dict[str, int] = {name: 0 for name in MODELS}
 
@@ -135,14 +138,8 @@ def _write_files(d: Path, *, facets_legacy: bool = False) -> None:
                 "generator_version": "4",
                 "model": "m",
                 "entities": {
+                    # laid out as the generator writes an entry
                     "anchor": {
-                        "entity_id": ENTITY,
-                        "generator_version": "4",
-                        "model": "m",
-                        "generated_at": "2026-10-16",
-                        "definition": "The settle.",
-                        "context": "",
-                        "integrated": [KEY],
                         "revisions": [
                             {
                                 "by": "llm",
@@ -158,6 +155,13 @@ def _write_files(d: Path, *, facets_legacy: bool = False) -> None:
                                 "context": "",
                             },
                         ],
+                        "integrated": [KEY],
+                        "entity_id": ENTITY,
+                        "generator_version": "4",
+                        "model": "m",
+                        "generated_at": "2026-10-16",
+                        "definition": "The settle.",
+                        "context": "",
                     }
                 },
             }
