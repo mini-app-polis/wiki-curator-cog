@@ -110,6 +110,19 @@ joins with the page documents (MINI-96). The units read and write whole
 state documents for now; per-entry reads are an API change to make if the
 worker's reads prove slow.
 
+**MINI-95 (2026-10-17): the queue and the worker.** `wiki-curator-jobs.fifo`,
+one message group, reserved concurrency 1: jobs never run side by side, so
+two cannot pay for one entity or race on a document. Messages are
+`{"type": "wiki.job", "version": 1, "payload": <job>}`. The API enqueues a
+`link` after composing a source — behind `flags.wcs.wiki_jobs_enabled`,
+seeded off (migration 055), because every job costs model calls — and
+`POST /v1/wcs/wiki/jobs` (scope `wcs.wiki.write`) enqueues the follow-ons
+the worker posts back, keeping the API the only producer. The worker
+(`worker.lambda_handler`) reads state into a fresh temporary folder per
+invocation, sends a job's follow-ons before it counts as done, and returns
+failed records to the queue. The Railway service and its git-push render are
+not retired yet: that waits until the worker has run on real lessons.
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /

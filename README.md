@@ -201,6 +201,20 @@ undecided entities, `generate` — in chunks of entities — for every page its
 newly linked statements touched; a repeated job touches none). The command does
 not run them; run each the same way, or let the worker's dispatch do it.
 
+### The worker (ADR-006, MINI-95)
+
+On AWS the same units run as a Lambda behind `wiki-curator-jobs.fifo`
+(`wiki_curator_cog.worker.lambda_handler`, deployed by CI on each release;
+the function, queue and alarms are `module "wiki_curator"` in
+mini-app-polis/infra). The API is the only producer: it enqueues a `link`
+when a source is composed — only while `flags.wcs.wiki_jobs_enabled` is on,
+seeded off — and the follow-on jobs each job names, which the worker posts to
+`POST /v1/wcs/wiki/jobs`. One job at a time; each reads the export and the
+state from the API into a fresh temporary folder, so a warm container never
+holds stale state. A failed job is returned to the queue and retried (its
+finished parts are no-ops), and an unreadable message is reported once and
+dead-lettered.
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
