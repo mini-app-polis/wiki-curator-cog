@@ -683,15 +683,19 @@ class _NoWrites(state_backend.FileState):
         self.name = f"{inner.name} (dry run)"
 
     def links(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        """Read the links document through the wrapped store."""
         return self._inner.links(path, required=required)
 
     def facets(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        """Read the facets document through the wrapped store."""
         return self._inner.facets(path, required=required)
 
     def prose(self, path: Path, *, required: bool = False):  # type: ignore[no-untyped-def]
+        """Read the prose document through the wrapped store."""
         return self._inner.prose(path, required=required)
 
     def save(self, obj, path: Path, *, final: bool = False) -> None:  # type: ignore[no-untyped-def]
+        """Discard the write: a dry run changes no state."""
         return None
 
 

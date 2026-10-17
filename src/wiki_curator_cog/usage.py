@@ -84,6 +84,7 @@ class Usage:
         cache_read: int = 0,
         cache_write: int = 0,
     ) -> None:
+        """Add calls and token counts to the totals, under the lock."""
         with self._lock:
             self.calls += calls
             self.input_tokens += input_tokens
@@ -112,6 +113,7 @@ class Usage:
         )
 
     def cost_usd(self) -> float | None:
+        """The run's cost in US dollars, or None when the model has no known price."""
         price = _price(self.model)
         if price is None:
             return None
@@ -180,6 +182,7 @@ class MeteredLLM:
         json_schema: dict[str, Any],
         schema_name: str = "output",
     ) -> LLMResult:
+        """Count the call, then make it through the wrapped client."""
         self.usage.add(calls=1)
         result: LLMResult = self._inner.generate_json(
             messages=messages, json_schema=json_schema, schema_name=schema_name
@@ -208,6 +211,7 @@ class DryRunLLM:
         json_schema: dict[str, Any],
         schema_name: str = "output",
     ) -> LLMResult:
+        """Record the call's estimated tokens and answer the schema's empty result."""
         _ = json_schema
         chars = sum(len(m.content) for m in messages)
         items = sum(len(_ID.findall(m.content)) for m in messages if m.role == "user")

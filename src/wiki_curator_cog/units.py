@@ -67,6 +67,7 @@ class StatePaths:
 
     @classmethod
     def under(cls, folder: Path) -> StatePaths:
+        """The standard state file paths inside ``folder``."""
         return cls(
             links=folder / "links.json",
             facets=folder / "facets.json",
