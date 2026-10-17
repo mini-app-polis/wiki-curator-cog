@@ -556,10 +556,15 @@ def consolidate_local(
     names = {e.slug: e.canonical_name for e in export.entities}
     review_path = facets_path.with_name(facets_path.stem + "-review.md")
     review_path.write_text(consolidate.review_markdown(facets, names, supports))
+    thin_path = facets_path.with_name("thin-review.md")
+    thin_path.write_text(
+        consolidate.thin_review_markdown(export, facets, supports, definitions)
+    )
     LOG.info("consolidate.complete %s", counts)
     return {
         "facets_file": str(facets_path),
         "review_file": str(review_path),
+        "thin_review_file": str(thin_path),
         "consolidator_version": consolidate.CONSOLIDATOR_VERSION,
         "model": model,
         "used_links": links is not None,

@@ -122,7 +122,10 @@ see what was folded where. Each entity's support (sources taught in,
 references from elsewhere, read from `links.json` beside the facets file or
 `--links`) guides the call: thin entities fold readily, nothing folds into a
 less-supported page, and thin entities with no home are listed at the end of
-the review.
+the review. `thin-review.md`, written beside the facets file, lists every thin
+entity — what was said, which source, and where it ended up — for a private
+scan; give one weight with a note. A rerun with nothing new to decide makes no
+model calls, so it is a free way to refresh both reviews.
 
 ```bash
 doppler run --config prd -- uv run python -m wiki_curator_cog.main consolidate \

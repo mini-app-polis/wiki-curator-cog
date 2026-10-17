@@ -511,3 +511,25 @@ def test_a_facet_through_an_alias_is_not_nested() -> None:
     assert [(f.slug, f.under) for f in merges.facets[_id(ANCHOR)]] == [
         (STATIONARY, None)
     ]
+
+
+def test_thin_review_shows_what_was_said_where_and_where_it_went() -> None:
+    facets = consolidate.FacetsFile()
+    facets.record(STATIONARY, ANCHOR, "", "fake")
+    facets.record(DIRECTIONAL, None, "", "fake")
+    facets.record(ANCHOR, None, "", "fake")
+    supports = consolidate.support(_export())
+    text = consolidate.thin_review_markdown(
+        _export(), facets, supports, {DIRECTIONAL: "Intent kept through the anchor."}
+    )
+    own, folded = text.split("## Folded into a broader page", 1)
+    assert "## On their own page (1)" in own
+    assert "### Anchor with Directional Intent" in own
+    assert "**Definition.** Intent kept through the anchor." in own
+    assert "### Stationary Anchor" in folded
+    assert (
+        "folded into **Anchor** · [concepts/anchor.md](../concepts/anchor.md)" in folded
+    )
+    assert "> Stay over your feet.\n> — 2026-01-01 · lesson" in folded
+    # anchor has two sources: not thin
+    assert "### Anchor\n" not in text

@@ -33,4 +33,5 @@ prose-review*.md
 generate-summary.json
 facets.json
 facets-review*.md
+thin-review.md
 consolidate-summary.json
