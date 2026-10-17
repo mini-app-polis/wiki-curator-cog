@@ -603,3 +603,19 @@ def test_a_failed_batch_is_skipped_and_retried_next_run(catalog: link.Catalog) -
     second = link.run_linking(statements, catalog, links, llm, model="m", batch_size=2)
     assert second["linked"] == 2
     assert second["skipped"] == 2
+
+
+def test_a_stray_field_from_the_model_does_not_reject_the_answer() -> None:
+    from mini_app_polis.llm._json import validate_json
+
+    answer = {
+        "statements": [
+            {
+                "id": "x",
+                "references": [
+                    {"name": "frame", "posture": "assert", "polarity": "assert"}
+                ],
+            }
+        ]
+    }
+    validate_json(answer, link.RESPONSE_SCHEMA)

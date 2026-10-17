@@ -335,16 +335,18 @@ in exactly this shape:
 [{"name": "<concept>", "polarity": "assert"}]}]}
 """
 
+#: Lenient on purpose: a model that adds a stray field to an otherwise good
+#: answer should not cost the whole batch. Only the fields read are required.
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "additionalProperties": False,
+    "additionalProperties": True,
     "required": ["statements"],
     "properties": {
         "statements": {
             "type": "array",
             "items": {
                 "type": "object",
-                "additionalProperties": False,
+                "additionalProperties": True,
                 "required": ["id", "references"],
                 "properties": {
                     "id": {"type": "string"},
@@ -352,7 +354,7 @@ RESPONSE_SCHEMA: dict[str, Any] = {
                         "type": "array",
                         "items": {
                             "type": "object",
-                            "additionalProperties": False,
+                            "additionalProperties": True,
                             "required": ["name", "polarity"],
                             "properties": {
                                 "name": {"type": "string"},

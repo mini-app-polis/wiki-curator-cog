@@ -384,7 +384,7 @@ curly quotes (“ ”) or single quotes instead, so the JSON stays valid.
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "additionalProperties": False,
+    "additionalProperties": True,
     "required": ["definition", "context"],
     "properties": {
         "definition": {"type": "string"},
