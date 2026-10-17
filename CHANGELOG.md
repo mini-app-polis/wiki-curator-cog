@@ -1,3 +1,34 @@
+# [2.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.22...v2.1.0) (2026-10-17)
+
+
+### Bug Fixes
+
+* accept stray fields in model responses instead of rejecting the batch ([96b9587](https://github.com/mini-app-polis/wiki-curator-cog/commit/96b958766e28d634a74cdcbef2cba80afc646c9a))
+* consolidate — explicit fold decision; nest facets in Details ([3539cbb](https://github.com/mini-app-polis/wiki-curator-cog/commit/3539cbb5b090b52fb5809c897007d5b65140f2e1))
+* correct or unlink model-written links that point at no page ([f64c597](https://github.com/mini-app-polis/wiki-curator-cog/commit/f64c5975f3ce6e69e7a2eaeb66739cd9b335ea89))
+* **deps:** bump miniapppolis-common-utils to 6.2.0 ([a573506](https://github.com/mini-app-polis/wiki-curator-cog/commit/a5735060788b1f33c1903f9c66b158cf2f3c552a))
+* hubs converge in one run — cover all pending mentions per call ([054a1de](https://github.com/mini-app-polis/wiki-curator-cog/commit/054a1de5209214b42757cae20c7e60c94763b59a))
+* hubs converge in one run; parse the first JSON object in model responses ([1200a48](https://github.com/mini-app-polis/wiki-curator-cog/commit/1200a48ba01dc9db9884f6d615eed0124ebc16c5))
+* refuse to render an empty export over the wiki ([2c22473](https://github.com/mini-app-polis/wiki-curator-cog/commit/2c22473f122ed94b92164056d74ba448ab25eb1c))
+
+
+### Features
+
+* add local generation (generate mode) and render --prose ([362d443](https://github.com/mini-app-polis/wiki-curator-cog/commit/362d4434ec311c08db873ba088594a5bc5cab330))
+* add local linking pass (link mode) writing references to links.json ([85dd57f](https://github.com/mini-app-polis/wiki-curator-cog/commit/85dd57ffda67075e4afb0a91cf5aee9b2c9f4ebe))
+* add local linking pass (link mode) writing references to links.json ([c99ed7e](https://github.com/mini-app-polis/wiki-curator-cog/commit/c99ed7edc888ac98c9225b6488b56f31f06fce45))
+* add local render mode with link check and corpus quality summary ([66482bc](https://github.com/mini-app-polis/wiki-curator-cog/commit/66482bc7bdf3b44592b42d49fb5c9428aad6fa4c))
+* consolidate — private thin-entity review ([0813361](https://github.com/mini-app-polis/wiki-curator-cog/commit/0813361b436fb720e018d3284ab5c0df8a592b0c))
+* consolidate — weigh support; never fold into a thinner page ([3768571](https://github.com/mini-app-polis/wiki-curator-cog/commit/376857183ca9935cb9b4a8f8cd09c6afc07f5f8c))
+* facet consolidation — fold narrow entities into their broader concept ([136d39b](https://github.com/mini-app-polis/wiki-curator-cog/commit/136d39bfe2b22030b4d9f3185dfde593a15af40d))
+* fixed-shape prose — rewrite, never grow; condense over-shape pages ([8a6ae73](https://github.com/mini-app-polis/wiki-curator-cog/commit/8a6ae738ab4d6b7ad2cc23e821ecdf4d9bb401ff))
+* fold drills and patterns; dry runs and cost reporting ([204ddfc](https://github.com/mini-app-polis/wiki-curator-cog/commit/204ddfce03bc0689540879798af87a9f49eb106d))
+* generate a short definition plus an In practice section ([6d05f66](https://github.com/mini-app-polis/wiki-curator-cog/commit/6d05f66ee5a41c1133dacdc10f34d278fb4d3b50))
+* merge entities a note declares the same (alias_of), at build time ([cb5fc0e](https://github.com/mini-app-polis/wiki-curator-cog/commit/cb5fc0e6f1d38fb203a944e6157e5a514835a12b))
+* overlay linker references on the local render ([bf876c9](https://github.com/mini-app-polis/wiki-curator-cog/commit/bf876c93c3282d5be0b643298237c812409dc5e2))
+* run link and generate calls in parallel (--workers) ([c556d29](https://github.com/mini-app-polis/wiki-curator-cog/commit/c556d29fb9b0fad0873985eff8bb187af5ce7043))
+* show only a count when more than 25 pages reference an entity ([4ed3f5a](https://github.com/mini-app-polis/wiki-curator-cog/commit/4ed3f5a9bde7bedc7c8269e1ddb66248b26cbcf9))
+
 ## [2.0.22](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.21...v2.0.22) (2026-10-16)
 
 
