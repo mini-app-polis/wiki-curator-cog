@@ -228,7 +228,7 @@ def test_render_mode_skips_the_gate_config_and_reporting(
         patch.object(main, "render_local", return_value=_summary(0)) as render,
     ):
         assert main.main(["render"]) == 0
-    render.assert_called_once_with(tmp_path.resolve(), None)
+    render.assert_called_once_with(tmp_path.resolve(), None, None)
     assert json.loads(capsys.readouterr().out) == _summary(0)
 
 

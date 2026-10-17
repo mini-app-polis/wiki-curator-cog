@@ -55,7 +55,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import link
+from . import generate, link
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -211,7 +211,11 @@ def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     }
 
 
-def render_local(wiki_repo_path: Path, links_path: Path | None = None) -> dict:
+def render_local(
+    wiki_repo_path: Path,
+    links_path: Path | None = None,
+    prose_path: Path | None = None,
+) -> dict:
     """Render into an existing local clone. No clone, commit, push or report.
 
     The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
@@ -249,6 +253,17 @@ def render_local(wiki_repo_path: Path, links_path: Path | None = None) -> dict:
             "proposed_pages": ostats.proposed_pages,
         }
 
+    prose_summary: dict | None = None
+    if prose_path is not None:
+        if not prose_path.exists():
+            raise RuntimeError(f"prose file not found: {prose_path}")
+        prose = generate.ProseFile.load(prose_path)
+        export = generate.apply_prose(export, prose)
+        prose_summary = {
+            "file": str(prose_path),
+            "overviews": sum(1 for e in export.entities if e.overview_md.strip()),
+        }
+
     bundle, stats = render_bundle(export, rendered_at=dt.date.today(), overlay=overlay)
     bundle.pop("log.md", None)
 
@@ -274,6 +289,7 @@ def render_local(wiki_repo_path: Path, links_path: Path | None = None) -> dict:
         "dropped": [{"reason": r, "reference": ref} for r, ref in stats.dropped],
         "quality": corpus_quality(export, build_indexes(export)),
         "links": overlay_summary,
+        "prose": prose_summary,
     }
     LOG.info(
         "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",
@@ -350,6 +366,72 @@ def link_local(
         summary["references"],
         len(summary["new_concepts"]),
     )
+    return summary
+
+
+def generate_local(
+    prose_path: Path,
+    *,
+    links_path: Path | None = None,
+    wiki_repo_path: Path | None = None,
+    entities: list[str] | None = None,
+    sample: int | None = None,
+) -> dict:
+    """Run generation locally: overviews to a JSON file, nothing to the API.
+
+    ADR-005 / MINI-86, local half. Reads the export (read-only) and, when
+    given, the links file — for the concepts it proposed and the statements
+    that refer to each entity. ``wiki_repo_path`` is where the current pages
+    are read from, so an overview edited on the page becomes the base. Saves
+    after every entity, and writes a readable review next to the prose file.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+
+    overlay = None
+    links = None
+    if links_path is not None and links_path.exists():
+        links = link.LinksFile.load(links_path)
+        export, overlay, _ = link.build_overlay(export, links)
+
+    corpus = generate.build_corpus(export, overlay, links)
+    prose = generate.ProseFile.load(prose_path)
+    chosen = generate.choose_entities(
+        corpus, prose, slugs=entities or (), sample=sample
+    )
+    llm, model = link.llm_from_env()
+
+    LOG.info(
+        "generate.start entities=%s model=%s file=%s links=%s",
+        len(chosen),
+        model,
+        prose_path,
+        links_path if links is not None else None,
+    )
+    counts = generate.run_generation(
+        chosen,
+        corpus,
+        prose,
+        llm,
+        model=model,
+        wiki_repo_path=wiki_repo_path,
+        on_entity=lambda: prose.save(prose_path),
+    )
+    prose.save(prose_path)
+
+    slugs = [e.slug for e in chosen]
+    review_path = prose_path.with_name(prose_path.stem + "-review.md")
+    review_path.write_text(generate.review_markdown(prose, slugs))
+    summary = {
+        "prose_file": str(prose_path),
+        "review_file": str(review_path),
+        "generator_version": generate.GENERATOR_VERSION,
+        "model": model,
+        "used_links": links is not None,
+        **counts,
+        "slugs": slugs,
+    }
+    LOG.info("generate.complete %s", counts)
     return summary
 
 

@@ -145,9 +145,12 @@ superseded. Newer evidence wins.
 - **A per-entity watermark** records which statements have been integrated.
   A re-run never integrates the same statement twice, and an entity with
   nothing new costs no LLM call.
-- **Human edits are dated inputs**, not locks. An edit counts as a correction
-  made on its date; a later lesson that contradicts it can win, as it would
-  over an older lesson.
+- **The page is the base.** Nobody is expected to own or maintain the prose
+  (2026-10-16): corrections normally arrive as notes. Editing a page is
+  optional. When a page's overview differs from every overview this pass
+  wrote, it was edited; the edit is kept as a revision and becomes the base.
+  Edits are dated inputs, not locks — a later lesson that contradicts one can
+  win, as it would over an older lesson.
 - **Rebuild from scratch** stays available: regenerate an entity from all its
   statements with past human edits fed in as dated notes. It is the escape
   hatch for drift, and the way to produce a variant from a subset of sources.
@@ -161,10 +164,11 @@ Generated prose and every revision of it live in `api-kaianolevine-com`: the
 text, who changed it (LLM or human), when, and for LLM revisions the model and
 prompt version. That revision history is the version control.
 
-During the proof of concept the wiki repo stays as the reading, editing and
-diffing surface. Before each run the cog compares each page's prose with what
-it last wrote; a difference is a human edit, saved to the API as a revision
-dated to its commit, and integrated on top of. Once the website exists it
+During the proof of concept the wiki repo stays as the reading and diffing
+surface, and the place an occasional edit would be made. Before generating an
+entity the cog reads the page's overview; one it never wrote is an edit,
+saved as a revision and integrated on top of. Locally the revisions live in
+`prose.json`; the API takes them over in the durable half. Once the website exists it
 writes edits to the API directly and this sync step goes away. Branch review
 is not required.
 

@@ -1,0 +1,367 @@
+"""Generation, local half (ADR-005, MINI-86).
+
+The model is faked. These pin what generation does around it: which
+evidence an entity gets, the watermark, the page as the base, and the
+render of the result.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import uuid
+from pathlib import Path
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+from mini_app_polis.llm import LLMResult
+
+import wiki_curator_cog.flow as flow
+import wiki_curator_cog.main as main
+from wiki_curator_cog import generate, link
+from wiki_curator_cog import markdown_utils as md
+from wiki_curator_cog.render import render_bundle
+
+from .export_builders import (
+    WcsAttribution,
+    WcsDefinition,
+    WcsEntity,
+    WcsInstructor,
+    WcsSource,
+    WcsWikiExport,
+)
+
+
+def _id(name: str) -> uuid.UUID:
+    return uuid.uuid5(uuid.NAMESPACE_DNS, name)
+
+
+def _source(name: str, day: dt.date) -> Any:
+    return WcsSource(
+        id=_id(f"s-{name}"),
+        transcript_id=_id(f"t-{name}"),
+        title=name,
+        session_date=day,
+        session_type="private_lesson",
+        instructors_raw=["Kaiano"],
+        visibility="private",
+        is_default_visible=False,
+        created_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+    )
+
+
+def _export() -> WcsWikiExport:
+    anchor = WcsEntity(
+        id=_id("anchor-step"),
+        slug="anchor-step",
+        canonical_name="Anchor Step",
+        kind="technique",
+    )
+    stretch = WcsEntity(
+        id=_id("stretch"), slug="stretch", canonical_name="Stretch", kind="concept"
+    )
+    old, new = _source("Old", dt.date(2025, 1, 1)), _source("New", dt.date(2026, 6, 1))
+    robert = WcsInstructor(
+        id=_id("robert"), slug="robert-royston", canonical_name="Robert Royston"
+    )
+    return WcsWikiExport(
+        entities=[anchor, stretch],
+        instructors=[robert],
+        sources=[old, new],
+        attributions=[
+            WcsAttribution(
+                id=_id("a-old"),
+                source_id=old.id,
+                entity_id=anchor.id,
+                attribution_kind="taught",
+                prose="The anchor travels backward.",
+            ),
+            WcsAttribution(
+                id=_id("a-new"),
+                source_id=new.id,
+                entity_id=anchor.id,
+                instructor_id=robert.id,
+                attribution_kind="taught",
+                prose="The anchor is an arrival, with stretch in the connection.",
+            ),
+        ],
+        definitions=[
+            WcsDefinition(
+                id=_id("d-stretch"),
+                source_id=new.id,
+                entity_id=stretch.id,
+                term="Stretch",
+                definition="Elastic tension between partners.",
+            )
+        ],
+    )
+
+
+def _links(export: WcsWikiExport) -> link.LinksFile:
+    """The new anchor statement mentions stretch and connection (proposed)."""
+    links = link.LinksFile()
+    statement = next(
+        s
+        for s in link.collect_statements(export)
+        if s.key == f"attribution:{_id('a-new')}"
+    )
+    links.record(
+        statement,
+        [
+            link.Reference("stretch", "stretch", str(_id("stretch")), "assert"),
+            link.Reference("connection", "connection", None, "assert"),
+        ],
+        "m",
+    )
+    return links
+
+
+class FakeLLM:
+    """Returns an overview naming the statement ids it was given."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        user = messages[-1].content
+        statements = json.loads(
+            user.split("New statements (JSON, newest first):\n", 1)[1]
+        )
+        base = user.split("Current overview:\n", 1)[1].split("\n\nNew statements", 1)[0]
+        self.calls.append({"base": base, "statements": statements})
+        text = f"Overview from {len(statements)} statements."
+        return LLMResult("fake", "fake", {"overview": text}, "")
+
+
+def _corpus_and_overlay():
+    export = _export()
+    links = _links(export)
+    augmented, overlay, _ = link.build_overlay(export, links)
+    return augmented, generate.build_corpus(augmented, overlay, links)
+
+
+# ── evidence ──
+
+
+def test_own_and_referring_evidence_are_gathered() -> None:
+    _, corpus = _corpus_and_overlay()
+
+    assert {e.key for e in corpus.own["anchor-step"]} == {
+        f"attribution:{_id('a-old')}",
+        f"attribution:{_id('a-new')}",
+    }
+    # stretch is mentioned by the anchor statement; connection exists only
+    # because the linker proposed it, and still gets its evidence.
+    assert [e.subject for e in corpus.referring["stretch"]] == [
+        "[[techniques/anchor-step]]"
+    ]
+    assert [e.role for e in corpus.referring["connection"]] == ["refers"]
+
+
+def test_evidence_carries_teacher_date_and_source_link() -> None:
+    _, corpus = _corpus_and_overlay()
+    new = next(e for e in corpus.own["anchor-step"] if "arrival" in e.text)
+    old = next(e for e in corpus.own["anchor-step"] if "backward" in e.text)
+
+    assert new.teacher == "Robert Royston"
+    assert old.teacher == "Kaiano"  # no instructor id: the source's instructors
+    assert new.date == "2026-06-01"
+    assert new.as_prompt()["source"].startswith("[[sources/2026-06-01")
+
+
+def test_a_denied_reference_is_not_evidence() -> None:
+    export = _export()
+    links = _links(export)
+    # A newer statement about anchor step denies its link to stretch.
+    newer = link.Statement(
+        kind="attribution",
+        id=_id("a-deny"),
+        subject_id=_id("anchor-step"),
+        subject_slug="anchor-step",
+        source_id=None,
+        session_date=dt.date(2027, 1, 1),
+        text="Anchor step has nothing to do with stretch.",
+    )
+    links.record(
+        newer, [link.Reference("stretch", "stretch", str(_id("stretch")), "deny")], "m"
+    )
+    augmented, overlay, _ = link.build_overlay(export, links)
+    corpus = generate.build_corpus(augmented, overlay, links)
+
+    assert "stretch" not in corpus.referring
+
+
+def test_evidence_is_newest_first_and_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, corpus = _corpus_and_overlay()
+    monkeypatch.setattr(generate, "MAX_OWN_STATEMENTS", 1)
+    entity = corpus.entities["anchor-step"]
+
+    pending = generate.pending(entity, corpus, generate.ProseFile())
+
+    assert [e.date for e in pending] == ["2026-06-01"]
+
+
+# ── a run, and the watermark ──
+
+
+def test_a_run_integrates_then_skips_until_there_is_something_new(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, corpus = _corpus_and_overlay()
+    monkeypatch.setattr(generate, "MAX_OWN_STATEMENTS", 1)
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+    anchor = corpus.entities["anchor-step"]
+
+    generate.run_generation([anchor], corpus, prose, llm, model="m", today="2026-10-16")
+    assert prose.prose("anchor-step") == "Overview from 1 statements."
+    assert llm.calls[0]["base"] == "(empty)"
+
+    # the capped-out older statement comes next, on top of the first overview
+    generate.run_generation([anchor], corpus, prose, llm, model="m", today="2026-10-16")
+    assert llm.calls[1]["base"] == "Overview from 1 statements."
+    assert [s["date"] for s in llm.calls[1]["statements"]] == ["2025-01-01"]
+
+    # nothing left: no call
+    result = generate.run_generation([anchor], corpus, prose, llm, model="m")
+    assert result == {"entities": 1, "generated": 0}
+    assert len(llm.calls) == 2
+
+
+def test_a_new_version_regenerates_from_scratch() -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+    anchor = corpus.entities["anchor-step"]
+    generate.run_generation([anchor], corpus, prose, llm, model="m")
+
+    with patch.object(generate, "GENERATOR_VERSION", "next"):
+        generate.run_generation([anchor], corpus, prose, llm, model="m")
+
+    assert llm.calls[1]["base"] == "(empty)"
+    assert len(llm.calls[1]["statements"]) == 2
+
+
+# ── the page is the base ──
+
+
+def _write_page(wiki: Path, rel: str, overview: str) -> None:
+    page = md.Page(frontmatter={"slug": rel})
+    page.set_section("Overview", [overview])
+    (wiki / rel).parent.mkdir(parents=True, exist_ok=True)
+    (wiki / rel).write_text(md.serialize(page))
+
+
+def test_an_overview_edited_on_the_page_becomes_the_base(tmp_path: Path) -> None:
+    export = _export()
+    corpus = generate.build_corpus(export)
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+    anchor = corpus.entities["anchor-step"]
+    _write_page(
+        tmp_path, "techniques/anchor-step.md", "Hand-written: the anchor is an arrival."
+    )
+
+    generate.run_generation(
+        [anchor], corpus, prose, llm, model="m", wiki_repo_path=tmp_path
+    )
+
+    assert llm.calls[0]["base"] == "Hand-written: the anchor is an arrival."
+    bys = [r["by"] for r in prose.entities["anchor-step"]["revisions"]]
+    assert bys == ["page", "llm"]
+
+
+def test_a_page_showing_our_own_older_overview_is_not_an_edit(tmp_path: Path) -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+    anchor = corpus.entities["anchor-step"]
+    with patch.object(generate, "MAX_OWN_STATEMENTS", 1):
+        generate.run_generation([anchor], corpus, prose, llm, model="m")
+    # the page was rendered from that first overview, then generation ran again
+    _write_page(tmp_path, "techniques/anchor-step.md", prose.prose("anchor-step"))
+
+    generate.run_generation(
+        [anchor], corpus, prose, llm, model="m", wiki_repo_path=tmp_path
+    )
+
+    assert [r["by"] for r in prose.entities["anchor-step"]["revisions"]] == [
+        "llm",
+        "llm",
+    ]
+
+
+# ── choosing entities ──
+
+
+def test_named_entities_and_unknown_slugs() -> None:
+    _, corpus = _corpus_and_overlay()
+    chosen = generate.choose_entities(
+        corpus, generate.ProseFile(), slugs=["connection"]
+    )
+    assert [e.slug for e in chosen] == ["connection"]
+    with pytest.raises(RuntimeError, match="nope"):
+        generate.choose_entities(corpus, generate.ProseFile(), slugs=["nope"])
+
+
+def test_a_sample_is_reproducible_and_only_pending() -> None:
+    _, corpus = _corpus_and_overlay()
+    a = generate.choose_entities(corpus, generate.ProseFile(), sample=2, seed=3)
+    b = generate.choose_entities(corpus, generate.ProseFile(), sample=2, seed=3)
+    assert [e.slug for e in a] == [e.slug for e in b]
+    assert len(a) == 2
+
+
+# ── render ──
+
+
+def test_generated_prose_renders_as_the_overview() -> None:
+    augmented, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    generate.run_generation(
+        [corpus.entities["connection"]], corpus, prose, FakeLLM(), model="m"
+    )
+
+    bundle, _ = render_bundle(
+        generate.apply_prose(augmented, prose), rendered_at=dt.date(2026, 10, 16)
+    )
+
+    page = md.parse(bundle["concepts/connection.md"])
+    assert page.get_section("Overview") == ["Overview from 1 statements."]
+
+
+def test_generate_local_end_to_end(tmp_path: Path) -> None:
+    export = _export()
+    links_path = tmp_path / "links.json"
+    _links(export).save(links_path)
+    prose_path = tmp_path / "prose.json"
+
+    with (
+        patch.object(flow, "_fetch_export", return_value=export),
+        patch.object(link, "llm_from_env", return_value=(FakeLLM(), "fake/m")),
+    ):
+        summary = flow.generate_local(
+            prose_path, links_path=links_path, entities=["connection"]
+        )
+
+    assert summary["generated"] == 1
+    assert summary["used_links"] is True
+    assert generate.ProseFile.load(prose_path).prose("connection")
+    assert (tmp_path / "prose-review.md").exists()
+
+
+def test_generate_mode_passes_its_arguments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with patch.object(main, "generate_local", return_value={"generated": 0}) as run:
+        assert (
+            main.main(["generate", "--entity", "connection", "--entity", "anchor"]) == 0
+        )
+    kwargs = run.call_args.kwargs
+    assert kwargs["entities"] == ["connection", "anchor"]
+    assert kwargs["wiki_repo_path"] == tmp_path.resolve()
+    assert kwargs["links_path"].name == "links.json"

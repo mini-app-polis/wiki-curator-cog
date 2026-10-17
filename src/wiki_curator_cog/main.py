@@ -46,7 +46,13 @@ from mini_app_polis.environment import Environment, current_environment
 
 from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
-from wiki_curator_cog.flow import REPO, export_run, link_local, render_local
+from wiki_curator_cog.flow import (
+    REPO,
+    export_run,
+    generate_local,
+    link_local,
+    render_local,
+)
 
 LOG = log.get_logger()
 
@@ -91,7 +97,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "mode",
         nargs="?",
         default=None,
-        choices=["export", "render", "link"],
+        choices=["export", "render", "link", "generate"],
         help=(
             "Optional. 'export' asks for a run outright; omitting it defers "
             "to RUN_ON_START. 'render' is the local proof-of-concept loop. "
@@ -106,7 +112,27 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--links",
         default=None,
-        help="render: overlay the references in this links file (from `link`).",
+        help=(
+            "render / generate: the links file from `link` — overlaid on the "
+            "render; used by generate for proposed concepts and referring "
+            "statements."
+        ),
+    )
+    parser.add_argument(
+        "--prose",
+        default=None,
+        help="render: put the overviews from this prose file (from `generate`) on the pages.",
+    )
+    parser.add_argument(
+        "--prose-file",
+        default="prose.json",
+        help="generate: the overviews file, and the watermark (default prose.json).",
+    )
+    parser.add_argument(
+        "--entity",
+        action="append",
+        default=None,
+        help="generate: an entity slug to generate; repeat for several.",
     )
     parser.add_argument(
         "--sample",
@@ -143,7 +169,9 @@ def _auto_run_enabled() -> bool:
     return current_environment() is Environment.PRODUCTION
 
 
-def _render(wiki_repo_path_raw: str, links: str | None = None) -> int:
+def _render(
+    wiki_repo_path_raw: str, links: str | None = None, prose: str | None = None
+) -> int:
     """The local loop: render into a clone, print what it found.
 
     Exits non-zero when any link has no page, after writing, so the result
@@ -156,7 +184,8 @@ def _render(wiki_repo_path_raw: str, links: str | None = None) -> int:
         return 2
     wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
     links_path = Path(links).expanduser().resolve() if links else None
-    summary = render_local(wiki_repo_path, links_path)
+    prose_path = Path(prose).expanduser().resolve() if prose else None
+    summary = render_local(wiki_repo_path, links_path, prose_path)
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 1 if summary["broken_links"]["count"] else 0
 
@@ -171,14 +200,31 @@ def _link(args: argparse.Namespace) -> int:
     return 0
 
 
+def _generate(args: argparse.Namespace) -> int:
+    """Local generation: overviews to a file, a summary to stdout."""
+    wiki = os.getenv("WIKI_REPO_PATH", "").strip()
+    links = args.links or "links.json"
+    summary = generate_local(
+        Path(args.prose_file).expanduser().resolve(),
+        links_path=Path(links).expanduser().resolve(),
+        wiki_repo_path=Path(wiki).expanduser().resolve() if wiki else None,
+        entities=args.entity,
+        sample=args.sample,
+    )
+    sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run one export, a local render or a local linking pass; return the exit code."""
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.mode == "render":
-        return _render(os.getenv("WIKI_REPO_PATH", ""), args.links)
+        return _render(os.getenv("WIKI_REPO_PATH", ""), args.links, args.prose)
     if args.mode == "link":
         return _link(args)
+    if args.mode == "generate":
+        return _generate(args)
 
     # Before load_config, so a container that is not going to do anything
     # exits cleanly whether or not its secrets are in place.

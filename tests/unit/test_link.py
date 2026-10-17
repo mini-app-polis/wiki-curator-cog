@@ -577,4 +577,6 @@ def test_render_mode_passes_the_links_file(
         main, "render_local", return_value={"broken_links": {"count": 0}}
     ) as run:
         assert main.main(["render", "--links", str(tmp_path / "l.json")]) == 0
-    run.assert_called_once_with(tmp_path.resolve(), (tmp_path / "l.json").resolve())
+    run.assert_called_once_with(
+        tmp_path.resolve(), (tmp_path / "l.json").resolve(), None
+    )

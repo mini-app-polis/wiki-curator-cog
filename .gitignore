@@ -28,3 +28,5 @@ render-summary.json
 links.json
 links-review*.md
 link-summary.json
+prose.json
+prose-review.md

@@ -122,6 +122,27 @@ doppler run --config prd -- uv run python -m wiki_curator_cog.main link --sample
 Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
 `LLM_MODEL` overrides the model.
 
+### Generate overviews locally (ADR-005, MINI-86)
+
+Generation, local half: for each entity, an LLM is given the page's current
+overview and the statements not yet integrated into it — the entity's own,
+plus the statements that refer to it from `links.json` — and returns the
+updated overview, newest statements winning. Results go to `prose.json`
+(also the watermark: an entity with nothing new costs no call), with a
+readable `prose-review.md` beside it. Nothing goes to the API.
+
+```bash
+# named entities, or --sample N for a reproducible spread across kinds
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --entity connection --entity anchor-step
+
+# then put the overviews on the pages (with the link overlay)
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json --prose prose.json > render-summary.json
+```
+
+The page is the base: if an overview was edited on the page, the next run
+builds on the edit rather than replacing it. Editing is optional —
+corrections normally arrive as notes.
+
 ### Run an export locally
 
 `WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the
