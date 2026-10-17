@@ -1,3 +1,10 @@
+## [2.3.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.0...v2.3.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **ci:** deploy the release tag when a re-run finds it on main's tip (MINI-95) ([ebcfd86](https://github.com/mini-app-polis/wiki-curator-cog/commit/ebcfd86a9c41c859909b070025db0cd5210289e0))
+
 # [2.3.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.2.0...v2.3.0) (2026-10-17)
 
 
