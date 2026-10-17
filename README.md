@@ -105,6 +105,12 @@ wins — a later denial removes a link:
 WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json > render-summary.json
 ```
 
+**Identity fixes.** If a note says two names are the same thing (an
+`alias_of` relation), every local mode builds with them merged: the
+preferred entity absorbs the other's content and lists its name as an alias,
+and the other page goes. A newer `distinct_from` splits them again. Nothing
+upstream changes; `render-summary.json` lists the merges under `merged`.
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts

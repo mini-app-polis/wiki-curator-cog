@@ -55,7 +55,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import generate, link
+from . import generate, identity, link
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -236,6 +236,7 @@ def render_local(
 
     export = _fetch_export()
     _require_corpus(export)
+    export, merges = identity.resolve(export)
 
     overlay = None
     overlay_summary: dict | None = None
@@ -243,7 +244,7 @@ def render_local(
         if not links_path.exists():
             raise RuntimeError(f"links file not found: {links_path}")
         export, overlay, ostats = link.build_overlay(
-            export, link.LinksFile.load(links_path)
+            export, link.LinksFile.load(links_path), merges
         )
         overlay_summary = {
             "file": str(links_path),
@@ -295,6 +296,7 @@ def render_local(
         "quality": corpus_quality(export, build_indexes(export)),
         "links": overlay_summary,
         "prose": prose_summary,
+        "merged": dict(sorted(merges.by_slug.items())),
     }
     LOG.info(
         "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",
@@ -323,6 +325,9 @@ def link_local(
     """
     export = _fetch_export()
     _require_corpus(export)
+    # Link against the merged corpus, so a merged-away name resolves to its
+    # preferred entity rather than being proposed as a new concept.
+    export, _ = identity.resolve(export)
 
     statements = link.collect_statements(export)
     chosen = (
@@ -393,13 +398,14 @@ def generate_local(
     export = _fetch_export()
     _require_corpus(export)
 
+    export, merges = identity.resolve(export)
     overlay = None
     links = None
     if links_path is not None and links_path.exists():
         links = link.LinksFile.load(links_path)
-        export, overlay, _ = link.build_overlay(export, links)
+        export, overlay, _ = link.build_overlay(export, links, merges)
 
-    corpus = generate.build_corpus(export, overlay, links)
+    corpus = generate.build_corpus(export, overlay, links, merges)
     prose = generate.ProseFile.load(prose_path)
     chosen = generate.choose_entities(
         corpus, prose, slugs=entities or (), sample=sample

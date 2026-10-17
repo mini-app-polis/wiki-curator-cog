@@ -136,6 +136,7 @@ def build_corpus(
     export: WcsWikiExport,
     overlay: LinkOverlay | None = None,
     links: link.LinksFile | None = None,
+    merges: Any = None,
 ) -> Corpus:
     """Group every statement under the entities it is evidence for.
 
@@ -146,6 +147,11 @@ def build_corpus(
     """
     indexes = build_indexes(export)
     by_slug = {e.slug: e for e in export.entities}
+    corpus_entities = dict(by_slug)
+    if merges:
+        for old_slug, new_slug in merges.by_slug.items():
+            if new_slug in by_slug:
+                by_slug[old_slug] = by_slug[new_slug]
     instructor_ids = _instructor_ids(export)
     statements = link.collect_statements(export)
     by_key = {s.key: s for s in statements}
@@ -163,7 +169,7 @@ def build_corpus(
             text=s.text,
         )
 
-    corpus = Corpus(entities=by_slug)
+    corpus = Corpus(entities=corpus_entities)
     for s in statements:
         corpus.own.setdefault(s.subject_slug, []).append(evidence(s, "about"))
 

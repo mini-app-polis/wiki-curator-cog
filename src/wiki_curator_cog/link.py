@@ -652,7 +652,9 @@ class OverlayStats:
 
 
 def build_overlay(
-    export: WcsWikiExport, links: LinksFile
+    export: WcsWikiExport,
+    links: LinksFile,
+    merges: Any = None,
 ) -> tuple[WcsWikiExport, LinkOverlay, OverlayStats]:
     """Settle the links file into an overlay, and the export it renders over.
 
@@ -662,9 +664,21 @@ def build_overlay(
     two. A pair whose winner is a denial is dropped. Targets with no entity
     become proposed concepts, added to the returned export so they get pages
     and index entries like any other entity.
+
+    ``merges`` (from :mod:`wiki_curator_cog.identity`) redirects references
+    to and from merged-away entities onto their preferred entity; ``export``
+    is then the merged export.
     """
     by_id = {str(e.id): e for e in export.entities}
     by_slug = {e.slug: e for e in export.entities}
+    if merges:
+        for old_id, new_id in merges.by_id.items():
+            target = by_id.get(str(new_id))
+            if target is not None:
+                by_id[str(old_id)] = target
+        for old_slug, new_slug in merges.by_slug.items():
+            if new_slug in by_slug:
+                by_slug[old_slug] = by_slug[new_slug]
     proposed: dict[str, WcsEntity] = {}
     events: dict[tuple[uuid.UUID, uuid.UUID], list[tuple[str, int, str]]] = {}
     stats = OverlayStats()
