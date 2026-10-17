@@ -129,6 +129,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="generate: the overviews file, and the watermark (default prose.json).",
     )
     parser.add_argument(
+        "--condense",
+        action="store_true",
+        help="generate: only rewrite pages whose prose has outgrown the fixed shape.",
+    )
+    parser.add_argument(
         "--entity",
         action="append",
         default=None,
@@ -221,6 +226,7 @@ def _generate(args: argparse.Namespace) -> int:
         wiki_repo_path=Path(wiki).expanduser().resolve() if wiki else None,
         entities=args.entity,
         sample=args.sample,
+        condense=args.condense,
         **({"workers": args.workers} if args.workers is not None else {}),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")

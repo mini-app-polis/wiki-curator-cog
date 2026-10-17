@@ -432,7 +432,6 @@ def test_the_prompt_asks_for_a_short_definition_and_separate_context() -> None:
     assert "at most about 40 words" in generate.SYSTEM_PROMPT.replace("\n", " ")
     assert generate.RESPONSE_SCHEMA["required"] == ["definition", "context"]
     flat = generate.SYSTEM_PROMPT.replace("\\\n", " ").replace("\n", " ")
-    assert "One paragraph, at most about 80 words" in flat
     assert "See also" in flat
 
 
@@ -570,3 +569,88 @@ def test_a_page_showing_repaired_links_is_not_mistaken_for_an_edit(
         "llm",
         "llm",
     ]
+
+
+# ── the fixed shape ──
+
+
+def test_over_shape_counts_words_and_sentences_not_links() -> None:
+    short = (
+        "It works like this. People get it wrong. It connects to [[concepts/frame]]."
+    )
+    assert not generate.over_shape("A stop.", short)
+    assert generate.over_shape("A stop.", short + " A fourth sentence.")
+    assert generate.over_shape("word " * 60, "")
+    # a citation does not count as a sentence
+    assert not generate.over_shape("A stop.", "One point ([[sources/x]]). Two. Three.")
+
+
+class LongThenShortLLM(FakeLLM):
+    """The first answer is over shape; a condense call returns a short one."""
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        if messages[0].content == generate.CONDENSE_PROMPT:
+            self.calls.append({"condense": True})
+            return LLMResult(
+                "fake", "fake", {"definition": "Short.", "context": "One. Two."}, ""
+            )
+        self.calls.append({"condense": False})
+        long = " ".join(f"Sentence {i}." for i in range(6))
+        return LLMResult("fake", "fake", {"definition": "Short.", "context": long}, "")
+
+
+def test_an_over_shape_answer_is_condensed_before_it_is_stored() -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    llm = LongThenShortLLM()
+
+    generate.run_generation(
+        [corpus.entities["anchor-step"]], corpus, prose, llm, model="m"
+    )
+
+    assert [c["condense"] for c in llm.calls] == [False, True]
+    assert prose.context("anchor-step") == "One. Two."
+
+
+def test_condense_rewrites_only_pages_over_shape_and_keeps_the_watermark() -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    for slug, context in [
+        ("anchor-step", " ".join(f"S{i}." for i in range(8))),
+        ("stretch", "Fine."),
+    ]:
+        prose.entities[slug] = {
+            "generator_version": generate.GENERATOR_VERSION,
+            "definition": "Def.",
+            "context": context,
+            "integrated": ["k1"],
+            "revisions": [],
+        }
+    llm = LongThenShortLLM()
+
+    result = generate.run_condense(corpus, prose, llm, model="m")
+
+    assert result["slugs"] == ["anchor-step"]
+    assert prose.context("anchor-step") == "One. Two."
+    assert prose.context("stretch") == "Fine."
+    assert prose.integrated("anchor-step") == {"k1"}
+    assert prose.entities["anchor-step"]["revisions"][-1]["statements"] == 0
+
+
+def test_the_prompt_fixes_the_shape_and_rewrites_rather_than_appends() -> None:
+    flat = " ".join(generate.SYSTEM_PROMPT.replace("\\\n", " ").split())
+    assert "At most three sentences" in flat
+    assert "It never grows" in flat
+    assert "a draft to improve" in flat
+
+
+def test_generate_mode_passes_condense(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with patch.object(main, "generate_local", return_value={}) as run:
+        assert main.main(["generate", "--condense", "--workers", "8"]) == 0
+    assert run.call_args.kwargs["condense"] is True
+    assert run.call_args.kwargs["workers"] == 8

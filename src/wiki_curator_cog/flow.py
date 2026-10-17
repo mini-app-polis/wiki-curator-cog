@@ -389,8 +389,12 @@ def generate_local(
     entities: list[str] | None = None,
     sample: int | None = None,
     workers: int = generate.DEFAULT_WORKERS,
+    condense: bool = False,
 ) -> dict:
     """Run generation locally: overviews to a JSON file, nothing to the API.
+
+    With ``condense``, no new evidence is integrated: only pages whose prose
+    has outgrown the fixed shape are rewritten to fit it.
 
     ADR-005 / MINI-86, local half. Reads the export (read-only) and, when
     given, the links file — for the concepts it proposed and the statements
@@ -410,6 +414,31 @@ def generate_local(
 
     corpus = generate.build_corpus(export, overlay, links, merges)
     prose = generate.ProseFile.load(prose_path)
+    if condense:
+        llm, model = link.llm_from_env()
+        counts = generate.run_condense(
+            corpus,
+            prose,
+            llm,
+            model=model,
+            workers=workers,
+            on_entity=lambda: prose.save(prose_path),
+        )
+        prose.save(prose_path)
+        review_path = prose_path.with_name(prose_path.stem + "-review.md")
+        review_path.write_text(generate.review_markdown(prose, counts["slugs"]))
+        LOG.info(
+            "condense.complete over_shape=%s condensed=%s",
+            counts["over_shape"],
+            counts["condensed"],
+        )
+        return {
+            "prose_file": str(prose_path),
+            "review_file": str(review_path),
+            "model": model,
+            **counts,
+        }
+
     chosen = generate.choose_entities(
         corpus, prose, slugs=entities or (), sample=sample
     )

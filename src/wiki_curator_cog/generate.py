@@ -61,6 +61,13 @@ LOG = log.get_logger()
 #: from scratch. Entities generated under another version start over.
 GENERATOR_VERSION = "4"
 
+#: The shape the prose must keep (prompt revision 4.1, 2026-10-16). Over
+#: these limits a result gets one condense call before it is stored. Word
+#: counts are generous: the prompt asks for ~40 and ~80.
+DEFINITION_MAX_WORDS = 55
+CONTEXT_MAX_WORDS = 100
+CONTEXT_MAX_SENTENCES = 3
+
 #: Attempts per entity before it is skipped for this run. A malformed
 #: response is usually a one-off; a second failure is reported, and the
 #: entity stays pending for the next run.
@@ -412,24 +419,32 @@ good glossary entry: one or two plain sentences, at most about 40 words, \
 saying what it is. No citations, no links, no history, no advice, no \
 qualifications.
 
-context — optional, shown lower on the page under "In practice". Only the \
-few points a dancer most needs beyond the definition: how it works or is \
-done, the key thing people get wrong and what is right instead, how it \
-connects to the bigger ideas. One paragraph, at most about 80 words. Leave \
-it as an empty string when there is nothing worth adding — common for thin \
-entities.
+context — optional, shown lower on the page under "In practice". At most \
+three sentences, about 80 words in all, one paragraph. Each sentence has a \
+job: how it works or is done; the key thing people get wrong and what is \
+right instead; how it connects to the bigger ideas. Use fewer when there is \
+less to say, and an empty string when there is nothing worth adding — \
+common for thin entities.
+
+The shape is fixed. It never grows: the page gets better, not longer.
 
 You are given the current definition and context (possibly empty) and new \
-statements from lessons and notes. Return the updated pair.
+statements from lessons and notes. Return the best version of both, in \
+that shape, using the current text and the new statements together. The \
+current text is a draft to improve, not to preserve word for word: sharpen \
+it, replace a weaker point with a stronger one, merge two points into one \
+sentence. A new point gets in only by being more useful than something \
+already there. If the new statements add nothing useful, return the current \
+text unchanged.
 
 Voice: an experienced dancer explaining to another dancer. Synthesise in \
 your own words; do not paraphrase lesson by lesson or recount who said what. \
 Short sentences, everyday language, no hedging, no filler. Shorter is better.
 
 Rules:
-- Keep what the current text says unless new statements contradict it or \
-add something that matters; you are revising, not starting over. Most new \
-statements will not change a good definition.
+- Do not drop a point the current text makes unless a better one replaces \
+it or a newer statement contradicts it. Most new statements will not change \
+a good definition.
 - Newer statements win. If a newer one contradicts an older idea, state the \
 newer idea; mention the change only if it is itself worth knowing.
 - Name a teacher only when teachers genuinely disagree.
@@ -460,6 +475,61 @@ RESPONSE_SCHEMA: dict[str, Any] = {
         "context": {"type": "string"},
     },
 }
+
+
+CONDENSE_PROMPT = """\
+You tighten one page of a West Coast Swing (WCS) wiki that has grown past \
+its shape. Rewrite the definition and context below to fit it, keeping the \
+most useful points and their citations and links, adding nothing new.
+
+definition — one or two plain sentences, at most about 40 words; no \
+citations or links.
+context — at most three sentences, about 80 words, one paragraph: how it \
+works or is done; the key mistake and what is right instead; how it \
+connects to the bigger ideas. Merge or drop the weaker points to fit.
+
+Keep the same voice: an experienced dancer explaining to another dancer. \
+Output ONLY valid JSON, exactly {"definition": "...", "context": "..."}. \
+Inside the text never use the straight double-quote character; use curly \
+quotes or single quotes.
+"""
+
+_SENTENCE_END = re.compile(r"[.!?](?:[)\]”’'\"]*)(?=\s+[A-Z(\[“‘]|\s*$)")
+
+
+def _sentences(text: str) -> int:
+    """Roughly how many sentences ``text`` has; links and citations ignored."""
+    plain = re.sub(r"\(\[\[[^)]*\]\]\)", "", text)
+    plain = re.sub(r"\[\[[^\]|]*\|?([^\]]*)\]\]", r"\1", plain).strip()
+    return len(_SENTENCE_END.findall(plain)) if plain else 0
+
+
+def over_shape(definition: str, context: str) -> bool:
+    """Whether the prose has outgrown the fixed shape."""
+    return (
+        len(definition.split()) > DEFINITION_MAX_WORDS
+        or len(context.split()) > CONTEXT_MAX_WORDS
+        or _sentences(context) > CONTEXT_MAX_SENTENCES
+    )
+
+
+def condense(llm: LLMClient, definition: str, context: str) -> tuple[str, str]:
+    """One call that rewrites over-shape prose to fit, adding nothing."""
+    user = "\n".join(
+        ["Definition:", definition or "(empty)", "", "Context:", context or "(empty)"]
+    )
+    result = llm.generate_json(
+        messages=[
+            LLMMessage(role="system", content=CONDENSE_PROMPT),
+            LLMMessage(role="user", content=user),
+        ],
+        json_schema=RESPONSE_SCHEMA,
+        schema_name="prose",
+    )
+    return (
+        str(result.output_json.get("definition", definition)).strip(),
+        str(result.output_json.get("context", context)).strip(),
+    )
 
 
 def build_messages(
@@ -587,6 +657,8 @@ def generate_one(
     )
     definition = str(result.output_json.get("definition", "")).strip()
     context = str(result.output_json.get("context", "")).strip()
+    if over_shape(definition, context):
+        definition, context = condense(llm, definition, context)
     if corpus.pages is not None:
         definition = corpus.pages.repair(definition)
         context = corpus.pages.repair(context)
@@ -726,6 +798,69 @@ def run_generation(
         "generated": generated,
         "failed": len(failed),
         "failed_slugs": sorted(failed),
+    }
+
+
+def run_condense(
+    corpus: Corpus,
+    prose: ProseFile,
+    llm: LLMClient,
+    *,
+    model: str,
+    today: str | None = None,
+    workers: int = 1,
+    on_entity: Any = None,
+) -> dict[str, Any]:
+    """Rewrite every entity whose stored prose has outgrown the shape.
+
+    No new evidence and no change to the watermark: only the text is
+    tightened, and the result is recorded as a revision like any other.
+    """
+    day = today or dt.date.today().isoformat()
+    lock = threading.Lock()
+    targets = [
+        corpus.entities[slug]
+        for slug in sorted(prose.entities)
+        if slug in corpus.entities
+        and prose.current(slug) is not None
+        and over_shape(prose.definition(slug), prose.context(slug))
+    ]
+    done: list[str] = []
+    failed: list[str] = []
+
+    def work(entity: WcsEntity) -> None:
+        try:
+            definition, context = condense(
+                llm, prose.definition(entity.slug), prose.context(entity.slug)
+            )
+        except LLMError as exc:
+            LOG.warning("condense.failed slug=%s err=%s", entity.slug, exc)
+            with lock:
+                failed.append(entity.slug)
+            return
+        if corpus.pages is not None:
+            definition = corpus.pages.repair(definition)
+            context = corpus.pages.repair(context)
+        with lock:
+            _record(prose, entity, [], definition, context, model=model, today=day)
+            done.append(entity.slug)
+            if on_entity is not None:
+                on_entity()
+            LOG.info(
+                "condense.entity done=%s/%s slug=%s",
+                len(done),
+                len(targets),
+                entity.slug,
+            )
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        list(pool.map(work, targets))
+    return {
+        "over_shape": len(targets),
+        "condensed": len(done),
+        "failed": len(failed),
+        "failed_slugs": sorted(failed),
+        "slugs": sorted(done),
     }
 
 
