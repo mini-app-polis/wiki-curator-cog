@@ -180,6 +180,32 @@ def test_render_local_never_touches_git(tmp_path: Path) -> None:
         flow.render_local(wiki)
 
 
+@pytest.mark.parametrize(
+    "export",
+    [
+        WcsWikiExport(),
+        WcsWikiExport(entities=_export().entities),
+        WcsWikiExport(sources=_export().sources),
+    ],
+    ids=["empty", "no-sources", "no-entities"],
+)
+def test_an_empty_export_writes_and_removes_nothing(
+    tmp_path: Path, export: WcsWikiExport
+) -> None:
+    wiki = _clone(tmp_path)
+    with (
+        patch.object(flow, "_fetch_export", return_value=export),
+        pytest.raises(flow.EmptyExportError),
+    ):
+        flow.render_local(wiki)
+    assert (wiki / "concepts" / "gone.md").exists()
+    assert sorted(p.name for p in wiki.rglob("*.md")) == [
+        "CLAUDE.md",
+        "gone.md",
+        "log.md",
+    ]
+
+
 def test_render_local_refuses_a_directory_that_is_not_the_wiki(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="CLAUDE.md"):
         flow.render_local(tmp_path)

@@ -92,6 +92,29 @@ def _fetch_export() -> WcsWikiExportItem:
     return KaianoApiClient.from_env(MACHINE_NAME).export_wcs_wiki()
 
 
+class EmptyExportError(RuntimeError):
+    """The export holds no entities or no sources; nothing is written."""
+
+
+def _require_corpus(export: WcsWikiExportItem) -> None:
+    """Refuse an export with no entities or no sources, before anything is written.
+
+    Every derived page is rewritten from the export and every page it does
+    not produce is removed, so an empty export renders as "delete the whole
+    wiki". An empty corpus is far likelier to mean the wrong environment or a
+    broken API than a corpus that was emptied on purpose — the first local
+    render against a dev API with no data removed 1829 pages from the working
+    tree. If the corpus ever is emptied on purpose, deleting the wiki is a
+    decision to make by hand, not a side effect of a render.
+    """
+    if not export.entities or not export.sources:
+        raise EmptyExportError(
+            f"export has {len(export.entities)} entities and "
+            f"{len(export.sources)} sources; refusing to render over the wiki. "
+            "Check which API this run is pointed at."
+        )
+
+
 def _write_bundle(wiki_repo_path: Path, bundle: dict[str, str]) -> list[Path]:
     written: list[Path] = []
     for rel_path, content in sorted(bundle.items()):
@@ -121,6 +144,7 @@ def _export(config: Config) -> dict:
     wiki_repo = WikiRepo(config)
 
     export = _fetch_export()
+    _require_corpus(export)
     log_path = config.wiki_repo_path / "log.md"
     existing_log = log_path.read_text() if log_path.exists() else ""
 
@@ -206,6 +230,7 @@ def render_local(wiki_repo_path: Path) -> dict:
         )
 
     export = _fetch_export()
+    _require_corpus(export)
     bundle, stats = render_bundle(export, rendered_at=dt.date.today())
     bundle.pop("log.md", None)
 
