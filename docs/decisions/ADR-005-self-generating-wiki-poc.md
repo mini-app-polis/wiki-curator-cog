@@ -127,9 +127,18 @@ correction surface for content.
 When statements conflict, the newer one wins; the older can be marked
 superseded rather than deleted.
 
-The API's admin correction endpoints (name corrections, repoint, merge) remain
-for rare identity fixes, such as two spellings of one instructor. They are not
-the content-correction path.
+**Identity fixes are notes too** (2026-10-16). When two entities are the same
+thing under two names — *underarm turn* and *right side pass with underarm
+turn* — the fix is a note saying so and naming the preferred term, ingested
+like any other. The extraction records it as a dated relation of kind
+`alias-of`, from the other name to the preferred one; composition already
+stores relations with both endpoints, so the API needs no change. The merge
+is applied when the wiki is built, not in the database: the preferred page
+absorbs the other's evidence and lists its name as an alias, links to the
+other name point at the preferred page, and generation sees the combined
+evidence. Newest wins, so a later note saying they differ splits them again —
+nothing is destroyed, which a repoint-and-delete could not promise. The API's
+admin endpoints remain an escape hatch, not the path.
 
 ### Generation integrates; it does not rebuild
 

@@ -431,3 +431,6 @@ def test_definition_comes_first_and_context_renders_under_in_practice() -> None:
 def test_the_prompt_asks_for_a_short_definition_and_separate_context() -> None:
     assert "at most about 40 words" in generate.SYSTEM_PROMPT.replace("\n", " ")
     assert generate.RESPONSE_SCHEMA["required"] == ["definition", "context"]
+    flat = generate.SYSTEM_PROMPT.replace("\\\n", " ").replace("\n", " ")
+    assert "One paragraph, at most about 80 words" in flat
+    assert "See also" in flat

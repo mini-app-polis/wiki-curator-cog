@@ -55,7 +55,7 @@ LOG = log.get_logger()
 
 #: Raised when the prompt changes in a way that should regenerate every page
 #: from scratch. Entities generated under another version start over.
-GENERATOR_VERSION = "3"
+GENERATOR_VERSION = "4"
 
 #: Attempts per entity before it is skipped for this run. A malformed
 #: response is usually a one-off; a second failure is reported, and the
@@ -340,8 +340,9 @@ qualifications.
 context — optional, shown lower on the page under "In practice". Only the \
 few points a dancer most needs beyond the definition: how it works or is \
 done, the key thing people get wrong and what is right instead, how it \
-connects to the bigger ideas. At most about 120 words. Leave it as an empty \
-string when there is nothing worth adding — common for thin entities.
+connects to the bigger ideas. One paragraph, at most about 80 words. Leave \
+it as an empty string when there is nothing worth adding — common for thin \
+entities.
 
 You are given the current definition and context (possibly empty) and new \
 statements from lessons and notes. Return the updated pair.
@@ -364,8 +365,9 @@ context only, link at most two of the most important, exactly as given in \
 - In the context only, cite sparingly: at most three citations, each the \
 exact source link given, e.g. ([[sources/2026-03-01-anchor-step]]). Never \
 invent a source, fact or quote.
-- No headings, no bullet lists, no preamble. Do not mention statements, \
-sources, lessons or this process.
+- No headings, no bullet lists, no preamble. Never end with "See also" or \
+any list of related pages — the page lists those itself. Do not mention \
+statements, sources, lessons or this process.
 
 Output ONLY valid JSON — no markdown fences, no commentary before or after — \
 in exactly this shape:
