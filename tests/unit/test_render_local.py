@@ -172,12 +172,21 @@ def test_render_local_writes_pages_removes_stale_and_leaves_the_log(
 def test_render_local_never_touches_git(tmp_path: Path) -> None:
     wiki = _clone(tmp_path)
     with (
-        patch.object(flow, "_fetch_export", return_value=_export()),
-        patch.object(flow, "WikiRepo", side_effect=AssertionError("no git")),
-        patch.object(flow, "assert_push_access", side_effect=AssertionError("no push")),
-        patch.object(flow, "ensure_wiki_clone", side_effect=AssertionError("no clone")),
+        patch.object(flow, "_fetch_export", return_value=_export()) as fetch,
+        patch.object(flow, "WikiRepo", side_effect=AssertionError("no git")) as repo,
+        patch.object(
+            flow, "assert_push_access", side_effect=AssertionError("no push")
+        ) as push,
+        patch.object(
+            flow, "ensure_wiki_clone", side_effect=AssertionError("no clone")
+        ) as clone,
     ):
         flow.render_local(wiki)
+
+    fetch.assert_called_once()
+    repo.assert_not_called()
+    push.assert_not_called()
+    clone.assert_not_called()
 
 
 @pytest.mark.parametrize(

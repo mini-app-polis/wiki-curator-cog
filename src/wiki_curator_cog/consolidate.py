@@ -216,6 +216,7 @@ class Group:
 
     @property
     def version(self) -> str:
+        """The current prompt version for this group, the watermark its decisions carry."""
         return CONSOLIDATOR_VERSIONS[self.key]
 
 
@@ -244,6 +245,7 @@ CONCEPTS: Group = GROUPS[0]
 
 
 def group_of(kind: str) -> Group | None:
+    """The fold group that decides ``kind``, or None when the kind is never folded."""
     return next((g for g in GROUPS if kind in g.kinds), None)
 
 
@@ -283,6 +285,7 @@ class Support:
 
     @property
     def weight(self) -> int:
+        """Total evidence: distinct sources plus references from elsewhere."""
         return self.sources + self.references
 
     @property
@@ -476,6 +479,7 @@ class FacetsFile:
 
     @classmethod
     def load(cls, path: Path) -> FacetsFile:
+        """Read the facets file at ``path``; a missing file is an empty one."""
         if not path.exists():
             return cls()
         raw = json.loads(path.read_text())
@@ -488,6 +492,7 @@ class FacetsFile:
         )
 
     def save(self, path: Path) -> None:
+        """Write the file to ``path``, entities sorted by slug."""
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "consolidator_versions": self.consolidator_versions,

@@ -60,6 +60,7 @@ class FileState:
     name = "files"
 
     def links(self, path: Path, *, required: bool = False) -> link.LinksFile | None:
+        """Load the links file, or an empty one when it does not exist (unless ``required``)."""
         if not path.exists():
             _missing(path, required)
             return link.LinksFile()
@@ -68,18 +69,21 @@ class FileState:
     def facets(
         self, path: Path, *, required: bool = False
     ) -> consolidate.FacetsFile | None:
+        """Load the facets file, or an empty one when it does not exist (unless ``required``)."""
         if not path.exists():
             _missing(path, required)
             return consolidate.FacetsFile()
         return consolidate.FacetsFile.load(path)
 
     def prose(self, path: Path, *, required: bool = False) -> generate.ProseFile | None:
+        """Load the prose file, or an empty one when it does not exist (unless ``required``)."""
         if not path.exists():
             _missing(path, required)
             return generate.ProseFile()
         return generate.ProseFile.load(path)
 
     def save(self, obj: StateObject, path: Path, *, final: bool = False) -> None:
+        """Write ``obj`` to its file; ``final`` makes no difference here."""
         _ = final
         obj.save(path)
 
@@ -205,6 +209,7 @@ class ApiState(FileState):
         return obj
 
     def links(self, path: Path, *, required: bool = False) -> link.LinksFile | None:
+        """Read the links document from the API, caching it at ``path``."""
         obj = self._read("links", path)
         assert isinstance(obj, link.LinksFile)
         return obj
@@ -212,11 +217,13 @@ class ApiState(FileState):
     def facets(
         self, path: Path, *, required: bool = False
     ) -> consolidate.FacetsFile | None:
+        """Read the facets document from the API, caching it at ``path``."""
         obj = self._read("facets", path)
         assert isinstance(obj, consolidate.FacetsFile)
         return obj
 
     def prose(self, path: Path, *, required: bool = False) -> generate.ProseFile | None:
+        """Read the prose document from the API, caching it at ``path``."""
         obj = self._read("prose", path)
         assert isinstance(obj, generate.ProseFile)
         return obj
