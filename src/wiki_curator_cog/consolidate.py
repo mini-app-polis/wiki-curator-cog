@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
@@ -43,7 +44,7 @@ LOG = log.get_logger()
 
 #: Bump when the prompt or the rules change in a way that should redecide
 #: every entity; entities decided under an older version are asked again.
-CONSOLIDATOR_VERSION = "1"
+CONSOLIDATOR_VERSION = "4"
 
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_WORKERS = 8
@@ -75,17 +76,34 @@ them. "Connection" absorbs "connection quality", not every idea a partner \
 feels through the hand.
 - Comparisons of two ideas ("middle triple vs anchor triple") and entries \
 that name their own distinct move, figure or principle stay standalone.
-- Two names for exactly the same thing are also facets: fold the longer or \
-less common name into the common one.
-- The parent must be in the list of entries and must not be the candidate \
-itself. When unsure, the parent is null: a wrong fold hides a page.
+- "same" is true when the candidate says nothing the parent does not: \
+another name or phrasing for exactly the same idea ("anchor as zero \
+velocity" when the anchor is defined as a deceleration to zero). It is then \
+folded in as another name, with no line of its own. A "framing", \
+"perspective" or "way of thinking about" the parent that restates what the \
+parent is ("anchor as a stationary moment", "anchor as stop and redirect", \
+"anchor purpose" when the anchor is defined as a stop then a redirect) is \
+the same idea: "same" is true. "same" is false only when the candidate adds \
+something a reader of the parent's definition would not already know: a \
+variation, a condition, a mistake, a mechanism or a specific use.
+- Support is evidence. Every entry carries how many sources teach it and \
+how many statements elsewhere refer to it; every name in the list of entries \
+carries its total in brackets. An entry with one source and almost no \
+references is probably a note on another topic rather than a concept of its \
+own: fold it into the entry it is about whenever there is a plausible one. A \
+well-supported entry is established: fold it only when it is clearly a facet \
+or the same idea. Prefer well-supported parents.
+- The parent must be in the list of entries, without its bracketed count, \
+and must not be the candidate itself. A parent with less support than the \
+candidate is refused. When unsure about a well-supported entry, the parent is null: a wrong fold \
+hides a page.
 - "reason" is a few words a reviewer can check at a glance.
 - Return every candidate id you were given. Do not invent ids.
 
 Output ONLY valid JSON — no markdown fences, no commentary before or after — \
 in exactly this shape:
 {"entries": [{"id": "<candidate id>", "parent": "<entry name>" or null, \
-"reason": "<a few words>"}]}
+"same": false, "reason": "<a few words>"}]}
 """
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -98,16 +116,71 @@ RESPONSE_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "additionalProperties": True,
-                "required": ["id", "parent"],
-                "properties": {
-                    "id": {"type": "string"},
-                    "parent": {"type": ["string", "null"]},
-                    "reason": {"type": "string"},
-                },
+                # Only the id is required, and nothing else is typed: a stray
+                # null in one entry must not cost the other 49 their answers.
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
             },
         }
     },
 }
+
+
+@dataclass(frozen=True)
+class Support:
+    """How established an entity is: the evidence behind it.
+
+    ``sources`` is how many distinct sources teach it (its own statements);
+    ``references`` how many statements about other entities refer to it,
+    after the linker's newest-wins settling. An entity named once in one
+    lesson and nowhere else is weakly supported — maybe wrong, maybe not a
+    concept at all but a note on another topic.
+    """
+
+    sources: int = 0
+    references: int = 0
+
+    @property
+    def weight(self) -> int:
+        return self.sources + self.references
+
+    @property
+    def thin(self) -> bool:
+        """One source at most, and at most one reference from elsewhere."""
+        return self.sources <= 1 and self.references <= 1
+
+
+def support(
+    export: WcsWikiExport, links: link.LinksFile | None = None, merges: Any = None
+) -> dict[str, Support]:
+    """Every entity's support, by slug.
+
+    ``export`` is the merged export; ``merges`` redirects references to
+    merged-away names, as at build time.
+    """
+    sources: dict[Any, set[Any]] = defaultdict(set)
+    for a in export.attributions:
+        sources[a.entity_id].add(a.source_id)
+    for d in export.definitions:
+        sources[d.entity_id].add(d.source_id)
+    for p in export.drill_purposes:
+        sources[p.drill_entity_id].add(p.source_id)
+    for r in export.technique_requirements:
+        sources[r.technique_entity_id].add(r.source_id)
+
+    references: dict[Any, int] = {}
+    if links is not None:
+        _, overlay, _ = link.build_overlay(export, links, merges)
+        references = {
+            target: sum(by_subject.values())
+            for target, by_subject in overlay.referenced_by.items()
+        }
+    return {
+        e.slug: Support(
+            sources=len(sources.get(e.id, ())), references=references.get(e.id, 0)
+        )
+        for e in export.entities
+    }
 
 
 @dataclass
@@ -118,10 +191,13 @@ class Candidate:
     name: str
     kind: str
     definition: str
+    support: Support = field(default_factory=Support)
 
 
 def candidates(
-    export: WcsWikiExport, definitions: dict[str, str] | None = None
+    export: WcsWikiExport,
+    definitions: dict[str, str] | None = None,
+    supports: dict[str, Support] | None = None,
 ) -> list[Candidate]:
     """Every foldable entity, alphabetical so related names share a batch.
 
@@ -130,6 +206,7 @@ def candidates(
     fallback.
     """
     definitions = definitions or {}
+    supports = supports or {}
     out = [
         Candidate(
             slug=e.slug,
@@ -138,6 +215,7 @@ def candidates(
             definition=" ".join(
                 (definitions.get(e.slug) or e.overview_md or "").split()
             )[:400],
+            support=supports.get(e.slug, Support()),
         )
         for e in export.entities
         if e.kind in FOLDABLE_KINDS
@@ -162,6 +240,8 @@ def build_messages(
                         "name": c.name,
                         "kind": c.kind,
                         "definition": c.definition,
+                        "sources": c.support.sources,
+                        "referenced_by": c.support.references,
                     }
                     for c in batch
                 ],
@@ -176,16 +256,22 @@ def build_messages(
     ]
 
 
+#: The bracketed support count the list of entries carries after each name.
+_COUNT = re.compile(r"\s*\[\d+\]\s*$")
+
+
 def decide_batch(
     llm: LLMClient,
     batch: Sequence[Candidate],
     all_names: Sequence[str],
     parents: link.Catalog,
-) -> dict[str, tuple[str | None, str]]:
-    """One call: slug → (parent slug or None, reason).
+    supports: dict[str, Support] | None = None,
+) -> dict[str, tuple[str | None, bool, str]]:
+    """One call: slug → (parent slug or None, same as the parent, reason).
 
     A parent name that matches no foldable entity, or matches the candidate
-    itself, counts as standalone. Ids the model invents are ignored; ids it
+    itself, counts as standalone. So does a parent with less support than
+    the candidate: an established entity is never folded into a thinner one. Ids the model invents are ignored; ids it
     leaves out stay undecided for the next run.
     """
     result = llm.generate_json(
@@ -193,19 +279,28 @@ def decide_batch(
         json_schema=RESPONSE_SCHEMA,
         schema_name="facets",
     )
-    wanted = {c.slug for c in batch}
-    out: dict[str, tuple[str | None, str]] = {}
+    supports = supports or {}
+    by_slug = {c.slug: c for c in batch}
+    out: dict[str, tuple[str | None, bool, str]] = {}
     for item in result.output_json.get("entries", []):
         slug = str(item.get("id", ""))
-        if slug not in wanted:
+        candidate = by_slug.get(slug)
+        if candidate is None:
             continue
         raw = item.get("parent")
+        reason = str(item.get("reason") or "").strip()
         parent: str | None = None
         if isinstance(raw, str) and raw.strip():
-            hit = parents.find(link.api_slugify(raw))
+            hit = parents.find(link.api_slugify(_COUNT.sub("", raw)))
             if hit is not None and hit.slug != slug:
                 parent = hit.slug
-        out[slug] = (parent, str(item.get("reason", "")).strip())
+        if parent is not None:
+            weight = supports.get(parent, Support()).weight
+            if weight < candidate.support.weight:
+                reason = f"refused {parent}: less support than this entry"
+                parent = None
+        same = parent is not None and item.get("same") is True
+        out[slug] = (parent, same, reason)
     return out
 
 
@@ -244,9 +339,12 @@ class FacetsFile:
         entry = self.entities.get(slug)
         return entry is not None and entry.get("version") == CONSOLIDATOR_VERSION
 
-    def record(self, slug: str, parent: str | None, reason: str, model: str) -> None:
+    def record(
+        self, slug: str, parent: str | None, reason: str, model: str, same: bool = False
+    ) -> None:
         self.entities[slug] = {
             "parent": parent,
+            "same": same,
             "reason": reason,
             "version": CONSOLIDATOR_VERSION,
             "model": model,
@@ -254,9 +352,21 @@ class FacetsFile:
         }
 
     def parents(self) -> dict[str, str]:
-        """slug → parent slug, for every entity decided to be a facet."""
+        """slug → parent slug, for every entity decided to fold."""
         return {
             slug: entry["parent"]
+            for slug, entry in self.entities.items()
+            if entry.get("parent")
+        }
+
+    def folds(self) -> dict[str, tuple[str, bool]]:
+        """slug → (parent slug, listed as a facet), for every entity to fold.
+
+        An entity the model judged the same as its parent folds as another
+        name: no line under ``## Details``.
+        """
+        return {
+            slug: (entry["parent"], not entry.get("same", False))
             for slug, entry in self.entities.items()
             if entry.get("parent")
         }
@@ -269,15 +379,23 @@ def run_consolidation(
     *,
     model: str,
     definitions: dict[str, str] | None = None,
+    supports: dict[str, Support] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
     workers: int = DEFAULT_WORKERS,
     on_batch: Any = None,
     sample: int | None = None,
 ) -> dict[str, Any]:
     """Decide every foldable entity not already decided under this version."""
-    pool_of = candidates(export, definitions)
+    supports = supports if supports is not None else support(export)
+    pool_of = candidates(export, definitions, supports)
     foldable = [e for e in export.entities if e.kind in FOLDABLE_KINDS]
-    all_names = sorted({e.canonical_name for e in foldable}, key=str.lower)
+    all_names = sorted(
+        {
+            f"{e.canonical_name} [{supports.get(e.slug, Support()).weight}]"
+            for e in foldable
+        },
+        key=str.lower,
+    )
     parents = link.Catalog(foldable)
 
     todo = [c for c in pool_of if not facets.is_decided(c.slug)]
@@ -292,15 +410,15 @@ def run_consolidation(
     def work(batch: list[Candidate]) -> None:
         nonlocal decided, failed_batches
         try:
-            results = decide_batch(llm, batch, all_names, parents)
+            results = decide_batch(llm, batch, all_names, parents, supports)
         except LLMError as exc:
             with lock:
                 failed_batches += 1
             LOG.warning("consolidate.batch_failed size=%s err=%s", len(batch), exc)
             return
         with lock:
-            for slug, (parent, reason) in results.items():
-                facets.record(slug, parent, reason, model)
+            for slug, (parent, same, reason) in results.items():
+                facets.record(slug, parent, reason, model, same)
                 decided += 1
             if on_batch is not None:
                 on_batch()
@@ -320,11 +438,36 @@ def run_consolidation(
     }
 
 
-def review_markdown(facets: FacetsFile, names: dict[str, str]) -> str:
-    """Each parent with the facets folded into it, largest first."""
+def review_markdown(
+    facets: FacetsFile,
+    names: dict[str, str],
+    supports: dict[str, Support] | None = None,
+) -> str:
+    """Each page with everything folded into it, largest first.
+
+    Chains are followed to the page the fold ends on (cycles are left out,
+    as the build leaves them standing), so the review matches the wiki.
+    Entities folded as another name are marked. With ``supports``, each
+    line shows its evidence (sources / references), and thin entities that
+    found no home are listed at the end: candidates for a note.
+    """
+    supports = supports or {}
+
+    def ev(slug: str) -> str:
+        s = supports.get(slug)
+        return f" `{s.sources}s/{s.references}r`" if s is not None else ""
+
+    parents = facets.parents()
     groups: dict[str, list[str]] = defaultdict(list)
-    for slug, parent in facets.parents().items():
-        groups[parent].append(slug)
+    for slug in parents:
+        seen = {slug}
+        end = parents[slug]
+        while end in parents and end not in seen:
+            seen.add(end)
+            end = parents[end]
+        if end in seen:
+            continue
+        groups[end].append(slug)
     lines = [
         f"# Facet review — version {CONSOLIDATOR_VERSION}",
         "",
@@ -334,11 +477,34 @@ def review_markdown(facets: FacetsFile, names: dict[str, str]) -> str:
         "",
     ]
     for parent, slugs in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
-        lines.append(f"## {names.get(parent, parent)} ({len(slugs)})")
+        lines.append(f"## {names.get(parent, parent)}{ev(parent)} ({len(slugs)})")
         lines.append("")
         for slug in sorted(slugs):
-            reason = facets.entities[slug].get("reason", "")
+            entry = facets.entities[slug]
+            reason = entry.get("reason", "")
             tail = f" — {reason}" if reason else ""
-            lines.append(f"- {names.get(slug, slug)}{tail}")
+            via = (
+                f" (via {names.get(entry['parent'], entry['parent'])})"
+                if entry["parent"] != parent
+                else ""
+            )
+            mark = " _(same; another name)_" if entry.get("same") else ""
+            lines.append(f"- {names.get(slug, slug)}{ev(slug)}{via}{mark}{tail}")
+        lines.append("")
+
+    homeless = sorted(
+        slug
+        for slug, entry in facets.entities.items()
+        if not entry.get("parent") and slug in supports and supports[slug].thin
+    )
+    if homeless:
+        lines += [
+            f"## Thin and standalone ({len(homeless)})",
+            "",
+            "One source at most and almost no references, but no broader page "
+            "was found for them. Each may be a note on another topic.",
+            "",
+        ]
+        lines += [f"- {names.get(slug, slug)}{ev(slug)}" for slug in homeless]
         lines.append("")
     return "\n".join(lines)

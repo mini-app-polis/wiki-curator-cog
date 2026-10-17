@@ -151,7 +151,18 @@ corpus, and records the answer in `facets.json` with a version watermark.
 Drills and patterns are never folded by the pass. At build time a facet folds
 like an alias — its statements, references and links move to the broader
 page — but keeps its name there under `## Details`, as one line with the
-first sentence of its own definition. Notes outrank the pass: a note's
+first sentence of its own definition — unless the model judged it the same
+idea under another name, when it folds as an alias with no line of its own,
+so Details lists real variations rather than three phrasings of one
+definition. Support is evidence: each entity's sources (how many lessons
+teach it) and references (how many statements elsewhere refer to it) go to
+the model with it, and every possible parent carries its total. A thin entity —
+one source, almost no references — is likely a note on another topic and is
+folded wherever there is a plausible home; an established one folds only when
+it clearly is a facet. An entity is never folded into one with less support,
+which also keeps a well-taught technique from disappearing into a thinner
+page. Thin entities left with no home are listed in the review as candidates
+for a note. Notes outrank the pass: a note's
 `facet_of`, `alias_of` or `distinct_from` for the same entity or pair wins, so
 "X is its own concept" splits it back out on the next build. The extraction
 prompt now names the concept rather than the point made about it, so new

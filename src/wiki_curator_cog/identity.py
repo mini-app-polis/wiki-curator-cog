@@ -75,13 +75,13 @@ class Merges:
 
 
 def find_merges(
-    export: WcsWikiExport, facet_parents: dict[str, str] | None = None
+    export: WcsWikiExport, folds: dict[str, tuple[str, bool]] | None = None
 ) -> Merges:
     """Settle every alias/facet/distinct claim into a set of merges.
 
-    ``facet_parents`` (slug → parent slug, from the consolidation pass) adds
-    a facet fold for every entity a note has not already settled: no note
-    claim on that entity's own fold, and none on that pair.
+    ``folds`` (slug → (parent slug, listed as a facet), from the
+    consolidation pass) adds a fold for every entity a note has not already
+    settled: no note claim on that entity's own fold, and none on that pair.
 
     Per unordered pair the newest claim wins; undated claims (operator
     additions) count as oldest. The winning ``alias_of`` or ``facet_of``
@@ -121,9 +121,9 @@ def find_merges(
         if kind in ALIAS_KINDS or kind in FACET_KINDS:
             edges[frm] = (to, kind in FACET_KINDS)
 
-    if facet_parents:
+    if folds:
         by_slug = {e.slug: e for e in export.entities}
-        for slug, parent_slug in facet_parents.items():
+        for slug, (parent_slug, listed) in folds.items():
             child, parent = by_slug.get(slug), by_slug.get(parent_slug)
             if child is None or parent is None or child.id == parent.id:
                 continue
@@ -131,7 +131,7 @@ def find_merges(
                 continue
             if child.id in edges or frozenset((child.id, parent.id)) in latest:
                 continue  # a note has spoken: it outranks the model
-            edges[child.id] = (parent.id, True)
+            edges[child.id] = (parent.id, listed)
 
     merges = Merges()
     for start in sorted(edges, key=lambda i: entities[i].slug):
@@ -224,8 +224,8 @@ def apply_merges(export: WcsWikiExport, merges: Merges) -> WcsWikiExport:
 
 
 def resolve(
-    export: WcsWikiExport, facet_parents: dict[str, str] | None = None
+    export: WcsWikiExport, folds: dict[str, tuple[str, bool]] | None = None
 ) -> tuple[WcsWikiExport, Merges]:
     """Find and apply every merge the notes, and the facets file, call for."""
-    merges = find_merges(export, facet_parents)
+    merges = find_merges(export, folds)
     return apply_merges(export, merges), merges

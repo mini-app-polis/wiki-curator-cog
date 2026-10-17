@@ -287,9 +287,16 @@ def _consolidate(args: argparse.Namespace) -> int:
         kwargs["batch_size"] = args.batch_size
     if args.workers is not None:
         kwargs["workers"] = args.workers
+    facets_file = Path(args.facets_file).expanduser().resolve()
+    links = (
+        Path(args.links).expanduser().resolve()
+        if args.links
+        else facets_file.with_name("links.json")
+    )
     summary = consolidate_local(
-        Path(args.facets_file).expanduser().resolve(),
+        facets_file,
         prose_path=Path(args.prose).expanduser().resolve() if args.prose else None,
+        links_path=links if links.exists() else None,
         **kwargs,
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")

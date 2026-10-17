@@ -118,7 +118,11 @@ are skipped). `render`, `generate` and `link` then fold each facet into its
 broader page, listed under `## Details`. They pick up `facets.json` from next
 to the `--links` file by default, or take `--facets PATH`. A note's
 `facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
-see what was folded where.
+see what was folded where. Each entity's support (sources taught in,
+references from elsewhere, read from `links.json` beside the facets file or
+`--links`) guides the call: thin entities fold readily, nothing folds into a
+less-supported page, and thin entities with no home are listed at the end of
+the review.
 
 ```bash
 doppler run --config prd -- uv run python -m wiki_curator_cog.main consolidate \

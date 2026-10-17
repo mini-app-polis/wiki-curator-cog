@@ -81,6 +81,16 @@ def _export(*relations: WcsRelation) -> WcsWikiExport:
         ],
         sources=[LESSON, NOTE],
         attributions=[
+            *(
+                WcsAttribution(
+                    id=_id(f"a-anchor-{src.title}"),
+                    source_id=src.id,
+                    entity_id=_id(ANCHOR),
+                    attribution_kind="taught",
+                    prose="Settle and stop.",
+                )
+                for src in (LESSON, NOTE)
+            ),
             WcsAttribution(
                 id=_id("a-stationary"),
                 source_id=LESSON.id,
@@ -115,8 +125,11 @@ def _note(frm: str, to: str, kind: str) -> WcsRelation:
 class FakeLLM:
     """Answers from ``parents[slug]`` (a name or None); records each batch."""
 
-    def __init__(self, parents: dict[str, str | None]) -> None:
+    def __init__(
+        self, parents: dict[str, str | None], same: tuple[str, ...] = ()
+    ) -> None:
         self.parents = parents
+        self.same = set(same)
         self.calls: list[list[str]] = []
         self.prompts: list[str] = []
 
@@ -127,7 +140,13 @@ class FakeLLM:
         self.calls.append(ids)
         out = {
             "entries": [
-                {"id": i, "parent": self.parents.get(i), "reason": "test"} for i in ids
+                {
+                    "id": i,
+                    "parent": self.parents.get(i),
+                    "same": i in self.same,
+                    "reason": "test",
+                }
+                for i in ids
             ]
         }
         return LLMResult(provider="fake", model="fake", output_json=out, raw_text="")
@@ -148,7 +167,11 @@ def test_the_model_sees_definitions_and_every_possible_parent() -> None:
         _export(), facets, llm, model="fake", definitions={ANCHOR: "The settle."}
     )
     prompt = llm.prompts[0]
-    assert "Anchor; Anchor with Directional Intent; Stationary Anchor" in prompt
+    assert (
+        "Anchor [2]; Anchor with Directional Intent [0]; Stationary Anchor [1]"
+        in prompt
+    )
+    assert '"sources": 1' in prompt
     assert "The settle." in prompt
     assert "Whip" not in prompt.split("Candidates", 1)[0]
 
@@ -217,30 +240,32 @@ def test_review_groups_facets_under_their_parent() -> None:
 
 
 def test_facets_fold_into_the_parent_and_are_listed() -> None:
-    export, merges = identity.resolve(_export(), {STATIONARY: ANCHOR})
+    export, merges = identity.resolve(_export(), {STATIONARY: (ANCHOR, True)})
     slugs = {e.slug for e in export.entities}
     assert STATIONARY not in slugs
     anchor = next(e for e in export.entities if e.slug == ANCHOR)
     assert "Stationary Anchor" in anchor.aliases
-    assert [a.entity_id for a in export.attributions] == [_id(ANCHOR)]
+    assert {a.entity_id for a in export.attributions} == {_id(ANCHOR)}
     assert merges.facets[_id(ANCHOR)][0].name == "Stationary Anchor"
     # the whip now ends in the anchor
     assert any(r.to_entity_id == _id(ANCHOR) for r in export.relations)
 
 
 def test_drills_and_patterns_are_never_folded_by_the_model() -> None:
-    merges = identity.find_merges(_export(), {DRILL: ANCHOR, STATIONARY: WHIP})
+    merges = identity.find_merges(
+        _export(), {DRILL: (ANCHOR, True), STATIONARY: (WHIP, True)}
+    )
     assert not merges
 
 
 def test_a_note_keeping_them_apart_outranks_the_model() -> None:
     export = _export(_note(STATIONARY, ANCHOR, "distinct_from"))
-    assert not identity.find_merges(export, {STATIONARY: ANCHOR})
+    assert not identity.find_merges(export, {STATIONARY: (ANCHOR, True)})
 
 
 def test_a_note_folding_elsewhere_outranks_the_model() -> None:
     export = _export(_note(STATIONARY, DIRECTIONAL, "facet_of"))
-    merges = identity.find_merges(export, {STATIONARY: ANCHOR})
+    merges = identity.find_merges(export, {STATIONARY: (ANCHOR, True)})
     assert merges.by_slug == {STATIONARY: DIRECTIONAL}
     assert [f.slug for f in merges.facets[_id(DIRECTIONAL)]] == [STATIONARY]
 
@@ -252,14 +277,16 @@ def test_a_note_can_fold_any_kind() -> None:
 
 def test_facet_chains_resolve_to_the_broadest_page() -> None:
     merges = identity.find_merges(
-        _export(), {STATIONARY: DIRECTIONAL, DIRECTIONAL: ANCHOR}
+        _export(), {STATIONARY: (DIRECTIONAL, True), DIRECTIONAL: (ANCHOR, True)}
     )
     assert merges.by_slug == {STATIONARY: ANCHOR, DIRECTIONAL: ANCHOR}
     assert [f.slug for f in merges.facets[_id(ANCHOR)]] == [DIRECTIONAL, STATIONARY]
 
 
 def test_a_facet_cycle_leaves_both_standing() -> None:
-    assert not identity.find_merges(_export(), {STATIONARY: ANCHOR, ANCHOR: STATIONARY})
+    assert not identity.find_merges(
+        _export(), {STATIONARY: (ANCHOR, True), ANCHOR: (STATIONARY, True)}
+    )
 
 
 def test_an_alias_is_not_listed_as_a_facet() -> None:
@@ -272,7 +299,7 @@ def test_an_alias_is_not_listed_as_a_facet() -> None:
 
 
 def test_details_list_each_facet_with_its_gist_and_links_follow() -> None:
-    export, merges = identity.resolve(_export(), {STATIONARY: ANCHOR})
+    export, merges = identity.resolve(_export(), {STATIONARY: (ANCHOR, True)})
     prose = generate.ProseFile()
     details = generate.details_by_entity(export, merges, prose)
     assert details == {
@@ -297,7 +324,7 @@ def test_gists_are_one_sentence_capped_in_length() -> None:
 
 
 def test_links_to_a_folded_page_are_repaired_to_its_parent() -> None:
-    export, merges = identity.resolve(_export(), {STATIONARY: ANCHOR})
+    export, merges = identity.resolve(_export(), {STATIONARY: (ANCHOR, True)})
     pages = generate.PageIndex.from_export(export, merges)
     assert (
         pages.repair("see [[concepts/stationary-anchor|it]]")
@@ -306,6 +333,128 @@ def test_links_to_a_folded_page_are_repaired_to_its_parent() -> None:
 
 
 def test_the_linker_resolves_a_facet_name_to_its_parent() -> None:
-    export, _ = identity.resolve(_export(), {STATIONARY: ANCHOR})
+    export, _ = identity.resolve(_export(), {STATIONARY: (ANCHOR, True)})
     ref = link.Catalog(export.entities).resolve("stationary anchor", "assert")
     assert ref is not None and ref.target_slug == ANCHOR
+
+
+def test_a_null_or_missing_field_costs_only_that_entry() -> None:
+    class Sloppy(FakeLLM):
+        def generate_json(self, **kwargs):
+            out = {
+                "entries": [
+                    {"id": STATIONARY, "parent": "anchor", "reason": None},
+                    {"id": DIRECTIONAL},
+                ]
+            }
+            return LLMResult(provider="f", model="f", output_json=out, raw_text="")
+
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_export(), facets, Sloppy({}), model="fake")
+    assert facets.parents() == {STATIONARY: ANCHOR}
+    assert facets.entities[STATIONARY]["reason"] == ""
+    assert facets.entities[DIRECTIONAL]["parent"] is None
+
+
+def test_the_same_idea_folds_as_another_name_with_no_details_line() -> None:
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(
+        _export(),
+        facets,
+        FakeLLM({STATIONARY: "anchor", DIRECTIONAL: "anchor"}, same=(STATIONARY,)),
+        model="fake",
+    )
+    export, merges = identity.resolve(_export(), facets.folds())
+    assert merges.by_slug == {STATIONARY: ANCHOR, DIRECTIONAL: ANCHOR}
+    assert [f.slug for f in merges.facets[_id(ANCHOR)]] == [DIRECTIONAL]
+    anchor = next(e for e in export.entities if e.slug == ANCHOR)
+    assert "Stationary Anchor" in anchor.aliases
+
+
+def test_same_is_ignored_without_a_parent() -> None:
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(
+        _export(), facets, FakeLLM({}, same=(STATIONARY,)), model="fake"
+    )
+    assert facets.entities[STATIONARY]["same"] is False
+
+
+def test_review_follows_chains_to_the_page_they_end_on() -> None:
+    facets = consolidate.FacetsFile()
+    facets.record(STATIONARY, DIRECTIONAL, "", "fake", same=True)
+    facets.record(DIRECTIONAL, ANCHOR, "", "fake")
+    text = consolidate.review_markdown(
+        facets,
+        {ANCHOR: "Anchor", STATIONARY: "Stationary Anchor", DIRECTIONAL: "Directional"},
+    )
+    assert "## Anchor (2)" in text
+    assert "- Stationary Anchor (via Directional) _(same; another name)_" in text
+    assert "## Directional" not in text
+
+
+# ── support ──
+
+
+def test_support_counts_sources_and_references_from_elsewhere() -> None:
+    links = link.LinksFile()
+    links.statements = {
+        "attribution:x": {
+            "subject_slug": DIRECTIONAL,
+            "session_date": "2026-01-01",
+            "references": [
+                {
+                    "name": "anchor",
+                    "target_slug": ANCHOR,
+                    "target_entity_id": None,
+                    "polarity": "assert",
+                },
+            ],
+        },
+        "attribution:y": {
+            "subject_slug": STATIONARY,
+            "session_date": "2026-01-01",
+            "references": [
+                {
+                    "name": "anchor",
+                    "target_slug": ANCHOR,
+                    "target_entity_id": None,
+                    "polarity": "assert",
+                },
+            ],
+        },
+    }
+    supports = consolidate.support(_export(), links)
+    assert supports[ANCHOR] == consolidate.Support(sources=2, references=2)
+    assert supports[STATIONARY] == consolidate.Support(sources=1, references=0)
+    assert supports[STATIONARY].thin and not supports[ANCHOR].thin
+
+
+def test_a_thinner_parent_is_refused() -> None:
+    llm = FakeLLM({ANCHOR: "stationary anchor [1]"})
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_export(), facets, llm, model="fake")
+    assert facets.entities[ANCHOR]["parent"] is None
+    assert "less support" in facets.entities[ANCHOR]["reason"]
+
+
+def test_a_bracketed_count_in_the_answer_still_resolves() -> None:
+    llm = FakeLLM({STATIONARY: "Anchor [2]"})
+    facets = consolidate.FacetsFile()
+    consolidate.run_consolidation(_export(), facets, llm, model="fake")
+    assert facets.parents() == {STATIONARY: ANCHOR}
+
+
+def test_review_shows_evidence_and_lists_thin_entries_with_no_home() -> None:
+    facets = consolidate.FacetsFile()
+    facets.record(STATIONARY, ANCHOR, "", "fake")
+    facets.record(DIRECTIONAL, None, "", "fake")
+    supports = consolidate.support(_export())
+    text = consolidate.review_markdown(
+        facets,
+        {ANCHOR: "Anchor", STATIONARY: "Stationary Anchor", DIRECTIONAL: "Directional"},
+        supports,
+    )
+    assert "## Anchor `2s/0r` (1)" in text
+    assert "- Stationary Anchor `1s/0r`" in text
+    assert "## Thin and standalone (1)" in text
+    assert "- Directional `0s/0r`" in text

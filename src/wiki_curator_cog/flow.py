@@ -211,13 +211,13 @@ def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     }
 
 
-def _facet_parents(facets_path: Path | None) -> dict[str, str] | None:
-    """slug → parent slug from the facets file, or None when there is none."""
+def _facet_parents(facets_path: Path | None) -> dict[str, tuple[str, bool]] | None:
+    """The folds from the facets file, or None when there is none."""
     if facets_path is None:
         return None
     if not facets_path.exists():
         raise RuntimeError(f"facets file not found: {facets_path}")
-    return consolidate.FacetsFile.load(facets_path).parents()
+    return consolidate.FacetsFile.load(facets_path).folds()
 
 
 def render_local(
@@ -510,6 +510,7 @@ def consolidate_local(
     facets_path: Path,
     *,
     prose_path: Path | None = None,
+    links_path: Path | None = None,
     sample: int | None = None,
     batch_size: int = consolidate.DEFAULT_BATCH_SIZE,
     workers: int = consolidate.DEFAULT_WORKERS,
@@ -523,7 +524,12 @@ def consolidate_local(
     """
     export = _fetch_export()
     _require_corpus(export)
-    export, _ = identity.resolve(export)
+    export, merges = identity.resolve(export)
+
+    links = None
+    if links_path is not None and links_path.exists():
+        links = link.LinksFile.load(links_path)
+    supports = consolidate.support(export, links, merges)
 
     definitions = None
     if prose_path is not None and prose_path.exists():
@@ -539,6 +545,7 @@ def consolidate_local(
         llm,
         model=model,
         definitions=definitions,
+        supports=supports,
         batch_size=batch_size,
         workers=workers,
         sample=sample,
@@ -548,13 +555,17 @@ def consolidate_local(
 
     names = {e.slug: e.canonical_name for e in export.entities}
     review_path = facets_path.with_name(facets_path.stem + "-review.md")
-    review_path.write_text(consolidate.review_markdown(facets, names))
+    review_path.write_text(consolidate.review_markdown(facets, names, supports))
     LOG.info("consolidate.complete %s", counts)
     return {
         "facets_file": str(facets_path),
         "review_file": str(review_path),
         "consolidator_version": consolidate.CONSOLIDATOR_VERSION,
         "model": model,
+        "used_links": links is not None,
+        "thin_entities": sum(
+            1 for c in consolidate.candidates(export, None, supports) if c.support.thin
+        ),
         **counts,
     }
 
