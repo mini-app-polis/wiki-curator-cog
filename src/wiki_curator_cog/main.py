@@ -48,6 +48,7 @@ from wiki_curator_cog.boot import mask_url
 from wiki_curator_cog.config import Config, load_config
 from wiki_curator_cog.flow import (
     REPO,
+    api_state,
     consolidate_local,
     export_run,
     generate_local,
@@ -120,43 +121,42 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--facets-file",
-        default="facets.json",
-        help="consolidate: the facet decisions, and the watermark (default facets.json).",
+        default=None,
+        help="consolidate: the facets file (default: facets.json in the state folder).",
     )
     parser.add_argument(
         "--facets",
         default=None,
         help=(
-            "render / generate / link: the facets file from `consolidate`. "
-            "Default: facets.json next to the --links file, when it exists."
+            "render / generate / link: the facets file (default: facets.json "
+            "in the state folder)."
         ),
     )
     parser.add_argument(
         "--links-file",
-        default="links.json",
-        help="link: the references file, and the watermark (default links.json).",
+        default=None,
+        help="link: the links file (default: links.json in the state folder).",
     )
     parser.add_argument(
         "--links",
         default=None,
         help=(
-            "render / generate: the links file from `link` — overlaid on the "
-            "render; used by generate for proposed concepts and referring "
-            "statements."
+            "render / generate / consolidate: the links file (default: "
+            "links.json in the state folder)."
         ),
     )
     parser.add_argument(
         "--prose",
         default=None,
         help=(
-            "render: put the overviews from this prose file (from `generate`) on "
-            "the pages; consolidate: show the model each entity's definition."
+            "render / consolidate: the prose file (default: prose.json in the "
+            "state folder)."
         ),
     )
     parser.add_argument(
         "--prose-file",
-        default="prose.json",
-        help="generate: the overviews file, and the watermark (default prose.json).",
+        default=None,
+        help="generate: the prose file (default: prose.json in the state folder).",
     )
     parser.add_argument(
         "--condense",
@@ -194,11 +194,23 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="link / consolidate: statements or entities per LLM call.",
     )
     parser.add_argument(
+        "--state",
+        choices=["api", "files"],
+        default="api",
+        help=(
+            "render / link / generate / consolidate: where links, facets and "
+            "prose are read from and written to. 'api' (the default) reads "
+            "the API and writes back what a run changed, keeping the files "
+            "as a checked cache; 'files' uses the files alone."
+        ),
+    )
+    parser.add_argument(
         "--state-dir",
         default=None,
         help=(
-            "state-import / state-verify: the folder holding links.json, "
-            "facets.json and prose.json (wcs-wiki/.curator)."
+            "The folder holding links.json, facets.json and prose.json, for "
+            "every command that uses them. Default: $WIKI_REPO_PATH/.curator. "
+            "A file flag (--links, --prose-file, ...) overrides one file."
         ),
     )
     parser.add_argument(
@@ -233,27 +245,70 @@ def _auto_run_enabled() -> bool:
     return current_environment() is Environment.PRODUCTION
 
 
-def _facets_path(facets: str | None, links: str | None) -> Path | None:
-    """--facets, else facets.json beside the links file if it is there.
+class NoStateFolderError(RuntimeError):
+    """A command needs its state files and no folder says where they are."""
 
-    Picking it up by default keeps render, generate and link on the same
-    folds: a generate run that forgot the flag would otherwise rewrite every
-    facet as its own page again.
+
+def _state_dir(args: argparse.Namespace) -> Path | None:
+    """--state-dir, else $WIKI_REPO_PATH/.curator. Never the current folder.
+
+    One folder for all three files, for every command: a default per file,
+    relative to wherever the command was run, is how a generate run once
+    started from an empty prose.json beside the code and regenerated the
+    whole wiki.
     """
-    if facets:
-        return Path(facets).expanduser().resolve()
-    if links:
-        sibling = Path(links).expanduser().resolve().with_name("facets.json")
-        if sibling.exists():
-            return sibling
+    if args.state_dir:
+        return Path(args.state_dir).expanduser().resolve()
+    wiki = os.getenv("WIKI_REPO_PATH", "").strip()
+    if wiki:
+        return (Path(wiki).expanduser() / ".curator").resolve()
     return None
+
+
+def _state_file(
+    args: argparse.Namespace, explicit: str | None, name: str, *, required: bool
+) -> Path | None:
+    """One state file: the flag if given, else ``name`` in the state folder.
+
+    ``required`` files are the ones the command writes: with no flag and no
+    folder it stops rather than guess. An optional file that is not in the
+    folder is left out when the state is files; with the API it is always
+    used, the path being its cache.
+    """
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    folder = _state_dir(args)
+    if folder is None:
+        if required:
+            raise NoStateFolderError(
+                f"no state folder for {name}: set WIKI_REPO_PATH (its .curator "
+                "folder is used) or pass --state-dir"
+            )
+        return None
+    path = folder / name
+    if required or args.state == "api" or path.exists():
+        return path
+    return None
+
+
+def _written_file(args: argparse.Namespace, explicit: str | None, name: str) -> Path:
+    """The state file a command writes: the flag, else the state folder's."""
+    path = _state_file(args, explicit, name, required=True)
+    assert path is not None
+    return path
+
+
+def _store(args: argparse.Namespace) -> dict:
+    """``state=`` for a local command: the API unless --state files."""
+    return {"state": api_state()} if args.state == "api" else {}
 
 
 def _render(
     wiki_repo_path_raw: str,
-    links: str | None = None,
-    prose: str | None = None,
-    facets: str | None = None,
+    links: Path | None = None,
+    prose: Path | None = None,
+    facets: Path | None = None,
+    store: dict | None = None,
 ) -> int:
     """The local loop: render into a clone, print what it found.
 
@@ -266,11 +321,7 @@ def _render(
         )
         return 2
     wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
-    links_path = Path(links).expanduser().resolve() if links else None
-    prose_path = Path(prose).expanduser().resolve() if prose else None
-    summary = render_local(
-        wiki_repo_path, links_path, prose_path, _facets_path(facets, links)
-    )
+    summary = render_local(wiki_repo_path, links, prose, facets, **(store or {}))
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 1 if summary["broken_links"]["count"] else 0
 
@@ -283,9 +334,10 @@ def _link(args: argparse.Namespace) -> int:
     if args.workers is not None:
         kwargs["workers"] = args.workers
     summary = link_local(
-        Path(args.links_file).expanduser().resolve(),
-        facets_path=_facets_path(args.facets, args.links_file),
+        _written_file(args, args.links_file, "links.json"),
+        facets_path=_state_file(args, args.facets, "facets.json", required=False),
         **kwargs,
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -294,17 +346,17 @@ def _link(args: argparse.Namespace) -> int:
 def _generate(args: argparse.Namespace) -> int:
     """Local generation: overviews to a file, a summary to stdout."""
     wiki = os.getenv("WIKI_REPO_PATH", "").strip()
-    links = args.links or "links.json"
     summary = generate_local(
-        Path(args.prose_file).expanduser().resolve(),
-        links_path=Path(links).expanduser().resolve(),
+        _written_file(args, args.prose_file, "prose.json"),
+        links_path=_state_file(args, args.links, "links.json", required=False),
         wiki_repo_path=Path(wiki).expanduser().resolve() if wiki else None,
         entities=args.entity,
         sample=args.sample,
         condense=args.condense,
-        facets_path=_facets_path(args.facets, links),
+        facets_path=_state_file(args, args.facets, "facets.json", required=False),
         dry_run=args.dry_run,
         **({"workers": args.workers} if args.workers is not None else {}),
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -317,17 +369,13 @@ def _consolidate(args: argparse.Namespace) -> int:
         kwargs["batch_size"] = args.batch_size
     if args.workers is not None:
         kwargs["workers"] = args.workers
-    facets_file = Path(args.facets_file).expanduser().resolve()
-    links = (
-        Path(args.links).expanduser().resolve()
-        if args.links
-        else facets_file.with_name("links.json")
-    )
+    facets_file = _written_file(args, args.facets_file or args.facets, "facets.json")
     summary = consolidate_local(
         facets_file,
-        prose_path=Path(args.prose).expanduser().resolve() if args.prose else None,
-        links_path=links if links.exists() else None,
+        prose_path=_state_file(args, args.prose, "prose.json", required=False),
+        links_path=_state_file(args, args.links, "links.json", required=False),
         **kwargs,
+        **_store(args),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -335,10 +383,13 @@ def _consolidate(args: argparse.Namespace) -> int:
 
 def _state(args: argparse.Namespace) -> int:
     """Import the state files into the API, or verify the API holds them."""
-    if not args.state_dir:
-        LOG.error("state.failed err=--state-dir is required (wcs-wiki/.curator)")
+    state_dir = _state_dir(args)
+    if state_dir is None:
+        LOG.error(
+            "state.failed err=set WIKI_REPO_PATH (its .curator folder) or pass "
+            "--state-dir"
+        )
         return 2
-    state_dir = Path(args.state_dir).expanduser().resolve()
     if args.mode == "state-import":
         kwargs = {"chunk": args.batch_size} if args.batch_size else {}
         summary = state_import_local(state_dir, **kwargs)
@@ -354,15 +405,27 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.mode == "render":
-        return _render(
-            os.getenv("WIKI_REPO_PATH", ""), args.links, args.prose, args.facets
-        )
-    if args.mode == "link":
-        return _link(args)
-    if args.mode == "generate":
-        return _generate(args)
-    if args.mode == "consolidate":
-        return _consolidate(args)
+        try:
+            return _render(
+                os.getenv("WIKI_REPO_PATH", ""),
+                _state_file(args, args.links, "links.json", required=False),
+                _state_file(args, args.prose, "prose.json", required=False),
+                _state_file(args, args.facets, "facets.json", required=False),
+                _store(args),
+            )
+        except NoStateFolderError as exc:
+            LOG.error("render.failed err=%s", exc)
+            return 2
+    try:
+        if args.mode == "link":
+            return _link(args)
+        if args.mode == "generate":
+            return _generate(args)
+        if args.mode == "consolidate":
+            return _consolidate(args)
+    except NoStateFolderError as exc:
+        LOG.error("%s.failed err=%s", args.mode, exc)
+        return 2
     if args.mode in {"state-import", "state-verify"}:
         return _state(args)
 

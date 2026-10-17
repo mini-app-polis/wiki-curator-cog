@@ -85,6 +85,15 @@ files in chunks and `state-verify` compares them, entry by entry, with what
 the API returns; on the real files the round trip was exact. Page documents
 wait for their schema (MINI-96).
 
+**MINI-94, part 1 (2026-10-17): the API is the store.** The local commands
+read each state document from the API and write back changed entries in
+batches during a run, with a final flush; the files remain as a cache in
+their old layout (byte-identical on the real state), checked against the API
+on every read. A disagreement stops the command before it reads or writes —
+the case of a run whose last write never arrived — so neither side
+overwrites the other. `--state files` keeps the file-only behaviour. The
+per-unit functions for the worker are part 2.
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /

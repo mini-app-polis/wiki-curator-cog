@@ -56,7 +56,7 @@ from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
 from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
-from . import consolidate, generate, identity, link, state_store, usage
+from . import consolidate, generate, identity, link, state_backend, state_store, usage
 from ._deadline import deadline
 from .boot import assert_push_access, ensure_wiki_clone, mask_url
 from .config import Config, assert_wiki_clone_ready, load_config
@@ -212,13 +212,19 @@ def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     }
 
 
-def _facet_parents(facets_path: Path | None) -> dict[str, tuple[str, bool]] | None:
-    """The folds from the facets file, or None when there is none."""
+def _state(state: state_backend.FileState | None) -> state_backend.FileState:
+    """The store a local command uses: files unless it was given another."""
+    return state if state is not None else state_backend.FileState()
+
+
+def _facet_parents(
+    facets_path: Path | None, state: state_backend.FileState | None = None
+) -> dict[str, tuple[str, bool]] | None:
+    """The folds from the facets state, or None when there is none."""
     if facets_path is None:
         return None
-    if not facets_path.exists():
-        raise RuntimeError(f"facets file not found: {facets_path}")
-    return consolidate.FacetsFile.load(facets_path).folds()
+    facets = _state(state).facets(facets_path, required=True)
+    return facets.folds() if facets is not None else None
 
 
 def render_local(
@@ -226,8 +232,13 @@ def render_local(
     links_path: Path | None = None,
     prose_path: Path | None = None,
     facets_path: Path | None = None,
+    state: state_backend.FileState | None = None,
 ) -> dict:
     """Render into an existing local clone. No clone, commit, push or report.
+
+    ``state`` is where links, prose and facets are read from: the files at
+    the paths given, or (``ApiState``) the API, with those paths as its
+    cache. A path left out means that layer is not used either way.
 
     The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
     Obsidian or ``git diff``, change something, run it again. Nothing leaves
@@ -247,16 +258,15 @@ def render_local(
 
     export = _fetch_export()
     _require_corpus(export)
-    export, merges = identity.resolve(export, _facet_parents(facets_path))
+    store = _state(state)
+    export, merges = identity.resolve(export, _facet_parents(facets_path, store))
 
     overlay = None
     overlay_summary: dict | None = None
     if links_path is not None:
-        if not links_path.exists():
-            raise RuntimeError(f"links file not found: {links_path}")
-        export, overlay, ostats = link.build_overlay(
-            export, link.LinksFile.load(links_path), merges
-        )
+        links = store.links(links_path, required=True)
+        assert links is not None
+        export, overlay, ostats = link.build_overlay(export, links, merges)
         overlay_summary = {
             "file": str(links_path),
             "statements": ostats.statements,
@@ -269,9 +279,8 @@ def render_local(
     context = None
     prose = None
     if prose_path is not None:
-        if not prose_path.exists():
-            raise RuntimeError(f"prose file not found: {prose_path}")
-        prose = generate.ProseFile.load(prose_path)
+        prose = store.prose(prose_path, required=True)
+        assert prose is not None
         export = generate.apply_prose(export, prose, merges)
         context = generate.context_by_entity(export, prose, merges)
         prose_summary = {
@@ -342,8 +351,9 @@ def link_local(
     workers: int = 1,
     facets_path: Path | None = None,
     dry_run: bool = False,
+    state: state_backend.FileState | None = None,
 ) -> dict:
-    """Run the linking pass locally: references to a JSON file, nothing to the API.
+    """Run the linking pass locally: references to the state store.
 
     With ``dry_run``, nothing is called and nothing is written: the summary
     says how many calls a real run would make and what they would cost.
@@ -359,14 +369,16 @@ def link_local(
     _require_corpus(export)
     # Link against the merged corpus, so a merged-away name resolves to its
     # preferred entity rather than being proposed as a new concept.
-    export, _ = identity.resolve(export, _facet_parents(facets_path))
+    store = _state(state)
+    export, _ = identity.resolve(export, _facet_parents(facets_path, store))
 
     statements = link.collect_statements(export)
     chosen = (
         link.sample_statements(statements, sample) if sample is not None else statements
     )
     catalog = link.Catalog(export.entities)
-    links = link.LinksFile.load(links_path)
+    links = store.links(links_path)
+    assert links is not None
     llm, model = link.llm_from_env(dry_run=dry_run)
 
     LOG.info(
@@ -384,12 +396,12 @@ def link_local(
         llm,
         model=model,
         batch_size=batch_size,
-        on_batch=None if dry_run else (lambda: links.save(links_path)),
+        on_batch=None if dry_run else (lambda: store.save(links, links_path)),
         workers=workers,
     )
     if dry_run:
         return _dry_summary("link", llm, counts)
-    links.save(links_path)
+    store.save(links, links_path, final=True)
 
     keys = [s.key for s in chosen]
     review_path = links_path.with_name(links_path.stem + "-review.md")
@@ -426,6 +438,7 @@ def generate_local(
     condense: bool = False,
     facets_path: Path | None = None,
     dry_run: bool = False,
+    state: state_backend.FileState | None = None,
 ) -> dict:
     """Run generation locally: overviews to a JSON file, nothing to the API.
 
@@ -444,15 +457,20 @@ def generate_local(
     export = _fetch_export()
     _require_corpus(export)
 
-    export, merges = identity.resolve(export, _facet_parents(facets_path))
+    store = _state(state)
+    export, merges = identity.resolve(export, _facet_parents(facets_path, store))
     overlay = None
     links = None
-    if links_path is not None and links_path.exists():
-        links = link.LinksFile.load(links_path)
+    if links_path is not None and (
+        isinstance(store, state_backend.ApiState) or links_path.exists()
+    ):
+        links = store.links(links_path)
+        assert links is not None
         export, overlay, _ = link.build_overlay(export, links, merges)
 
     corpus = generate.build_corpus(export, overlay, links, merges)
-    prose = generate.ProseFile.load(prose_path)
+    prose = store.prose(prose_path)
+    assert prose is not None
     if condense:
         llm, model = link.llm_from_env(dry_run=dry_run)
         counts = generate.run_condense(
@@ -461,11 +479,11 @@ def generate_local(
             llm,
             model=model,
             workers=workers,
-            on_entity=None if dry_run else (lambda: prose.save(prose_path)),
+            on_entity=None if dry_run else (lambda: store.save(prose, prose_path)),
         )
         if dry_run:
             return _dry_summary("condense", llm, counts)
-        prose.save(prose_path)
+        store.save(prose, prose_path, final=True)
         review_path = prose_path.with_name(prose_path.stem + "-review.md")
         review_path.write_text(generate.review_markdown(prose, counts["slugs"]))
         LOG.info(
@@ -500,12 +518,12 @@ def generate_local(
         llm,
         model=model,
         wiki_repo_path=wiki_repo_path,
-        on_entity=None if dry_run else (lambda: prose.save(prose_path)),
+        on_entity=None if dry_run else (lambda: store.save(prose, prose_path)),
         workers=workers,
     )
     if dry_run:
         return _dry_summary("generate", llm, counts)
-    prose.save(prose_path)
+    store.save(prose, prose_path, final=True)
 
     slugs = [e.slug for e in chosen]
     review_path = prose_path.with_name(prose_path.stem + "-review.md")
@@ -533,8 +551,9 @@ def consolidate_local(
     batch_size: int = consolidate.DEFAULT_BATCH_SIZE,
     workers: int = consolidate.DEFAULT_WORKERS,
     dry_run: bool = False,
+    state: state_backend.FileState | None = None,
 ) -> dict:
-    """Decide which entities are facets of broader ones: to a JSON file.
+    """Decide which entities are facets of broader ones: to the state store.
 
     With ``dry_run``, nothing is called and nothing is written: the summary
     says how many calls a real run would make and what they would cost.
@@ -548,17 +567,21 @@ def consolidate_local(
     _require_corpus(export)
     export, merges = identity.resolve(export)
 
+    store = _state(state)
+    api = isinstance(store, state_backend.ApiState)
     links = None
-    if links_path is not None and links_path.exists():
-        links = link.LinksFile.load(links_path)
+    if links_path is not None and (api or links_path.exists()):
+        links = store.links(links_path)
     supports = consolidate.support(export, links, merges)
 
     definitions = None
-    if prose_path is not None and prose_path.exists():
-        prose = generate.ProseFile.load(prose_path)
+    if prose_path is not None and (api or prose_path.exists()):
+        prose = store.prose(prose_path)
+        assert prose is not None
         definitions = {e.slug: prose.definition(e.slug) for e in export.entities}
 
-    facets = consolidate.FacetsFile.load(facets_path)
+    facets = store.facets(facets_path)
+    assert facets is not None
     llm, model = link.llm_from_env(dry_run=dry_run)
     LOG.info("consolidate.start model=%s file=%s", model, facets_path)
     counts = consolidate.run_consolidation(
@@ -571,11 +594,11 @@ def consolidate_local(
         batch_size=batch_size,
         workers=workers,
         sample=sample,
-        on_batch=None if dry_run else (lambda: facets.save(facets_path)),
+        on_batch=None if dry_run else (lambda: store.save(facets, facets_path)),
     )
     if dry_run:
         return _dry_summary("consolidate", llm, counts)
-    facets.save(facets_path)
+    store.save(facets, facets_path, final=True)
 
     names = {e.slug: e.canonical_name for e in export.entities}
     review_path = facets_path.with_name(facets_path.stem + "-review.md")
@@ -607,6 +630,11 @@ _STATE_TIMEOUT_S = 180.0
 
 def _state_client() -> KaianoApiClient:
     return KaianoApiClient(machine_name=MACHINE_NAME, timeout=_STATE_TIMEOUT_S)
+
+
+def api_state() -> state_backend.ApiState:
+    """The API as the state store, through this cog's own key (MINI-94)."""
+    return state_backend.ApiState(_state_client())
 
 
 def state_import_local(

@@ -424,7 +424,12 @@ def test_link_mode_runs_without_the_gate_or_config(
         patch.object(main, "load_config", side_effect=AssertionError("no config")),
         patch.object(main, "link_local", return_value={"linked": 0}) as run,
     ):
-        assert main.main(["link", "--sample", "20", "--links-file", str(out)]) == 0
+        assert (
+            main.main(
+                ["link", "--sample", "20", "--links-file", str(out), "--state", "files"]
+            )
+            == 0
+        )
     run.assert_called_once_with(
         out.resolve(), facets_path=None, sample=20, dry_run=False
     )
@@ -590,7 +595,12 @@ def test_render_mode_passes_the_links_file(
     with patch.object(
         main, "render_local", return_value={"broken_links": {"count": 0}}
     ) as run:
-        assert main.main(["render", "--links", str(tmp_path / "l.json")]) == 0
+        assert (
+            main.main(
+                ["render", "--links", str(tmp_path / "l.json"), "--state", "files"]
+            )
+            == 0
+        )
     run.assert_called_once_with(
         tmp_path.resolve(), (tmp_path / "l.json").resolve(), None, None
     )
