@@ -13,11 +13,12 @@ job                       unit                        follows with
 ``link``                  one source's statements     ``consolidate`` for its
                                                       undecided entities;
                                                       ``generate`` for every
-                                                      entity it taught or
+                                                      entity a newly linked
+                                                      statement taught or
                                                       referred to
 ``consolidate``           named undecided entities    ``generate`` for each page
                                                       that gained a fold
-``generate``              one entity                  — (``materialise``, MINI-96)
+``generate``              named entities              — (``materialise``, MINI-96)
 ========================  ==========================  ===========================
 
 Every unit is idempotent under its pass's watermark: a statement already
@@ -45,6 +46,11 @@ from .render import WcsWikiExport
 LOG = log.get_logger()
 
 JOBS = ("link", "consolidate", "generate")
+
+#: Entities per follow-on generate job. Each is one model call at most, made
+#: one after another, so this keeps a job well inside a Lambda's 15 minutes
+#: while sparing the worker one export and state read per entity.
+GENERATE_PER_JOB = 25
 
 
 class JobError(ValueError):
@@ -115,6 +121,14 @@ def _job(kind: str, **fields: Any) -> dict[str, Any]:
     return {"job": kind, **fields}
 
 
+def _generate_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
+    ordered = sorted(set(slugs))
+    return [
+        _job("generate", entities=ordered[i : i + GENERATE_PER_JOB])
+        for i in range(0, len(ordered), GENERATE_PER_JOB)
+    ]
+
+
 # ── link ──
 
 
@@ -124,6 +138,9 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
     statements = [s for s in link.collect_statements(ctx.export) if s.source_id == sid]
     links = ctx.store.links(ctx.paths.links)
     assert links is not None
+    # Only what this run links sends pages to be regenerated: a repeated job
+    # links nothing, so it asks for nothing.
+    newly = [s for s in statements if not links.is_linked(s)]
     counts = link.run_linking(
         statements,
         link.Catalog(ctx.export.entities),
@@ -135,7 +152,9 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
     ctx.store.save(links, ctx.paths.links, final=True)
 
     touched: set[str] = set()
-    for s in statements:
+    for s in newly:
+        if not links.is_linked(s):
+            continue  # its batch failed; the next run tries it again
         touched.add(s.subject_slug)
         entry = links.statements.get(s.key) or {}
         touched.update(r["target_slug"] for r in entry.get("references", []))
@@ -151,9 +170,9 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
         and by_slug[slug].kind in version_of
         and not facets.is_decided(slug, version_of[by_slug[slug].kind])
     )
-    follow = ([_job("consolidate", entities=undecided)] if undecided else []) + [
-        _job("generate", entity=slug) for slug in sorted(touched)
-    ]
+    follow = ([_job("consolidate", entities=undecided)] if undecided else []) + (
+        _generate_jobs(touched)
+    )
     return {
         "job": "link",
         "source_id": str(sid),
@@ -200,15 +219,15 @@ def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         "job": "consolidate",
         "entities": sorted(slugs),
         **{k: counts[k] for k in ("skipped", "decided", "failed_batches")},
-        "next": [_job("generate", entity=slug) for slug in gained],
+        "next": _generate_jobs(gained),
     }
 
 
 # ── generate ──
 
 
-def generate_entity(ctx: RunContext, slug: str) -> dict[str, Any]:
-    """Integrate one entity's pending statements. No call if there are none.
+def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
+    """Integrate these entities' pending statements. No call for one with none.
 
     A slug folded away since the job was enqueued is generated as the page it
     folded into; one that no longer exists at all is skipped.
@@ -217,19 +236,19 @@ def generate_entity(ctx: RunContext, slug: str) -> dict[str, Any]:
     assert links is not None
     export, overlay, _ = link.build_overlay(ctx.export, links, ctx.merges)
     corpus = generate.build_corpus(export, overlay, links, ctx.merges)
-    target = ctx.merges.by_slug.get(slug, slug) if ctx.merges else slug
-    entity = corpus.entities.get(target)
-    if entity is None:
-        return {
-            "job": "generate",
-            "entity": slug,
-            "skipped": "no such entity",
-            "next": [],
-        }
+    targets: dict[str, Any] = {}
+    skipped: list[str] = []
+    for slug in slugs:
+        target = ctx.merges.by_slug.get(slug, slug) if ctx.merges else slug
+        entity = corpus.entities.get(target)
+        if entity is None:
+            skipped.append(slug)
+        else:
+            targets.setdefault(target, entity)
     prose = ctx.store.prose(ctx.paths.prose)
     assert prose is not None
     counts = generate.run_generation(
-        [entity],
+        list(targets.values()),
         corpus,
         prose,
         ctx.llm,
@@ -239,7 +258,8 @@ def generate_entity(ctx: RunContext, slug: str) -> dict[str, Any]:
     ctx.store.save(prose, ctx.paths.prose, final=True)
     return {
         "job": "generate",
-        "entity": target,
+        "entities": sorted(targets),
+        "skipped": sorted(skipped),
         **{k: counts[k] for k in ("generated", "failed")},
         "next": [],
     }
@@ -265,8 +285,9 @@ def validate(job: dict[str, Any]) -> str:
         if not isinstance(entities, list) or not entities:
             raise JobError("consolidate needs a non-empty entities list")
     elif kind == "generate":
-        if not job.get("entity"):
-            raise JobError("generate needs entity")
+        entities = job.get("entities")
+        if not job.get("entity") and not (isinstance(entities, list) and entities):
+            raise JobError("generate needs entity or a non-empty entities list")
     else:
         raise JobError(f"unknown job {kind!r}; expected one of {', '.join(JOBS)}")
     return str(kind)
@@ -280,6 +301,7 @@ def handle(job: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
     elif kind == "consolidate":
         result = consolidate_entities(ctx, [str(e) for e in job["entities"]])
     else:
-        result = generate_entity(ctx, str(job["entity"]))
+        named = job.get("entities") or [job["entity"]]
+        result = generate_entities(ctx, [str(e) for e in named])
     LOG.info("unit.done job=%s next=%s", kind, len(result.get("next", [])))
     return result

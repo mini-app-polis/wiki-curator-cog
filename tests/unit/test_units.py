@@ -89,14 +89,15 @@ def test_a_link_job_links_one_source_and_names_what_follows(tmp_path: Path) -> N
     )
 
     assert result["statements"] == 4 and result["linked"] == 4
-    nxt = result["next"]
-    assert nxt[0] == {
-        "job": "consolidate",
-        "entities": ["anchor-step", "stretch", "wall-drill"],
-    }
-    generated = {j["entity"] for j in nxt[1:]}
-    # what it taught, and what it referred to — a new concept included
-    assert generated == {"anchor-step", "stretch", "wall-drill", "connection"}
+    assert result["next"] == [
+        {"job": "consolidate", "entities": ["anchor-step", "stretch", "wall-drill"]},
+        # what it taught, and what it referred to — a new concept included —
+        # in one job
+        {
+            "job": "generate",
+            "entities": ["anchor-step", "connection", "stretch", "wall-drill"],
+        },
+    ]
 
 
 def test_a_repeated_job_costs_nothing(tmp_path: Path) -> None:
@@ -107,6 +108,8 @@ def test_a_repeated_job_costs_nothing(tmp_path: Path) -> None:
     again = units.handle(job, _ctx(tmp_path, llm))
     assert llm.calls == calls
     assert again["linked"] == 0 and again["skipped"] == 4
+    # nothing newly linked, nothing to regenerate; the decisions are still owed
+    assert [j["job"] for j in again["next"]] == ["consolidate"]
 
 
 def test_a_source_with_nothing_in_the_corpus_is_a_no_op(tmp_path: Path) -> None:
@@ -128,7 +131,7 @@ def test_a_consolidate_job_decides_only_what_it_names(tmp_path: Path) -> None:
     assert facets.parents() == {"anchor-step": "stretch"}
     assert result["decided"] == 1
     # the page that gained a facet is regenerated with it
-    assert result["next"] == [{"job": "generate", "entity": "stretch"}]
+    assert result["next"] == [{"job": "generate", "entities": ["stretch"]}]
 
 
 def test_a_generate_job_writes_one_entity_once(tmp_path: Path) -> None:
@@ -149,14 +152,15 @@ def test_a_folded_entity_is_generated_as_its_page(tmp_path: Path) -> None:
     result = units.handle(
         {"job": "generate", "entity": "anchor-step"}, _ctx(tmp_path, RouterLLM())
     )
-    assert result["entity"] == "stretch"
+    assert result["entities"] == ["stretch"]
 
 
 def test_an_unknown_entity_is_skipped(tmp_path: Path) -> None:
     result = units.handle(
-        {"job": "generate", "entity": "gone"}, _ctx(tmp_path, RouterLLM())
+        {"job": "generate", "entities": ["gone", "stretch"]},
+        _ctx(tmp_path, RouterLLM()),
     )
-    assert result["skipped"] == "no such entity"
+    assert result["skipped"] == ["gone"] and result["entities"] == ["stretch"]
 
 
 @pytest.mark.parametrize(
@@ -217,3 +221,13 @@ def test_the_job_command_refuses_bad_json(
     assert main.main(["job", "--job", "not json", "--state", "files"]) == 2
     with patch.object(flow, "_fetch_export", return_value=_export()):
         assert main.main(["job", "--job", '{"job": "dance"}', "--state", "files"]) == 2
+
+
+def test_follow_on_generate_jobs_come_in_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(units, "GENERATE_PER_JOB", 2)
+    assert units._generate_jobs({"c", "a", "b"}) == [
+        {"job": "generate", "entities": ["a", "b"]},
+        {"job": "generate", "entities": ["c"]},
+    ]

@@ -186,7 +186,7 @@ unknown fields the same way, and a refused write stops the run.
 
 `units.handle` is the body of the wiki-jobs worker (MINI-95): one job in, its
 result and the jobs that should follow out. `link` takes one source;
-`consolidate` takes named entities; `generate` takes one entity. Each is a
+`consolidate` and `generate` take named entities. Each is a
 no-op when its watermark says there is nothing new, so a retried or
 duplicated message costs nothing. The `job` command runs one locally, against
 production and the state store — the way to see what one new note costs:
@@ -197,7 +197,8 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 ```
 
 The result's `next` lists the follow-on jobs (`consolidate` for the source's
-undecided entities, `generate` for every page it touched). The command does
+undecided entities, `generate` — in chunks of entities — for every page its
+newly linked statements touched; a repeated job touches none). The command does
 not run them; run each the same way, or let the worker's dispatch do it.
 
 ### Link locally (ADR-005, MINI-84)
