@@ -1,3 +1,10 @@
+# [2.2.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.1.0...v2.2.0) (2026-10-17)
+
+
+### Features
+
+* state-import and state-verify — move curator state to the API (MINI-89) ([042dbc6](https://github.com/mini-app-polis/wiki-curator-cog/commit/042dbc631c41d4c66e19a80e6533d42279c44cd5))
+
 # [2.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.0.22...v2.1.0) (2026-10-17)
 
 
