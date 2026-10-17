@@ -81,11 +81,24 @@ jobs:
         run: npx semantic-release
 
       # semantic-release tags the release commit it leaves at HEAD. No tag
-      # there means the push carried nothing releasable, and nothing new
-      # needs deploying.
+      # there means this run released nothing — but a re-run of a release
+      # that failed after pushing its tag (attempt 1 of 2.3.0) releases
+      # nothing either, while the tag it should deploy sits on main's tip,
+      # one commit past the merge this run checked out. So: the tag at HEAD,
+      # else the tag on main's tip when that tip is a release commit whose
+      # parent is this run's commit. Anything else deploys nothing.
       - name: Record the release tag
         id: released
-        run: echo "tag=$(git tag --points-at HEAD --list 'v*' | head -n1)" >> "$GITHUB_OUTPUT"
+        run: |
+          tag="$(git tag --points-at HEAD --list 'v*' | head -n1)"
+          if [ -z "$tag" ]; then
+            git fetch --quiet --tags origin main
+            tip="$(git rev-parse FETCH_HEAD)"
+            if [ "$(git rev-parse "$tip^")" = "$GITHUB_SHA" ]; then
+              tag="$(git tag --points-at "$tip" --list 'v*' | head -n1)"
+            fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   # The wiki-jobs worker (ADR-006, MINI-95), deployed here as a job: a release
   # published with GITHUB_TOKEN starts no workflows, so `on: release` would
