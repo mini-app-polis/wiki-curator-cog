@@ -415,3 +415,166 @@ def test_link_mode_runs_without_the_gate_or_config(
         assert main.main(["link", "--sample", "20", "--links-file", str(out)]) == 0
     run.assert_called_once_with(out.resolve(), sample=20)
     assert json.loads(capsys.readouterr().out) == {"linked": 0}
+
+
+# ── the overlay ──
+
+
+def _links_with(
+    *entries: tuple[str, str, list[tuple[str, str | None, str]]],
+) -> link.LinksFile:
+    """(subject_slug, session_date, [(target_slug, target_entity_id, polarity)])."""
+    links = link.LinksFile()
+    for i, (subject, date, refs) in enumerate(entries):
+        links.statements[f"attribution:{i}"] = {
+            "linker_version": link.LINKER_VERSION,
+            "model": "m",
+            "subject_slug": subject,
+            "source_id": None,
+            "session_date": date,
+            "text": "",
+            "references": [
+                {
+                    "name": slug.replace("-", " "),
+                    "target_slug": slug,
+                    "target_entity_id": eid,
+                    "polarity": pol,
+                }
+                for slug, eid, pol in refs
+            ],
+        }
+    return links
+
+
+def test_the_overlay_adds_proposed_concepts_and_both_directions() -> None:
+    export = _export()
+    links = _links_with(
+        (
+            "anchor-step",
+            "2026-03-01",
+            [
+                ("connection", None, "assert"),
+                ("stretch", str(_id("stretch")), "assert"),
+            ],
+        ),
+        ("wall-drill", "2026-03-02", [("connection", None, "assert")]),
+    )
+
+    augmented, overlay, stats = link.build_overlay(export, links)
+
+    connection = next(e for e in augmented.entities if e.slug == "connection")
+    assert connection.canonical_name == "Connection"
+    assert connection.kind == "concept"
+    assert stats.proposed_pages == ["connection"]
+    assert overlay.referenced_by[connection.id] == {
+        _id("anchor-step"): 1,
+        _id("wall-drill"): 1,
+    }
+    assert overlay.mentions[_id("anchor-step")] == {connection.id: 1, _id("stretch"): 1}
+    # the export passed in is not mutated
+    assert all(e.slug != "connection" for e in export.entities)
+
+
+def test_the_newest_word_wins_and_a_same_day_denial_beats_an_assertion() -> None:
+    stretch = str(_id("stretch"))
+    later_denial = _links_with(
+        ("anchor-step", "2026-01-01", [("stretch", stretch, "assert")]),
+        ("anchor-step", "2026-02-01", [("stretch", stretch, "deny")]),
+    )
+    reasserted = _links_with(
+        ("anchor-step", "2026-01-01", [("stretch", stretch, "deny")]),
+        ("anchor-step", "2026-02-01", [("stretch", stretch, "assert")]),
+    )
+    same_day = _links_with(
+        ("anchor-step", "2026-01-01", [("stretch", stretch, "assert")]),
+        ("anchor-step", "2026-01-01", [("stretch", stretch, "deny")]),
+    )
+
+    _, o1, s1 = link.build_overlay(_export(), later_denial)
+    _, o2, _ = link.build_overlay(_export(), reasserted)
+    _, o3, _ = link.build_overlay(_export(), same_day)
+
+    assert _id("stretch") not in o1.referenced_by and s1.denied_pairs == 1
+    assert o2.referenced_by[_id("stretch")] == {_id("anchor-step"): 1}
+    assert _id("stretch") not in o3.referenced_by
+
+
+def test_a_proposed_concept_only_denied_gets_no_page() -> None:
+    links = _links_with(("anchor-step", "2026-01-01", [("frame", None, "deny")]))
+    augmented, _, stats = link.build_overlay(_export(), links)
+    assert stats.proposed_pages == []
+    assert all(e.slug != "frame" for e in augmented.entities)
+
+
+def test_a_rendered_overlay_has_pages_sections_and_no_broken_links() -> None:
+    from wiki_curator_cog.render import find_broken_links, render_bundle
+
+    links = _links_with(
+        (
+            "anchor-step",
+            "2026-03-01",
+            [
+                ("connection", None, "assert"),
+                ("stretch", str(_id("stretch")), "assert"),
+            ],
+        ),
+        (
+            "wall-drill",
+            "2026-03-02",
+            [
+                ("connection", None, "assert"),
+                ("stretch", str(_id("stretch")), "assert"),
+            ],
+        ),
+    )
+    augmented, overlay, _ = link.build_overlay(_export(), links)
+
+    bundle, _ = render_bundle(
+        augmented, rendered_at=dt.date(2026, 10, 16), overlay=overlay
+    )
+
+    assert "concepts/connection.md" in bundle
+    assert "## Referenced by" in bundle["concepts/connection.md"]
+    assert "[[techniques/anchor-step]]" in bundle["concepts/connection.md"]
+    assert "## Mentions" in bundle["techniques/anchor-step.md"]
+    assert "[[concepts/connection]]" in bundle["techniques/anchor-step.md"]
+    assert "[[concepts/connection]]" in bundle["index.md"]
+    assert find_broken_links(bundle) == []
+
+
+def test_without_an_overlay_pages_are_unchanged() -> None:
+    from wiki_curator_cog.render import render_bundle
+
+    bundle, _ = render_bundle(_export(), rendered_at=dt.date(2026, 10, 16))
+    assert all(
+        "## Mentions" not in t and "## Referenced by" not in t for t in bundle.values()
+    )
+
+
+def test_render_local_with_links_reports_the_overlay(tmp_path: Path) -> None:
+    wiki = tmp_path / "wcs-wiki"
+    wiki.mkdir()
+    (wiki / "CLAUDE.md").write_text("# spec\n")
+    links_path = tmp_path / "links.json"
+    _links_with(("anchor-step", "2026-03-01", [("connection", None, "assert")])).save(
+        links_path
+    )
+
+    with patch.object(flow, "_fetch_export", return_value=_export()):
+        summary = flow.render_local(wiki, links_path)
+
+    assert (wiki / "concepts" / "connection.md").exists()
+    assert summary["links"]["proposed_pages"] == ["connection"]
+    assert summary["links"]["pairs"] == 1
+    assert summary["broken_links"]["count"] == 0
+
+
+def test_render_mode_passes_the_links_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with patch.object(
+        main, "render_local", return_value={"broken_links": {"count": 0}}
+    ) as run:
+        assert main.main(["render", "--links", str(tmp_path / "l.json")]) == 0
+    run.assert_called_once_with(tmp_path.resolve(), (tmp_path / "l.json").resolve())

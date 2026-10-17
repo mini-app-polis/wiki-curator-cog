@@ -211,7 +211,7 @@ def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     }
 
 
-def render_local(wiki_repo_path: Path) -> dict:
+def render_local(wiki_repo_path: Path, links_path: Path | None = None) -> dict:
     """Render into an existing local clone. No clone, commit, push or report.
 
     The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
@@ -232,7 +232,24 @@ def render_local(wiki_repo_path: Path) -> dict:
 
     export = _fetch_export()
     _require_corpus(export)
-    bundle, stats = render_bundle(export, rendered_at=dt.date.today())
+
+    overlay = None
+    overlay_summary: dict | None = None
+    if links_path is not None:
+        if not links_path.exists():
+            raise RuntimeError(f"links file not found: {links_path}")
+        export, overlay, ostats = link.build_overlay(
+            export, link.LinksFile.load(links_path)
+        )
+        overlay_summary = {
+            "file": str(links_path),
+            "statements": ostats.statements,
+            "pairs": ostats.pairs,
+            "denied_pairs": ostats.denied_pairs,
+            "proposed_pages": ostats.proposed_pages,
+        }
+
+    bundle, stats = render_bundle(export, rendered_at=dt.date.today(), overlay=overlay)
     bundle.pop("log.md", None)
 
     stale = list_stale_derived_paths(wiki_repo_path, set(bundle))
@@ -256,6 +273,7 @@ def render_local(wiki_repo_path: Path) -> dict:
         },
         "dropped": [{"reason": r, "reference": ref} for r, ref in stats.dropped],
         "quality": corpus_quality(export, build_indexes(export)),
+        "links": overlay_summary,
     }
     LOG.info(
         "render.local.complete pages=%s removed=%s broken_links=%s dropped=%s",

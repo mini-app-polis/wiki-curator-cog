@@ -104,6 +104,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="link: the references file, and the watermark (default links.json).",
     )
     parser.add_argument(
+        "--links",
+        default=None,
+        help="render: overlay the references in this links file (from `link`).",
+    )
+    parser.add_argument(
         "--sample",
         type=int,
         default=None,
@@ -138,7 +143,7 @@ def _auto_run_enabled() -> bool:
     return current_environment() is Environment.PRODUCTION
 
 
-def _render(wiki_repo_path_raw: str) -> int:
+def _render(wiki_repo_path_raw: str, links: str | None = None) -> int:
     """The local loop: render into a clone, print what it found.
 
     Exits non-zero when any link has no page, after writing, so the result
@@ -150,7 +155,8 @@ def _render(wiki_repo_path_raw: str) -> int:
         )
         return 2
     wiki_repo_path = Path(wiki_repo_path_raw).expanduser().resolve()
-    summary = render_local(wiki_repo_path)
+    links_path = Path(links).expanduser().resolve() if links else None
+    summary = render_local(wiki_repo_path, links_path)
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 1 if summary["broken_links"]["count"] else 0
 
@@ -170,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
 
     if args.mode == "render":
-        return _render(os.getenv("WIKI_REPO_PATH", ""))
+        return _render(os.getenv("WIKI_REPO_PATH", ""), args.links)
     if args.mode == "link":
         return _link(args)
 

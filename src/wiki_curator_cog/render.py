@@ -88,6 +88,32 @@ class RenderStats:
 
 
 @dataclass(frozen=True)
+class LinkOverlay:
+    """References from the linking pass, already resolved (ADR-005).
+
+    Built by :func:`wiki_curator_cog.link.build_overlay`. Each pair of
+    entities has been settled newest-wins, so a pair a later statement denied
+    is simply absent. Counts are the number of statements asserting the pair.
+    """
+
+    #: subject id → {target id: statements}, for a page's ``## Mentions``.
+    mentions: dict[uuid.UUID, dict[uuid.UUID, int]] = field(default_factory=dict)
+    #: target id → {subject id: statements}, for a page's ``## Referenced by``.
+    referenced_by: dict[uuid.UUID, dict[uuid.UUID, int]] = field(default_factory=dict)
+
+
+def _counted_links(counts: dict[uuid.UUID, int], indexes: ExportIndexes) -> list[str]:
+    """Wiki-links, most-referenced first, with a count where it is above one."""
+    rows: list[tuple[int, str, str]] = []
+    for other_id, n in counts.items():
+        other = indexes.entities_by_id.get(other_id)
+        if other is not None:
+            suffix = f" ({n})" if n > 1 else ""
+            rows.append((-n, other.slug, f"- {_entity_link(other)}{suffix}"))
+    return [line for _, _, line in sorted(rows)]
+
+
+@dataclass(frozen=True)
 class _ViewSpec:
     slug: str
     filter_description: str
@@ -493,8 +519,14 @@ def render_entity_page(
     indexes: ExportIndexes,
     *,
     rendered_at: dt.date,
+    overlay: LinkOverlay | None = None,
 ) -> str:
-    """Render one entity's Markdown page."""
+    """Render one entity's Markdown page.
+
+    With an ``overlay`` the page also gets ``## Mentions`` (what its
+    statements refer to) and ``## Referenced by`` (every entity that refers to
+    it, through the linking pass or a relation pointing here).
+    """
     attributions = indexes.attributions_by_entity.get(entity.id, [])
     definitions = indexes.definitions_by_entity.get(entity.id, [])
     relations = indexes.relations_by_entity.get(entity.id, [])
@@ -575,6 +607,23 @@ def render_entity_page(
             related_lines.append(line)
         if related_lines:
             page.set_section("Related", related_lines)
+
+    if overlay is not None:
+        mentions = _counted_links(overlay.mentions.get(entity.id, {}), indexes)
+        if mentions:
+            page.set_section("Mentions", mentions)
+        incoming = dict(overlay.referenced_by.get(entity.id, {}))
+        for relation in relations:
+            if (
+                relation.to_entity_id == entity.id
+                and relation.from_entity_id != entity.id
+            ):
+                incoming[relation.from_entity_id] = (
+                    incoming.get(relation.from_entity_id, 0) + 1
+                )
+        referenced_by = _counted_links(incoming, indexes)
+        if referenced_by:
+            page.set_section("Referenced by", referenced_by)
 
     return md.serialize(page)
 
@@ -1060,8 +1109,13 @@ def render_bundle(
     *,
     rendered_at: dt.date | None = None,
     existing_log: str = "",
+    overlay: LinkOverlay | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
-    """Render the full wiki bundle. Keys are repo-relative paths."""
+    """Render the full wiki bundle. Keys are repo-relative paths.
+
+    ``overlay`` adds the linking pass's references to entity pages; the
+    export should already carry any entities the overlay introduced.
+    """
     when = rendered_at or dt.date.today()
     indexes = build_indexes(export)
     bundle: dict[str, str] = {}
@@ -1087,7 +1141,9 @@ def render_bundle(
 
     for entity in sorted(export.entities, key=lambda e: e.slug):
         path = _entity_path(entity)
-        bundle[path] = render_entity_page(entity, indexes, rendered_at=when)
+        bundle[path] = render_entity_page(
+            entity, indexes, rendered_at=when, overlay=overlay
+        )
         if not indexes.attributions_by_entity.get(entity.id):
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")
 

@@ -42,7 +42,7 @@ from mini_app_polis import logger as log
 from mini_app_polis.llm import LLMMessage, build_llm
 from mini_app_polis.llm.base import LLMClient
 
-from .render import WcsEntity, WcsWikiExport
+from .render import LinkOverlay, WcsEntity, WcsWikiExport
 
 LOG = log.get_logger()
 
@@ -602,3 +602,93 @@ def review_markdown(links: LinksFile, keys: Iterable[str]) -> str:
             lines.append(f"- {r['name']} → `{r['target_slug']}`{mark}{deny}")
         lines.append("")
     return "\n".join(lines)
+
+
+# ── The overlay: references onto the rendered wiki ──
+
+#: Namespace for the ids of concepts the pass proposes. Deterministic, so a
+#: proposed concept keeps its id from render to render until the API mints a
+#: real one.
+_PROPOSED_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "wcs-wiki/linker/proposed")
+
+
+def _proposed_entity(slug: str, name: str) -> WcsEntity:
+    return WcsEntity(
+        id=uuid.uuid5(_PROPOSED_NAMESPACE, slug),
+        slug=slug,
+        canonical_name=" ".join(w[:1].upper() + w[1:] for w in name.split()) or slug,
+        kind="concept",
+        overview_md="",
+        status="",
+        external_origin={},
+        aliases=[],
+    )
+
+
+@dataclass
+class OverlayStats:
+    """What an overlay added to the render."""
+
+    statements: int = 0
+    pairs: int = 0
+    denied_pairs: int = 0
+    proposed_pages: list[str] = field(default_factory=list)
+
+
+def build_overlay(
+    export: WcsWikiExport, links: LinksFile
+) -> tuple[WcsWikiExport, LinkOverlay, OverlayStats]:
+    """Settle the links file into an overlay, and the export it renders over.
+
+    Every reference becomes an event on its (subject, target) pair, dated by
+    its statement's source. Per pair the newest event wins; on the same date a
+    denial beats an assertion, since a correction note is the likelier of the
+    two. A pair whose winner is a denial is dropped. Targets with no entity
+    become proposed concepts, added to the returned export so they get pages
+    and index entries like any other entity.
+    """
+    by_id = {str(e.id): e for e in export.entities}
+    by_slug = {e.slug: e for e in export.entities}
+    proposed: dict[str, WcsEntity] = {}
+    events: dict[tuple[uuid.UUID, uuid.UUID], list[tuple[str, int, str]]] = {}
+    stats = OverlayStats()
+
+    for entry in links.statements.values():
+        subject = by_slug.get(entry.get("subject_slug", ""))
+        if subject is None:
+            continue
+        stats.statements += 1
+        date = entry.get("session_date") or ""
+        for r in entry.get("references", []):
+            target = by_id.get(r.get("target_entity_id") or "") or by_slug.get(
+                r["target_slug"]
+            )
+            if target is None:
+                target = proposed.get(r["target_slug"])
+                if target is None:
+                    target = _proposed_entity(r["target_slug"], r.get("name", ""))
+                    proposed[r["target_slug"]] = target
+            if target.id == subject.id:
+                continue
+            deny = r.get("polarity") == "deny"
+            events.setdefault((subject.id, target.id), []).append(
+                (date, 1 if deny else 0, "deny" if deny else "assert")
+            )
+
+    overlay = LinkOverlay()
+    used_proposed: set[uuid.UUID] = set()
+    for (subject_id, target_id), evts in events.items():
+        evts.sort()
+        if evts[-1][2] == "deny":
+            stats.denied_pairs += 1
+            continue
+        n = sum(1 for e in evts if e[2] == "assert")
+        overlay.mentions.setdefault(subject_id, {})[target_id] = n
+        overlay.referenced_by.setdefault(target_id, {})[subject_id] = n
+        used_proposed.add(target_id)
+        stats.pairs += 1
+
+    kept = [e for e in proposed.values() if e.id in used_proposed]
+    stats.proposed_pages = sorted(e.slug for e in kept)
+    augmented = export.model_copy(update={"entities": [*export.entities, *kept]})
+    return augmented, overlay, stats

@@ -96,6 +96,15 @@ Exits 1 if any link has no page, after writing, so the result can be read.
 WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > render-summary.json
 ```
 
+To see the linking pass's references on the pages, overlay a links file
+(from `link`, below). New concepts it proposes get pages, every entity page
+gains `## Mentions` and `## Referenced by`, and per pair the newest statement
+wins — a later denial removes a link:
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json > render-summary.json
+```
+
 ### Link locally (ADR-005, MINI-84)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
