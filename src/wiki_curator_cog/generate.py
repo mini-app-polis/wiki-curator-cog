@@ -27,11 +27,14 @@ rebuild path ADR-005 keeps as the escape hatch for drift.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import random
+import threading
 import uuid
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -476,12 +479,20 @@ def generate_one(
     model: str,
     wiki_repo_path: Path | None,
     today: str,
+    lock: Any = None,
 ) -> bool:
-    """Integrate this entity's pending evidence. False if there was none."""
-    evidence = pending(entity, corpus, prose)
-    if not evidence:
-        return False
-    base = base_for(entity, prose, wiki_repo_path, today)
+    """Integrate this entity's pending evidence. False if there was none.
+
+    With a ``lock`` (parallel runs), reading and writing ``prose`` happen
+    under it and only the model call runs outside, so many calls can be in
+    flight while the file is updated one entity at a time.
+    """
+    guard = lock if lock is not None else contextlib.nullcontext()
+    with guard:
+        evidence = pending(entity, corpus, prose)
+        if not evidence:
+            return False
+        base = base_for(entity, prose, wiki_repo_path, today)
     result = llm.generate_json(
         messages=build_messages(entity, base, evidence),
         json_schema=RESPONSE_SCHEMA,
@@ -489,6 +500,21 @@ def generate_one(
     )
     definition = str(result.output_json.get("definition", "")).strip()
     context = str(result.output_json.get("context", "")).strip()
+    with guard:
+        _record(prose, entity, evidence, definition, context, model=model, today=today)
+    return True
+
+
+def _record(
+    prose: ProseFile,
+    entity: WcsEntity,
+    evidence: Sequence[Evidence],
+    definition: str,
+    context: str,
+    *,
+    model: str,
+    today: str,
+) -> None:
     entry = prose.entities.get(entity.slug)
     if entry is None or entry.get("generator_version") != GENERATOR_VERSION:
         history = entry.get("revisions", []) if entry else []
@@ -517,7 +543,11 @@ def generate_one(
             "context": context,
         }
     )
-    return True
+
+
+#: Calls in flight at once. One is sequential; more is faster, bounded by
+#: the account's rate limit (the client retries rate-limited calls).
+DEFAULT_WORKERS = 4
 
 
 def run_generation(
@@ -530,20 +560,29 @@ def run_generation(
     wiki_repo_path: Path | None = None,
     today: str | None = None,
     on_entity: Any = None,
+    workers: int = 1,
 ) -> dict[str, Any]:
-    """Generate each entity in turn; ``on_entity`` runs after each, to save.
+    """Generate each entity; ``on_entity`` runs after each, to save.
 
-    One entity's bad response does not end the run: it is retried, then
-    skipped and named in ``failed``, and stays pending — its statements are
-    not marked integrated — so the next run tries it again.
+    ``workers`` model calls run at once. Bookkeeping and ``on_entity`` run
+    under one lock, so the prose file is never written mid-update. One
+    entity's bad response does not end the run: it is retried, then skipped
+    and named in ``failed``, and stays pending — its statements are not
+    marked integrated — so the next run tries it again.
     """
     day = today or dt.date.today().isoformat()
+    lock = threading.Lock()
     generated = 0
+    done = 0
     failed: list[str] = []
-    for i, entity in enumerate(entities, 1):
+
+    def work(entity: WcsEntity) -> None:
+        nonlocal generated, done
+        ok = False
+        made = False
         for attempt in range(1, ATTEMPTS + 1):
             try:
-                if generate_one(
+                made = generate_one(
                     llm,
                     entity,
                     corpus,
@@ -551,8 +590,9 @@ def run_generation(
                     model=model,
                     wiki_repo_path=wiki_repo_path,
                     today=day,
-                ):
-                    generated += 1
+                    lock=lock,
+                )
+                ok = True
                 break
             except LLMError as exc:
                 LOG.warning(
@@ -562,18 +602,28 @@ def run_generation(
                     ATTEMPTS,
                     exc,
                 )
-                if attempt == ATTEMPTS:
-                    failed.append(entity.slug)
-        if on_entity is not None:
-            on_entity()
-        LOG.info("generate.entity done=%s/%s slug=%s", i, len(entities), entity.slug)
+        with lock:
+            done += 1
+            if made:
+                generated += 1
+            if not ok:
+                failed.append(entity.slug)
+            if on_entity is not None:
+                on_entity()
+            LOG.info(
+                "generate.entity done=%s/%s slug=%s", done, len(entities), entity.slug
+            )
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        list(pool.map(work, entities))
+
     prose.generator_version = GENERATOR_VERSION
     prose.model = model
     return {
         "entities": len(entities),
         "generated": generated,
         "failed": len(failed),
-        "failed_slugs": failed,
+        "failed_slugs": sorted(failed),
     }
 
 

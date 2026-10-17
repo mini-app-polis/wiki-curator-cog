@@ -147,6 +147,10 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render --links links.json --prose prose.json > render-summary.json
 ```
 
+`--workers N` runs N model calls at once (default 4 for `generate`, 1 for
+`link`); the files are still written one entity or batch at a time. The
+limit is the account's rate limit — rate-limited calls are retried.
+
 The page is the base: if an overview was edited on the page, the next run
 builds on the edit rather than replacing it. Editing is optional —
 corrections normally arrive as notes.

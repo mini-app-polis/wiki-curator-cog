@@ -619,3 +619,18 @@ def test_a_stray_field_from_the_model_does_not_reject_the_answer() -> None:
         ]
     }
     validate_json(answer, link.RESPONSE_SCHEMA)
+
+
+def test_parallel_linking_links_everything_once(catalog: link.Catalog) -> None:
+    statements = link.collect_statements(_export())
+    links = link.LinksFile()
+    llm = FakeLLM({})
+
+    result = link.run_linking(
+        statements, catalog, links, llm, model="m", batch_size=1, workers=4
+    )
+
+    assert result["linked"] == len(statements)
+    assert sorted(k for call in llm.calls for k in call) == sorted(
+        s.key for s in statements
+    )

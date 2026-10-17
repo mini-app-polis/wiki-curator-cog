@@ -141,6 +141,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="link: link a reproducible sample of N statements instead of all.",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help=(
+            "link / generate: model calls in flight at once "
+            "(default: 1 for link, 4 for generate)."
+        ),
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=None,
@@ -195,6 +204,8 @@ def _link(args: argparse.Namespace) -> int:
     kwargs: dict = {"sample": args.sample}
     if args.batch_size is not None:
         kwargs["batch_size"] = args.batch_size
+    if args.workers is not None:
+        kwargs["workers"] = args.workers
     summary = link_local(Path(args.links_file).expanduser().resolve(), **kwargs)
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
@@ -210,6 +221,7 @@ def _generate(args: argparse.Namespace) -> int:
         wiki_repo_path=Path(wiki).expanduser().resolve() if wiki else None,
         entities=args.entity,
         sample=args.sample,
+        **({"workers": args.workers} if args.workers is not None else {}),
     )
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0

@@ -31,9 +31,11 @@ import json
 import os
 import random
 import re
+import threading
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -520,40 +522,51 @@ def run_linking(
     model: str,
     batch_size: int = DEFAULT_BATCH_SIZE,
     on_batch: Any = None,
+    workers: int = 1,
 ) -> dict[str, Any]:
     """Link every statement not already linked; record into ``links``.
 
-    ``on_batch`` is called after each batch, so the caller can save progress
-    and a run cut short keeps what it paid for.
+    ``workers`` batches run at once; recording and ``on_batch`` (the save)
+    happen under one lock. One bad response does not end a long run: that
+    batch stays unlinked and the next run picks it up. With several workers,
+    batches in flight at the same moment do not see each other's newly
+    proposed names; the next run's names-in-use list catches them up.
     """
     todo = [s for s in statements if not links.is_linked(s)]
     skipped = len(statements) - len(todo)
+    batches = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
+    lock = threading.Lock()
     linked = 0
     failed_batches = 0
-    for start in range(0, len(todo), batch_size):
-        batch = todo[start : start + batch_size]
+    processed = 0
+
+    def work(batch: list[Statement]) -> None:
+        nonlocal linked, failed_batches, processed
+        with lock:
+            names = links.proposed_names()
         try:
-            results = link_batch(llm, batch, catalog, links.proposed_names())
+            results = link_batch(llm, batch, catalog, names)
         except LLMError as exc:
-            # One bad response does not end a long run: the batch stays
-            # unlinked and the next run picks it up.
-            failed_batches += 1
-            LOG.warning(
-                "link.batch_failed start=%s size=%s err=%s", start, len(batch), exc
+            with lock:
+                failed_batches += 1
+                processed += len(batch)
+            LOG.warning("link.batch_failed size=%s err=%s", len(batch), exc)
+            return
+        with lock:
+            for statement in batch:
+                if statement.key in results:
+                    links.record(statement, results[statement.key], model)
+                    linked += 1
+            processed += len(batch)
+            if on_batch is not None:
+                on_batch()
+            LOG.info(
+                "link.batch done=%s/%s linked_total=%s", processed, len(todo), linked
             )
-            continue
-        for statement in batch:
-            if statement.key in results:
-                links.record(statement, results[statement.key], model)
-                linked += 1
-        if on_batch is not None:
-            on_batch()
-        LOG.info(
-            "link.batch done=%s/%s linked_total=%s",
-            start + len(batch),
-            len(todo),
-            linked,
-        )
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        list(pool.map(work, batches))
+
     links.linker_version = LINKER_VERSION
     links.model = model
     return {

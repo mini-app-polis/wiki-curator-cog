@@ -313,6 +313,7 @@ def link_local(
     *,
     sample: int | None = None,
     batch_size: int = link.DEFAULT_BATCH_SIZE,
+    workers: int = 1,
 ) -> dict:
     """Run the linking pass locally: references to a JSON file, nothing to the API.
 
@@ -353,6 +354,7 @@ def link_local(
         model=model,
         batch_size=batch_size,
         on_batch=lambda: links.save(links_path),
+        workers=workers,
     )
     links.save(links_path)
 
@@ -386,6 +388,7 @@ def generate_local(
     wiki_repo_path: Path | None = None,
     entities: list[str] | None = None,
     sample: int | None = None,
+    workers: int = generate.DEFAULT_WORKERS,
 ) -> dict:
     """Run generation locally: overviews to a JSON file, nothing to the API.
 
@@ -427,6 +430,7 @@ def generate_local(
         model=model,
         wiki_repo_path=wiki_repo_path,
         on_entity=lambda: prose.save(prose_path),
+        workers=workers,
     )
     prose.save(prose_path)
 

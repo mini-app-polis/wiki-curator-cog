@@ -434,3 +434,30 @@ def test_the_prompt_asks_for_a_short_definition_and_separate_context() -> None:
     flat = generate.SYSTEM_PROMPT.replace("\\\n", " ").replace("\n", " ")
     assert "One paragraph, at most about 80 words" in flat
     assert "See also" in flat
+
+
+def test_parallel_generation_matches_sequential() -> None:
+    _, corpus = _corpus_and_overlay()
+    entities = sorted(corpus.entities.values(), key=lambda e: e.slug)
+    sequential, parallel = generate.ProseFile(), generate.ProseFile()
+    saves: list[int] = []
+
+    generate.run_generation(
+        entities, corpus, sequential, FakeLLM(), model="m", today="d"
+    )
+    result = generate.run_generation(
+        entities,
+        corpus,
+        parallel,
+        FakeLLM(),
+        model="m",
+        today="d",
+        workers=4,
+        on_entity=lambda: saves.append(1),
+    )
+
+    assert result["generated"] == len(entities)
+    assert len(saves) == len(entities)
+    for e in entities:
+        assert parallel.definition(e.slug) == sequential.definition(e.slug)
+        assert parallel.integrated(e.slug) == sequential.integrated(e.slug)
