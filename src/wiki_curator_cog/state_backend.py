@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from mini_app_polis import logger as log
+from mini_app_polis.api.contract import WcsWikiPage, WcsWikiPagesWrite
 
 from . import consolidate, generate, link, state_store
 
@@ -41,6 +42,11 @@ LOG = log.get_logger()
 #: Push changed entries once this many are waiting, or this long has passed.
 FLUSH_ENTRIES = 100
 FLUSH_SECONDS = 20.0
+
+#: Page documents per POST: a page with hundreds of references is tens of KB.
+PAGES_PER_POST = 50
+#: Slugs removed per POST, within the contract's limit.
+REMOVES_PER_POST = 500
 
 StateObject = link.LinksFile | consolidate.FacetsFile | generate.ProseFile
 
@@ -86,6 +92,28 @@ class FileState:
         """Write ``obj`` to its file; ``final`` makes no difference here."""
         _ = final
         obj.save(path)
+
+    def save_pages(
+        self, pages: list[WcsWikiPage], remove: list[str], folder: Path
+    ) -> dict[str, int]:
+        """Write each page document to ``folder/<slug>.json``; delete the removed.
+
+        Page documents are not state the passes read back, so there is no
+        document to compare against: the files are only a copy to read.
+        """
+        folder.mkdir(parents=True, exist_ok=True)
+        for page in pages:
+            (folder / f"{page.slug}.json").write_text(
+                json.dumps(page.model_dump(mode="json"), indent=2, ensure_ascii=False)
+                + "\n"
+            )
+        removed = 0
+        for slug in remove:
+            path = folder / f"{slug}.json"
+            if path.exists():
+                path.unlink()
+                removed += 1
+        return {"written": len(pages), "removed": removed}
 
 
 # ── Between the file objects and the API's documents ──
@@ -227,6 +255,31 @@ class ApiState(FileState):
         obj = self._read("prose", path)
         assert isinstance(obj, generate.ProseFile)
         return obj
+
+    def save_pages(
+        self, pages: list[WcsWikiPage], remove: list[str], folder: Path
+    ) -> dict[str, int]:
+        """Send the page documents to the API, in chunks; keep a copy in ``folder``.
+
+        Pages go first, then the removals, so a run cut short never leaves a
+        page removed and its replacement unwritten. A refused POST raises, and
+        the job is retried; a re-sent page is a no-op.
+        """
+        super().save_pages(pages, remove, folder)
+        posts = [
+            WcsWikiPagesWrite(pages=pages[i : i + PAGES_PER_POST])
+            for i in range(0, len(pages), PAGES_PER_POST)
+        ] + [
+            WcsWikiPagesWrite(remove=remove[i : i + REMOVES_PER_POST])
+            for i in range(0, len(remove), REMOVES_PER_POST)
+        ]
+        written = removed = 0
+        for post in posts:
+            result = self.client.put_wcs_wiki_pages(post)
+            written += result.written
+            removed += result.removed
+        LOG.info("pages.write written=%s removed=%s", written, removed)
+        return {"written": written, "removed": removed}
 
     def save(self, obj: StateObject, path: Path, *, final: bool = False) -> None:
         """Write the cache; send what changed once enough has, or at the end."""

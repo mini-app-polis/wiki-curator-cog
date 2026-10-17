@@ -87,7 +87,9 @@ def test_a_job_runs_against_the_api_and_sends_its_follow_ons(tmp_path: Path) -> 
     assert result["enqueued"] == ["q-0", "q-1"]
 
 
-def test_a_job_with_nothing_to_follow_sends_nothing(tmp_path: Path) -> None:
+def test_generate_sends_materialise_and_materialise_sends_nothing(
+    tmp_path: Path,
+) -> None:
     api = Api()
     with (
         patch.object(worker, "_fetch_export", return_value=_export()),
@@ -96,7 +98,15 @@ def test_a_job_with_nothing_to_follow_sends_nothing(tmp_path: Path) -> None:
         worker.run(
             {"job": "generate", "entity": "stretch"}, client=api, state_dir=tmp_path
         )
-    assert api.enqueued == []
+        assert api.enqueued == [[{"job": "materialise", "entities": ["stretch"]}]]
+        result = worker.run(
+            {"job": "materialise", "entities": ["stretch"]},
+            client=api,
+            state_dir=tmp_path,
+        )
+    assert api.enqueued == [[{"job": "materialise", "entities": ["stretch"]}]]
+    assert result["written"] == 1
+    assert api.pages["stretch"]["definition"] == "A definition."
 
 
 # ── The handler ──

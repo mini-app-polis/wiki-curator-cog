@@ -18,12 +18,16 @@ job                       unit                        follows with
                                                       referred to
 ``consolidate``           named undecided entities    ``generate`` for each page
                                                       that gained a fold
-``generate``              named entities              — (``materialise``, MINI-96)
+``generate``              named entities              ``materialise`` for every
+                                                      page it was asked about
+``materialise``           named pages                 —
 ========================  ==========================  ===========================
 
 Every unit is idempotent under its pass's watermark: a statement already
 linked, an entity already decided, an entity with nothing new to integrate
-costs no model call and writes nothing. So a retried or duplicated message is
+costs no model call and writes nothing. ``materialise`` calls no model; it
+rebuilds each page document from the state as it stands and stores it, so
+repeating it rewrites the same document. So a retried or duplicated message is
 a no-op, and a follow-on job that turns out to have nothing to do is cheap.
 
 The context is explicit — no module state — and built once per invocation.
@@ -40,17 +44,21 @@ from typing import Any
 
 from mini_app_polis import logger as log
 
-from . import consolidate, generate, identity, link, state_backend
+from . import consolidate, generate, identity, link, pages, state_backend
 from .render import WcsWikiExport
 
 LOG = log.get_logger()
 
-JOBS = ("link", "consolidate", "generate")
+JOBS = ("link", "consolidate", "generate", "materialise")
 
 #: Entities per follow-on generate job. Each is one model call at most, made
 #: one after another, so this keeps a job well inside a Lambda's 15 minutes
 #: while sparing the worker one export and state read per entity.
 GENERATE_PER_JOB = 25
+
+#: Pages per follow-on materialise job. No model call; the time is the
+#: export and state read every invocation pays, so as many as generate.
+MATERIALISE_PER_JOB = 25
 
 
 class JobError(ValueError):
@@ -64,6 +72,8 @@ class StatePaths:
     links: Path
     facets: Path
     prose: Path
+    #: Where a copy of each page document is written (MINI-96).
+    pages: Path
 
     @classmethod
     def under(cls, folder: Path) -> StatePaths:
@@ -72,6 +82,7 @@ class StatePaths:
             links=folder / "links.json",
             facets=folder / "facets.json",
             prose=folder / "prose.json",
+            pages=folder / "pages",
         )
 
 
@@ -86,6 +97,9 @@ class RunContext:
     paths: StatePaths
     llm: Any
     model: str
+    #: The facet decisions, read once for the invocation: the folds above
+    #: come from them, and link and consolidate use the same object.
+    facets: consolidate.FacetsFile
     #: A wcs-wiki clone, when there is one: generation builds on an edited
     #: page. The worker has none.
     wiki_repo_path: Path | None = None
@@ -104,8 +118,8 @@ def build_context(
 ) -> RunContext:
     """Apply the folds the facets state calls for, once, for this invocation."""
     facets = store.facets(paths.facets)
-    folds = facets.folds() if facets is not None else None
-    merged, merges = identity.resolve(export, folds)
+    assert facets is not None
+    merged, merges = identity.resolve(export, facets.folds())
     return RunContext(
         export=merged,
         merges=merges,
@@ -113,6 +127,7 @@ def build_context(
         paths=paths,
         llm=llm,
         model=model,
+        facets=facets,
         wiki_repo_path=wiki_repo_path,
         raw_export=export,
     )
@@ -122,12 +137,21 @@ def _job(kind: str, **fields: Any) -> dict[str, Any]:
     return {"job": kind, **fields}
 
 
-def _generate_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
+def _entity_jobs(
+    kind: str, slugs: set[str] | list[str], per: int
+) -> list[dict[str, Any]]:
     ordered = sorted(set(slugs))
     return [
-        _job("generate", entities=ordered[i : i + GENERATE_PER_JOB])
-        for i in range(0, len(ordered), GENERATE_PER_JOB)
+        _job(kind, entities=ordered[i : i + per]) for i in range(0, len(ordered), per)
     ]
+
+
+def _generate_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
+    return _entity_jobs("generate", slugs, GENERATE_PER_JOB)
+
+
+def _materialise_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
+    return _entity_jobs("materialise", slugs, MATERIALISE_PER_JOB)
 
 
 # ── link ──
@@ -160,8 +184,7 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
         entry = links.statements.get(s.key) or {}
         touched.update(r["target_slug"] for r in entry.get("references", []))
 
-    facets = ctx.store.facets(ctx.paths.facets)
-    assert facets is not None
+    facets = ctx.facets
     version_of = {k: g.version for g in consolidate.GROUPS for k in g.kinds}
     by_slug = {e.slug: e for e in ctx.export.entities}
     undecided = sorted(
@@ -196,8 +219,7 @@ def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
     export, merges = identity.resolve(raw)
     links = ctx.store.links(ctx.paths.links)
     supports = consolidate.support(export, links, merges)
-    facets = ctx.store.facets(ctx.paths.facets)
-    assert facets is not None
+    facets = ctx.facets
     before = facets.parents()
     counts = consolidate.run_consolidation(
         export,
@@ -231,7 +253,9 @@ def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
     """Integrate these entities' pending statements. No call for one with none.
 
     A slug folded away since the job was enqueued is generated as the page it
-    folded into; one that no longer exists at all is skipped.
+    folded into; one that no longer exists at all is skipped. Every page asked
+    about is materialised next, whether or not its prose changed: a new
+    reference or fold changes the page without new prose.
     """
     links = ctx.store.links(ctx.paths.links)
     assert links is not None
@@ -262,6 +286,70 @@ def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         "entities": sorted(targets),
         "skipped": sorted(skipped),
         **{k: counts[k] for k in ("generated", "failed")},
+        # a page gone since the job was enqueued is removed by materialise
+        "next": _materialise_jobs(set(targets) | set(skipped)),
+    }
+
+
+# ── materialise ──
+
+
+def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any]:
+    """Build these pages' documents from the state as it stands, and store them.
+
+    No model call. A slug folded into another page is materialised as that
+    page; every name folded into a page goes when the page is written, and a
+    slug that is no page at all is removed. ``None`` is every page, the
+    linker's proposed concepts included: the local backfill.
+    """
+    links = ctx.store.links(ctx.paths.links)
+    prose = ctx.store.prose(ctx.paths.prose)
+    assert links is not None and prose is not None
+    merges = ctx.merges
+    export, overlay, _ = link.build_overlay(ctx.export, links, merges)
+    corpus = generate.build_corpus(export, overlay, links, merges)
+    export = generate.apply_prose(export, prose, merges)
+    context = generate.context_by_entity(export, prose, merges)
+    details = generate.details_by_entity(export, merges, prose)
+
+    exists = {e.slug for e in export.entities}
+    folded = dict(merges.by_slug) if merges else {}
+    targets: set[str] = set()
+    remove: set[str] = set()
+    for slug in exists if slugs is None else slugs:
+        target = folded.get(slug, slug)
+        if target in exists:
+            targets.add(target)
+        if target != slug or target not in exists:
+            remove.add(slug)
+    remove |= {old for old, new in folded.items() if new in targets}
+    remove -= targets
+
+    evidence = {
+        slug: {
+            e.source_id
+            for e in corpus.own.get(slug, []) + corpus.referring.get(slug, [])
+            if e.source_id is not None
+        }
+        for slug in targets
+    }
+    documents = pages.build_documents(
+        export,
+        overlay=overlay,
+        context=context,
+        details=details,
+        merges=merges,
+        evidence=evidence,
+        only=targets,
+    )
+    counts = ctx.store.save_pages(
+        [documents[s] for s in sorted(documents)], sorted(remove), ctx.paths.pages
+    )
+    return {
+        "job": "materialise",
+        "entities": sorted(targets),
+        "removed": sorted(remove),
+        "written": counts["written"],
         "next": [],
     }
 
@@ -289,6 +377,10 @@ def validate(job: dict[str, Any]) -> str:
         entities = job.get("entities")
         if not job.get("entity") and not (isinstance(entities, list) and entities):
             raise JobError("generate needs entity or a non-empty entities list")
+    elif kind == "materialise":
+        entities = job.get("entities")
+        if not isinstance(entities, list) or not entities:
+            raise JobError("materialise needs a non-empty entities list")
     else:
         raise JobError(f"unknown job {kind!r}; expected one of {', '.join(JOBS)}")
     return str(kind)
@@ -301,6 +393,8 @@ def handle(job: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
         result = link_source(ctx, job["source_id"])
     elif kind == "consolidate":
         result = consolidate_entities(ctx, [str(e) for e in job["entities"]])
+    elif kind == "materialise":
+        result = materialise_pages(ctx, [str(e) for e in job["entities"]])
     else:
         named = job.get("entities") or [job["entity"]]
         result = generate_entities(ctx, [str(e) for e in named])

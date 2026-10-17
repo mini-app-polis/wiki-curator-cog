@@ -675,6 +675,44 @@ def run_job(
     return {**result, "dry_run": dry_run, "usage": usage.usage_of(llm)}
 
 
+def materialise_local(
+    state_dir: Path,
+    *,
+    entities: list[str] | None = None,
+    state: state_backend.FileState | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Materialise pages: the named ones, or every page (MINI-96).
+
+    No model call. With the API as the store this writes the page documents
+    to the API the environment points at — production under
+    ``doppler run --config prd``. Every page at once is the backfill, and the
+    way to rebuild the documents after the page logic changes. With
+    ``dry_run`` the documents are built and counted but not stored.
+    """
+    export = _fetch_export()
+    _require_corpus(export)
+    store = _state(state)
+    if dry_run:
+        store = _NoWrites(store)
+    ctx = units.build_context(
+        export,
+        store,
+        units.StatePaths.under(state_dir),
+        llm=None,
+        model="",
+    )
+    result = units.materialise_pages(ctx, entities or None)
+    summary = {
+        "dry_run": dry_run,
+        "pages": len(result["entities"]),
+        "removed": len(result["removed"]),
+        "written": result["written"],
+    }
+    LOG.info("materialise.local %s", summary)
+    return summary
+
+
 class _NoWrites(state_backend.FileState):
     """A store that reads through to another and writes nothing: dry runs."""
 
@@ -697,6 +735,10 @@ class _NoWrites(state_backend.FileState):
     def save(self, obj, path: Path, *, final: bool = False) -> None:  # type: ignore[no-untyped-def]
         """Discard the write: a dry run changes no state."""
         return None
+
+    def save_pages(self, pages, remove, folder: Path) -> dict[str, int]:  # type: ignore[no-untyped-def]
+        """Discard the pages: a dry run stores nothing."""
+        return {"written": 0, "removed": 0}
 
 
 def api_state() -> state_backend.ApiState:

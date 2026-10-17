@@ -1,7 +1,7 @@
 # ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
-**Status:** Accepted — steps 1–3 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch behind a flag seeded off (MINI-95). Page documents and visibility (MINI-96), the site's /wiki pages (MINI-97) and retiring the Railway service are open
+**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The site's /wiki pages (MINI-97) and retiring the Railway service are open; the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
 **Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
 **Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time); Asana MINI-89, MINI-94 – MINI-99
 
@@ -123,6 +123,38 @@ invocation, sends a job's follow-ons before it counts as done, and returns
 failed records to the queue. The Railway service and its git-push render are
 not retired yet: that waits until the worker has run on real lessons.
 
+**MINI-96 (2026-10-17): page documents.** `materialise` (`units.materialise_pages`)
+builds each named page with `pages.page_document` and posts it to
+`POST /v1/wcs/wiki/pages` (scope `wcs.wiki.write`), in chunks, removing in the
+same pass every name folded into a page it writes and any slug that is no
+longer a page. `generate` names `materialise` for every page it was asked
+about, model call or not, since a new reference or fold changes a page without
+new prose; `materialise` names nothing. The schema is `WcsWikiPage` in
+common-python-utils. Two refinements to the design below, both found while
+building it:
+
+- **Visibility is read live, not trusted from the document.** Each citation
+  carries its source id and `public` as it was when the page was built, but
+  the API rewrites `public` from `wcs_sources` on every read and filters on
+  it. A stored flag goes stale the moment a source is made private in
+  /admin/notes; a stale "public" is a leak.
+- **Plain and admin routes, as for sources**, rather than one route that
+  inspects scopes. `GET /v1/wcs/wiki/pages[/{slug}]` (`wcs.notes.read`)
+  serves the evidence the caller can see — default-visible sources and their
+  grants, the rule /notes uses — and drops a hidden source's links from the
+  text to their label. A page whose `evidence_sources` (its own statements'
+  and those referring to it) are all hidden is a 404 for that reader.
+  `GET /v1/wcs/wiki/admin/pages[/{slug}]` (`wcs.corpus.read`) serves
+  everything; `?as=public` shows what a reader with no grants would see.
+
+What the filter cannot do: generated prose may draw on private sources it no
+longer cites. The public-only rebuild of ADR-005 is still what closes that,
+before the wiki has any reader but Kaiano.
+
+The markdown export reads the same documents: `render` builds them and writes
+each entity page with `pages.page_markdown`, byte for byte the page it wrote
+before. Source, instructor and view pages, and the index, stay markdown-only.
+
 ### Page logic stays in the curator
 
 Folding (aliases, facets, nested Details), the reference overlay, Mentions /
@@ -167,9 +199,12 @@ as an edit (the page-as-base rule of ADR-005 carries over).
 - **Add a note from a page.** A form on a wiki page that creates a note source
   through the API, skipping the Drive round-trip, and flows through the same
   jobs. Wanted, not urgent (MINI-98).
-- **The `wcs-wiki` repo.** Kept as a local markdown export (`render`) for now,
-  since it is the only reader until the site pages exist. Whether it stays as
-  an export or retires is decided once `/wiki` works (MINI-99).
+- **The `wcs-wiki` repo.** Decided 2026-10-17, ahead of `/wiki` because it
+  shaped MINI-96 (MINI-99): it stays as a local markdown export, written by
+  `render` from the same page documents the API stores. The Railway `export`
+  mode and its git push retire; the repo is a local reading and diffing copy,
+  committed by hand if at all. Whether to delete it is revisited once `/wiki`
+  works.
 - **Public, indexable pages.** Client-rendered pages are fine for one signed-in
   reader. If the wiki goes public and search indexing matters, server
   rendering at the edge (a Worker in front of the shell) is the option to

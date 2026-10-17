@@ -96,6 +96,9 @@ class Evidence:
     role: str
     subject: str
     text: str
+    #: The statement's source, for the page's evidence (MINI-96). Not shown
+    #: to the model.
+    source_id: uuid.UUID | None = None
 
     def as_prompt(self) -> dict[str, str]:
         """The fields the model is shown."""
@@ -234,6 +237,7 @@ def build_corpus(
             role=role,
             subject=_link(by_slug.get(s.subject_slug)),
             text=s.text,
+            source_id=s.source_id,
         )
 
     corpus = Corpus(

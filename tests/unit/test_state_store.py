@@ -15,6 +15,7 @@ import pytest
 from mini_app_polis.api.contract import (
     WcsWikiFacetsState,
     WcsWikiLinksState,
+    WcsWikiPagesWriteResult,
     WcsWikiProseState,
     WcsWikiStateWriteResult,
 )
@@ -40,6 +41,19 @@ class FakeApi:
             "prose": {"generator_version": "", "model": "", "entities": {}},
         }
         self.posts: dict[str, int] = {name: 0 for name in MODELS}
+        self.gets: dict[str, int] = {name: 0 for name in MODELS}
+        #: Page documents as the API stores them, by slug (MINI-96).
+        self.pages: dict[str, dict[str, Any]] = {}
+        self.page_posts: list[Any] = []
+
+    def put_wcs_wiki_pages(self, payload: Any) -> WcsWikiPagesWriteResult:
+        self.page_posts.append(payload)
+        for page in payload.pages:
+            self.pages[page.slug] = page.model_dump(mode="json")
+        gone = [s for s in payload.remove if self.pages.pop(s, None) is not None]
+        return WcsWikiPagesWriteResult(
+            written=len(payload.pages), removed=len(gone), total=len(self.pages)
+        )
 
     def __getattr__(self, attr: str) -> Any:
         verb, name = attr.removeprefix("get_wcs_wiki_"), None
@@ -51,7 +65,12 @@ class FakeApi:
             raise AttributeError(attr)
         model, key = MODELS[name]
         if verb == "get":
-            return lambda: model.model_validate(self.docs[name])
+
+            def get() -> Any:
+                self.gets[name] += 1
+                return model.model_validate(self.docs[name])
+
+            return get
 
         def put(doc: Any) -> WcsWikiStateWriteResult:
             raw = doc.model_dump(mode="json")

@@ -529,7 +529,7 @@ def render_entity_page(
     context: str = "",
     details: Sequence[tuple[Any, ...]] = (),
 ) -> str:
-    """Render one entity's Markdown page.
+    """Render one entity's Markdown page, through its page document.
 
     ``details`` are the facets folded into this entity (MINI-93): each a name,
     a one-line gist and optionally a nesting depth, listed under
@@ -538,119 +538,24 @@ def render_entity_page(
     With an ``overlay`` the page also gets ``## Mentions`` (what its
     statements refer to) and ``## Referenced by`` (every entity that refers to
     it, through the linking pass or a relation pointing here).
+
+    The page is built as a document (:mod:`wiki_curator_cog.pages`, MINI-96)
+    and written from it, so the markdown and the API's page are one model.
     """
-    attributions = indexes.attributions_by_entity.get(entity.id, [])
-    definitions = indexes.definitions_by_entity.get(entity.id, [])
-    relations = indexes.relations_by_entity.get(entity.id, [])
-    drill_purposes = indexes.drill_purposes_by_entity.get(entity.id, [])
-    requirements = indexes.technique_requirements_by_entity.get(entity.id, [])
+    from . import pages  # pages builds on this module
 
-    page = md.Page(
-        frontmatter={
-            "type": _entity_page_type(entity.kind),
-            "slug": entity.slug,
-            "canonical_name": entity.canonical_name,
-            "kind": entity.kind,
-            "aliases": list(entity.aliases),
-            "status": entity.status,
-            "teachers": _collect_entity_teachers(entity.id, indexes),
-            "sources": _collect_entity_sources(entity.id, indexes),
-            "related": _collect_related_slugs(entity.id, indexes),
-            "rendered_at": rendered_at.isoformat(),
-        }
+    document = pages.page_document(
+        entity, indexes, overlay=overlay, context=context, details=details
     )
-
-    if entity.overview_md.strip():
-        page.set_section("Overview", [entity.overview_md.strip()])
-    if context.strip():
-        page.set_section("In practice", [context.strip()])
-    if details:
-        lines = []
-        for name, gist, *rest in details:
-            indent = "  " * (rest[0] if rest else 0)
-            item = f"**{name}** — {gist}" if gist else f"**{name}**"
-            lines.append(f"{indent}- {item}")
-        page.set_section("Details", lines)
-
-    by_teacher = _group_by_instructor(
-        attributions=attributions,
-        definitions=definitions,
-        indexes=indexes,
+    return pages.page_markdown(
+        document,
+        rendered_at=rendered_at,
+        paths={
+            e.slug: pages._path(e.kind, e.slug) for e in indexes.entities_by_id.values()
+        },
+        source_slugs=indexes.source_slug_by_id,
+        overlay=overlay is not None,
     )
-    if by_teacher:
-        body: list[str] = []
-        for heading in sorted(by_teacher):
-            body.append(f"### {heading}")
-            for _, block_lines in by_teacher[heading]:
-                body.extend(block_lines)
-                body.append("")
-        while body and not body[-1].strip():
-            body.pop()
-        page.set_section("By teacher", body)
-
-    mistakes = _render_mistake_lines(attributions, indexes)
-    if mistakes:
-        page.set_section("Common mistakes", mistakes)
-
-    if entity.kind == "drill" and drill_purposes:
-        develops: list[str] = []
-        for purpose in drill_purposes:
-            parts = [f"**{purpose.skill_name}**"]
-            if purpose.prose.strip():
-                parts.append(purpose.prose.strip())
-            if purpose.focus_context.strip():
-                parts.append(f"_Focus:_ {purpose.focus_context.strip()}")
-            develops.append(" — ".join(parts))
-        page.set_section("Develops", develops)
-
-    if entity.kind == "technique" and requirements:
-        requires: list[str] = []
-        for req in requirements:
-            parts = [f"**{req.skill_name}**"]
-            if req.prose.strip():
-                parts.append(req.prose.strip())
-            requires.append(" — ".join(parts))
-        page.set_section("Requires", requires)
-
-    if relations:
-        related_lines: list[str] = []
-        for relation in relations:
-            if relation.from_entity_id == entity.id:
-                other = indexes.entities_by_id.get(relation.to_entity_id)
-            else:
-                other = indexes.entities_by_id.get(relation.from_entity_id)
-            if other is None:
-                continue
-            label = relation.relation_kind.strip() or "related"
-            line = f"- {_entity_link(other)} ({label})"
-            if relation.prose.strip():
-                line += f": {relation.prose.strip()}"
-            related_lines.append(line)
-        if related_lines:
-            page.set_section("Related", related_lines)
-
-    if overlay is not None:
-        mentions = _counted_links(overlay.mentions.get(entity.id, {}), indexes)
-        if mentions:
-            page.set_section("Mentions", mentions)
-        incoming = dict(overlay.referenced_by.get(entity.id, {}))
-        for relation in relations:
-            if (
-                relation.to_entity_id == entity.id
-                and relation.from_entity_id != entity.id
-            ):
-                incoming[relation.from_entity_id] = (
-                    incoming.get(relation.from_entity_id, 0) + 1
-                )
-        referenced_by = _counted_links(incoming, indexes)
-        if len(referenced_by) > REFERENCED_BY_LINK_LIMIT:
-            page.set_section(
-                "Referenced by", [f"Referenced by {len(referenced_by)} pages."]
-            )
-        elif referenced_by:
-            page.set_section("Referenced by", referenced_by)
-
-    return md.serialize(page)
 
 
 def render_source_page(
@@ -1137,12 +1042,19 @@ def render_bundle(
     overlay: LinkOverlay | None = None,
     context: dict[uuid.UUID, str] | None = None,
     details: dict[uuid.UUID, list[tuple[Any, ...]]] | None = None,
+    documents: dict[str, Any] | None = None,
 ) -> tuple[dict[str, str], RenderStats]:
     """Render the full wiki bundle. Keys are repo-relative paths.
 
     ``overlay`` adds the linking pass's references to entity pages; the
     export should already carry any entities the overlay introduced.
+
+    Entity pages are written from their page documents (MINI-96):
+    ``documents``, by slug, when the caller built them — the same ones
+    ``materialise`` stores — or built here from the other arguments.
     """
+    from . import pages  # pages builds on this module
+
     when = rendered_at or dt.date.today()
     indexes = build_indexes(export)
     bundle: dict[str, str] = {}
@@ -1166,15 +1078,19 @@ def render_bundle(
         for slug, who in indexes.slug_collisions
     )
 
+    if documents is None:
+        documents = pages.build_documents(
+            export, overlay=overlay, context=context, details=details
+        )
+    paths = pages.paths_of(export)
     for entity in sorted(export.entities, key=lambda e: e.slug):
         path = _entity_path(entity)
-        bundle[path] = render_entity_page(
-            entity,
-            indexes,
+        bundle[path] = pages.page_markdown(
+            documents[entity.slug],
             rendered_at=when,
-            overlay=overlay,
-            context=(context or {}).get(entity.id, ""),
-            details=(details or {}).get(entity.id, ()),
+            paths=paths,
+            source_slugs=indexes.source_slug_by_id,
+            overlay=overlay is not None,
         )
         if not indexes.attributions_by_entity.get(entity.id):
             stats.observations.append(f"Entity `{entity.slug}` has no attributions.")
