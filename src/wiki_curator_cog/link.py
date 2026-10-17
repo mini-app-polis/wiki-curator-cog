@@ -72,6 +72,9 @@ _LLM_MAX_RETRIES = 2
 
 def llm_from_env() -> tuple[LLMClient, str]:
     """The client and model name, from ``LLM_PROVIDER`` / ``LLM_MODEL``."""
+    from . import _lenient_json
+
+    _lenient_json.install()
     provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
     if provider not in _DEFAULT_MODELS:
         raise RuntimeError(
