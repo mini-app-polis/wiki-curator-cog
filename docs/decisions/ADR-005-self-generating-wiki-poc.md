@@ -310,6 +310,8 @@ Tracked in Asana under MINI-29.
 
 ## Follow-ons, if MINI-88 is a go
 
+The pipeline and reading design for these is ADR-006 (proposed 2026-10-16).
+
 Separate work, not part of this decision:
 
 - Move to AWS: a per-entity queue and Lambda worker; retire the Railway
