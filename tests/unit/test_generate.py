@@ -487,3 +487,86 @@ def test_all_pending_mentions_are_covered_but_own_statements_wait(
     )
     assert len(prose.integrated("anchor-step")) == 1
     assert generate.pending(corpus.entities["anchor-step"], corpus, prose)
+
+
+# ── links the model writes ──
+
+
+def test_links_are_kept_corrected_or_unlinked() -> None:
+    augmented, _ = _corpus_and_overlay()
+    pages = generate.PageIndex.from_export(augmented)
+    source = next(p for p in pages.paths if p.startswith("sources/"))
+    text = (
+        f"Right [[techniques/anchor-step]], wrong dir [[patterns/anchor-step|the anchor]], "
+        f"with anchor [[concepts/stretch#Overview]], source [[{source}]], "
+        f"unknown [[techniques/no-such-thing]] and [[nowhere|Label]]."
+    )
+
+    fixed = pages.repair(text)
+
+    assert "[[techniques/anchor-step]]" in fixed
+    assert "[[techniques/anchor-step|the anchor]]" in fixed
+    assert "[[concepts/stretch#Overview]]" in fixed
+    assert f"[[{source}]]" in fixed
+    assert "unknown no such thing and Label." in fixed
+
+
+def test_rendered_prose_has_no_broken_links_even_when_stored_with_bad_ones() -> None:
+    from wiki_curator_cog.render import find_broken_links
+
+    augmented, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    prose.entities["connection"] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": "Links [[techniques/stretch]] and [[techniques/ghost]].",
+        "context": "See [[patterns/anchor-step]].",
+        "integrated": [],
+        "revisions": [],
+    }
+    export = generate.apply_prose(augmented, prose)
+    bundle, _ = render_bundle(
+        export,
+        rendered_at=dt.date(2026, 10, 16),
+        context=generate.context_by_entity(export, prose),
+    )
+
+    assert find_broken_links(bundle) == []
+    page = bundle["concepts/connection.md"]
+    assert "[[concepts/stretch]]" in page and "ghost" in page
+    assert "[[techniques/anchor-step]]" in page
+
+
+def test_a_page_showing_repaired_links_is_not_mistaken_for_an_edit(
+    tmp_path: Path,
+) -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    prose.entities["anchor-step"] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": "See [[concepts/anchor-step]].",
+        "context": "",
+        "integrated": [],
+        "revisions": [
+            {"by": "llm", "definition": "See [[concepts/anchor-step]].", "context": ""}
+        ],
+    }
+    assert corpus.pages is not None
+    _write_page(
+        tmp_path,
+        "techniques/anchor-step.md",
+        corpus.pages.repair("See [[concepts/anchor-step]]."),
+    )
+
+    generate.run_generation(
+        [corpus.entities["anchor-step"]],
+        corpus,
+        prose,
+        FakeLLM(),
+        model="m",
+        wiki_repo_path=tmp_path,
+    )
+
+    assert [r["by"] for r in prose.entities["anchor-step"]["revisions"]] == [
+        "llm",
+        "llm",
+    ]

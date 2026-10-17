@@ -31,6 +31,7 @@ import contextlib
 import datetime as dt
 import json
 import random
+import re
 import threading
 import uuid
 from collections.abc import Iterable, Sequence
@@ -133,6 +134,54 @@ class Corpus:
     entities: dict[str, WcsEntity]
     own: dict[str, list[Evidence]] = field(default_factory=dict)
     referring: dict[str, list[Evidence]] = field(default_factory=dict)
+    #: The wiki's pages, for correcting the links the model writes.
+    pages: PageIndex | None = None
+
+
+# ── Links in generated prose ──
+
+_WIKI_LINK = re.compile(r"\[\[([^\]|#]+)((?:#[^\]|]*)?)(?:\|([^\]]*))?\]\]")
+
+
+@dataclass(frozen=True)
+class PageIndex:
+    """Every page a link may point at: entity paths by slug, and all paths."""
+
+    path_by_slug: dict[str, str]
+    paths: frozenset[str]
+
+    @classmethod
+    def from_export(cls, export: WcsWikiExport) -> PageIndex:
+        """Entity and source pages as the renderer will write them."""
+        from .render import _entity_path  # the renderer owns paths
+
+        indexes = build_indexes(export)
+        path_by_slug = {e.slug: _entity_path(e)[:-3] for e in export.entities}
+        sources = {f"sources/{slug}" for slug in indexes.source_slug_by_id.values()}
+        return cls(path_by_slug, frozenset(path_by_slug.values()) | sources)
+
+    def repair(self, text: str) -> str:
+        """Correct or remove links the model wrote that point at no page.
+
+        The model is told to copy links exactly, and mostly does — but on the
+        full corpus it wrote dozens like ``[[techniques/sugar-push]]`` for
+        what is ``patterns/sugar-push``. A link whose target exists is kept.
+        One whose slug exists under another directory is pointed there. One
+        whose slug exists nowhere becomes its label, or the slug in words.
+        """
+
+        def fix(m: re.Match[str]) -> str:
+            target = m.group(1).strip().removesuffix(".md")
+            anchor, label = m.group(2) or "", m.group(3)
+            if target in self.paths:
+                return m.group(0)
+            slug = target.rsplit("/", 1)[-1]
+            path = self.path_by_slug.get(slug)
+            if path is not None:
+                return f"[[{path}{anchor}|{label}]]" if label else f"[[{path}{anchor}]]"
+            return label or slug.replace("-", " ")
+
+        return _WIKI_LINK.sub(fix, text)
 
 
 def build_corpus(
@@ -172,7 +221,7 @@ def build_corpus(
             text=s.text,
         )
 
-    corpus = Corpus(entities=corpus_entities)
+    corpus = Corpus(entities=corpus_entities, pages=PageIndex.from_export(export))
     for s in statements:
         corpus.own.setdefault(s.subject_slug, []).append(evidence(s, "about"))
 
@@ -264,15 +313,28 @@ class ProseFile:
         entry = self.current(slug)
         return set(entry["integrated"]) if entry else set()
 
-    def written_by_us(self, slug: str, definition: str, context: str) -> bool:
-        """Whether this pair is any definition and context this pass wrote."""
+    def written_by_us(
+        self,
+        slug: str,
+        definition: str,
+        context: str,
+        normalise: Any = None,
+    ) -> bool:
+        """Whether this pair is any definition and context this pass wrote.
+
+        ``normalise`` is applied to the stored text before comparing — the
+        link repair the renderer applies — so a page showing repaired links
+        is not mistaken for an edit.
+        """
         entry = self.entities.get(slug)
         if entry is None:
             return False
+        norm = normalise or (lambda t: t)
         return any(
             r["by"] == "llm"
-            and r.get("definition", r.get("prose", "")).strip() == definition.strip()
-            and r.get("context", "").strip() == context.strip()
+            and norm(r.get("definition", r.get("prose", ""))).strip()
+            == definition.strip()
+            and norm(r.get("context", "")).strip() == context.strip()
             for r in entry.get("revisions", [])
         )
 
@@ -302,7 +364,11 @@ def page_prose(wiki_repo_path: Path | None, entity: WcsEntity) -> tuple[str, str
 
 
 def base_for(
-    entity: WcsEntity, prose: ProseFile, wiki_repo_path: Path | None, today: str
+    entity: WcsEntity,
+    prose: ProseFile,
+    wiki_repo_path: Path | None,
+    today: str,
+    normalise: Any = None,
 ) -> tuple[str, str]:
     """The definition and context to build on: the page as it stands.
 
@@ -313,7 +379,7 @@ def base_for(
     """
     definition, context = page_prose(wiki_repo_path, entity)
     if (definition or context) and not prose.written_by_us(
-        entity.slug, definition, context
+        entity.slug, definition, context, normalise
     ):
         entry = prose.entities.setdefault(
             entity.slug,
@@ -512,7 +578,8 @@ def generate_one(
         evidence, covered = _pending(entity, corpus, prose)
         if not evidence:
             return False
-        base = base_for(entity, prose, wiki_repo_path, today)
+        repair = corpus.pages.repair if corpus.pages is not None else None
+        base = base_for(entity, prose, wiki_repo_path, today, repair)
     result = llm.generate_json(
         messages=build_messages(entity, base, evidence),
         json_schema=RESPONSE_SCHEMA,
@@ -520,6 +587,9 @@ def generate_one(
     )
     definition = str(result.output_json.get("definition", "")).strip()
     context = str(result.output_json.get("context", "")).strip()
+    if corpus.pages is not None:
+        definition = corpus.pages.repair(definition)
+        context = corpus.pages.repair(context)
     with guard:
         _record(
             prose,
@@ -660,19 +730,26 @@ def run_generation(
 
 
 def apply_prose(export: WcsWikiExport, prose: ProseFile) -> WcsWikiExport:
-    """The export with each entity's generated definition in ``overview_md``."""
+    """The export with each entity's generated definition in ``overview_md``.
+
+    Links in the prose are repaired against the pages this export renders,
+    so prose stored before a repair, or before a merge moved a page, still
+    renders with no broken links.
+    """
+    pages = PageIndex.from_export(export)
     entities = []
     for e in export.entities:
-        text = prose.definition(e.slug)
+        text = pages.repair(prose.definition(e.slug))
         entities.append(e.model_copy(update={"overview_md": text}) if text else e)
     return export.model_copy(update={"entities": entities})
 
 
 def context_by_entity(export: WcsWikiExport, prose: ProseFile) -> dict[uuid.UUID, str]:
     """Each entity's generated context, for the page's ``## In practice``."""
+    pages = PageIndex.from_export(export)
     out: dict[uuid.UUID, str] = {}
     for e in export.entities:
-        text = prose.context(e.slug)
+        text = pages.repair(prose.context(e.slug))
         if text:
             out[e.id] = text
     return out
