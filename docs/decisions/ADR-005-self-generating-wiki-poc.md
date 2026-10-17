@@ -1,9 +1,9 @@
 # ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — planned, not yet implemented
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges); durable half (storage in the API) pending
 **Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
-**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29 and MINI-83 – MINI-88
+**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29 and MINI-83 – MINI-90
 
 ## Context
 
@@ -152,17 +152,17 @@ superseded. Newer evidence wins.
   dancer needs beyond it (how it is done, the key mistake, connections) is a
   short, separately rendered "In practice" section. Both are deliberately
   brief: the evidence below carries the detail.
-- **The LLM owns the prose only.** `## By teacher`, `## Sources`, `## Related`
-  and `## Referenced by` stay mechanically rendered from the data, so links and
-  attribution cannot drift through repeated rewrites.
+- **The LLM owns the prose only.** `## By teacher`, `## Sources`, `## Related`,
+  `## Mentions` and `## Referenced by` stay mechanically rendered from the
+  data, so links and attribution cannot drift through repeated rewrites.
 - **Prose cites its sources** by id, so claims stay traceable across rewrites.
 - **A per-entity watermark** records which statements have been integrated.
   A re-run never integrates the same statement twice, and an entity with
   nothing new costs no LLM call.
 - **The page is the base.** Nobody is expected to own or maintain the prose
   (2026-10-16): corrections normally arrive as notes. Editing a page is
-  optional. When a page's overview differs from every overview this pass
-  wrote, it was edited; the edit is kept as a revision and becomes the base.
+  optional. When a page's definition or "In practice" differs from every
+  version this pass wrote, it was edited; the edit is kept as a revision and becomes the base.
   Edits are dated inputs, not locks — a later lesson that contradicts one can
   win, as it would over an older lesson.
 - **Rebuild from scratch** stays available: regenerate an entity from all its
@@ -171,6 +171,18 @@ superseded. Newer evidence wins.
 
 The render remains deterministic over what it reads. The non-determinism lives
 in the generation step, and its output is stored, versioned data.
+
+**As built (local half, 2026-10-16).** `generate` writes `prose.json` (current
+definition and context, revision history, per-entity watermark) and
+`render --prose` puts it on the pages. Evidence per call is the entity's own
+statements and the statements that refer to it, newest first and capped;
+what does not fit is integrated on the next run. The prompt was settled over
+four versions on an 8-entity sample (MINI-86 comments): the first produced
+accurate 500–760-word essays nobody would read; the split into a short
+definition and a one-paragraph "In practice" came from Kaiano. Definitions
+reflect the material as taught — *right side pass* is the low pattern, as
+Kaiano teaches it — not a generic definition. A failed entity is retried,
+then skipped and left pending; responses with stray fields are accepted.
 
 ### The API owns the prose and its history
 
@@ -202,27 +214,34 @@ proven as part of this work, not assumed.
 Tracked in Asana under MINI-29.
 
 1. **MINI-83** — baseline export and link check.
-2. **MINI-84** — the linking pass: mentions become references, general
-   concepts get pages, denials and newest-wins, `## Referenced by`.
+2. **MINI-84** — the linking pass, local: mentions become references in
+   `links.json`, general concepts get pages, denials and newest-wins,
+   `## Mentions` / `## Referenced by` via `render --links`. Durable half
+   (references in the API, importing `links.json`): **MINI-89**.
 3. **MINI-85** — notes and corrections ingest as sources. transcription-cog's
    minimum-length gate (`MIN_TRANSCRIPT_CHARS`) currently drops short notes;
    the extraction must emit a correction as a statement that can supersede an
    older one.
-4. **MINI-86** — integration-based generation: prompt validated against a
-   written rubric, revisions and watermark in the API, edit sync from the
-   repo, rebuild path.
+4. **MINI-86** — integration-based generation: a short definition and an
+   "In practice" paragraph per entity, the page as the base, the rebuild
+   path; local in `prose.json` first, then revisions and watermark in the
+   API.
 5. **MINI-87** — prove the update loop by hand and in tests:
    - a new lesson regenerates only the entities it touches;
    - a correction note contradicting an older claim changes the page;
    - a correction note denying a link removes it from the pages, and a later
      source re-asserting it brings it back;
    - raising the linker version relinks every statement;
-   - an edit in the repo syncs to the API and survives a later lesson, merged
-     with it;
+   - an edit on the page becomes the base and survives a later lesson,
+     merged with it;
+   - a note declaring two names the same merges their pages, and a later
+     note saying they differ splits them again;
    - a newer note overrides an older edit;
    - nothing new means no LLM calls and nothing to commit;
    - rebuild from scratch works, including a public-only variant.
 6. **MINI-88** — full-corpus run; time, cost and quality recorded; go/no-go.
+7. **MINI-90** — identity fixes through notes: `alias_of` / `distinct_from`
+   relations from the note extraction, merged at build time.
 
 ## Consequences
 
@@ -236,6 +255,10 @@ Tracked in Asana under MINI-29.
   being built. Each entity with new statements is a distinct unit of work,
   which is what a queue-driven Lambda worker expects. That reading belongs to
   the AWS follow-on; `evaluator.yaml` is not changed until the code is.
+- Linking and generation are unit-at-a-time: a batch of statements, or one
+  entity, in; its result out. Locally, `--workers N` runs N calls at once
+  with the files written under a lock. In the cloud each unit is its own
+  message and its own invocation — the same code, run per message.
 - If the markdown repo stops being the edit surface, the git dependency — the
   reason ADR-004's Lambda fit check failed — stops being load-bearing.
 - New API surface: linker-origin relations with an assert/deny polarity and
