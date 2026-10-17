@@ -91,6 +91,18 @@ the concept it mentions, carrying the statement's source and date.
   pipeline treats as rare-to-never. Running over stored statements also means
   correction notes and operator additions are linked by the same pass.
 
+**As built (local half, 2026-10-16).** No catalog of existing slugs goes in
+the prompt — it was most of each call's input. The model names concepts in
+their plain noun form ("redirect", not "redirection"); names are resolved
+locally the way the API resolves them; and each batch is told the names
+already proposed for concepts with no page, so later batches reuse them. A
+list of foundational concepts in the prompt is examples, not a vocabulary:
+specific concepts (contrabody position, tempo) stay alongside general ones,
+and two ideas get two names. *Leading* is the leader asking or signalling;
+*following* is the follower reacting to what the leader asks — not
+everything a follower does is following. The prompt was settled over three
+versions on a 20-statement sample (MINI-84 comments).
+
 **References can be denied, and the newest word wins.** A statement can deny
 a reference as well as assert one ("frame has nothing to do with anchor").
 For any pair of entities the newest assertion or denial is the one that holds;
