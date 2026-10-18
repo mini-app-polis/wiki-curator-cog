@@ -235,7 +235,11 @@ when a source is composed — only while `flags.wcs.wiki_jobs_enabled` is on,
 seeded off — and the follow-on jobs each job names, which the worker posts to
 `POST /v1/wcs/wiki/jobs`. Jobs run side by side only where they write different state entries (below); each reads the export and the
 state from the API into a fresh temporary folder, so a warm container never
-holds stale state. A failed job is returned to the queue and retried (its
+holds stale state. The export is the expensive read. The API builds it once per
+corpus revision, and the shared client sends back the ETag of the copy a warm
+container kept, so an unchanged corpus comes back as a 304. Don't add
+concurrency that would make jobs read the export in parallel without checking
+that it still costs one build per revision (the 2026-10-18 incident). A failed job is returned to the queue and retried (its
 finished parts are no-ops), and an unreadable message is reported once and
 dead-lettered.
 
