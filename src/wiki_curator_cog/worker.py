@@ -10,9 +10,13 @@ as its follow-ons, which this worker posts back to it. Every message is
 
 with a payload :func:`wiki_curator_cog.units.validate` accepts.
 
-**One job at a time.** The queue has one message group, so jobs never run
-side by side: two of them cannot race on one state document, or pay twice
-for one entity.
+**Side by side only where it is safe.** The queue is FIFO and the API picks
+each job's message group by what it writes (its ``wiki_dispatch.group_for``).
+``consolidate`` and ``generate`` share one group, so two of them never pay for
+one entity. ``link`` writes one source's statements and runs a group per
+source; ``materialise`` only writes page documents and spreads over a few
+groups. A job writes back only the state entries it changed, so jobs in
+different groups do not overwrite each other.
 
 **State in the API, no cache between invocations.** Each invocation reads the
 export and the state documents from the API and writes back what it changed.

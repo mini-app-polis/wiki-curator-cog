@@ -11,7 +11,7 @@ was and why it is gone.
 
 | Piece | Where it is declared |
 |---|---|
-| `wiki-curator-jobs.fifo`, its dead-letter queue, the function (`wiki-curator-worker`), the event source mapping, reserved concurrency 1, the alarms | `module "wiki_curator"` in mini-app-polis/infra |
+| `wiki-curator-jobs.fifo`, its dead-letter queue, the function (`wiki-curator-worker`), the event source mapping and its concurrency ceiling, the alarms | `module "wiki_curator"` in mini-app-polis/infra |
 | The function's code | this repo, deployed by CI on each release (`deploy` in `.github/workflows/ci.yml`, the shared `lambda-deploy.yml`) |
 | Its secrets | SSM, read by `load_secrets` at each invocation |
 | Who enqueues | api-kaianolevine-com only: a `link` job when a source is composed (behind `flags.wcs.wiki_jobs_enabled`), and the follow-ons a job posts to `POST /v1/wcs/wiki/jobs` |
