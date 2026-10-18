@@ -1,3 +1,10 @@
+## [3.0.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.0.0...v3.0.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* drop rendered_at from page frontmatter so an unchanged corpus renders unchanged (MINI-99) ([1327572](https://github.com/mini-app-polis/wiki-curator-cog/commit/1327572569f17f2b18e8a3e054e8b8540097c703))
+
 # [3.0.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.4.1...v3.0.0) (2026-10-18)
 
 
