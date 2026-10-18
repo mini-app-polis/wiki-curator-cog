@@ -45,17 +45,15 @@ the follow-ons are asked for again.
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-import sentry_sdk
 from mini_app_polis import load_secrets, timing
 from mini_app_polis import logger as logger_mod
 from mini_app_polis.api.contract import WcsWikiJob, WcsWikiJobsRequest
-from mini_app_polis.environment import current_environment
 from mini_app_polis.pipeline_status import RunReport, post_run_finding, run_report
+from mini_app_polis.sentry import init_sentry
 
 from . import link, state_backend, units, usage
 from ._deadline import deadline
@@ -68,11 +66,9 @@ MESSAGE_VERSION = 1
 TYPE_JOB = "wiki.job"
 
 # At import, once per cold start (see transcription-cog's worker).
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN_COGS"),
-    environment=current_environment().value,
-)
-sentry_sdk.get_global_scope().set_tag("service", MACHINE_NAME)
+# An empty DSN in production logs an ERROR rather than passing silently
+# (CD-038); the service tag tells this cog's events apart in the shared project.
+init_sentry(MACHINE_NAME)
 
 
 class UnprocessableMessage(RuntimeError):

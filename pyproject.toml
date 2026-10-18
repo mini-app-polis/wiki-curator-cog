@@ -5,7 +5,7 @@ description = "Builds the WCS wiki from the canonical corpus in api-kaianolevine
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "miniapppolis-common-utils[llm]>=6.4.0,<7",
+    "miniapppolis-common-utils[llm]>=6.6.0,<7",
     "anthropic>=0.40",
     "pydantic>=2.0.0,<3.0.0",
     "pydantic-settings>=2.4.0,<3.0.0",
