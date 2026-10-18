@@ -285,7 +285,7 @@ def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         "job": "generate",
         "entities": sorted(targets),
         "skipped": sorted(skipped),
-        **{k: counts[k] for k in ("generated", "failed")},
+        **{k: counts[k] for k in ("generated", "failed", "failed_slugs")},
         # a page gone since the job was enqueued is removed by materialise
         "next": _materialise_jobs(set(targets) | set(skipped)),
     }

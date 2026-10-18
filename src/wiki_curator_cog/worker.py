@@ -29,6 +29,14 @@ attempt finished.
 its receives and lands in the dead-letter queue, where someone can see what
 produced it.
 
+**One run report per job, as every cog sends one per run.** It counts the
+model calls and their cost, and is quiet when the job went cleanly. Work
+the job paid for and left undone — a failed link or consolidation batch, an
+entity whose prose failed — is an issue, so the report is a WARN: nothing
+retries it on its own, because the job succeeded. A job that raises is
+reported on its way out. The worker itself reports only the message it could
+not read, which never reached a job.
+
 **Follow-ons are sent before the job counts as done.** If the API cannot
 take them, the job is retried: its own work is a no-op the second time, and
 the follow-ons are asked for again.
@@ -47,7 +55,7 @@ from mini_app_polis import load_secrets, timing
 from mini_app_polis import logger as logger_mod
 from mini_app_polis.api.contract import WcsWikiJob, WcsWikiJobsRequest
 from mini_app_polis.environment import current_environment
-from mini_app_polis.pipeline_status import post_run_finding
+from mini_app_polis.pipeline_status import RunReport, post_run_finding, run_report
 
 from . import link, state_backend, units, usage
 from ._deadline import deadline
@@ -119,12 +127,63 @@ def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
     return result
 
 
+def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> None:
+    """Translate one job's result onto its run report.
+
+    Counts are counts. What a person should look at is an issue: work the
+    job paid for and could not finish — a batch the model answered badly, an
+    entity whose prose failed twice — which nothing retries on its own,
+    because the job itself succeeded and its message is gone.
+    """
+    kind = str(job.get("job"))
+    spent = result.get("usage") or {}
+    report.count("model_calls", int(spent.get("calls") or 0))
+    report.count("cost_usd_cents", round(float(spent.get("cost_usd") or 0) * 100))
+    report.count("jobs_enqueued", len(result.get("enqueued") or []))
+    if kind == "link":
+        report.ok(int(result.get("linked") or 0))
+        report.count("statements", int(result.get("statements") or 0))
+        if result.get("failed_batches"):
+            report.issue(
+                "link_batch_failed",
+                str(result.get("source_id")),
+                detail=f"{result['failed_batches']} batch(es) left unlinked; "
+                "re-send this link job to retry them",
+            )
+    elif kind == "consolidate":
+        report.ok(int(result.get("decided") or 0))
+        if result.get("failed_batches"):
+            report.issue(
+                "consolidate_batch_failed",
+                ", ".join(result.get("entities") or []),
+                detail=f"{result['failed_batches']} batch(es) left undecided",
+            )
+    elif kind == "generate":
+        report.ok(int(result.get("generated") or 0))
+        for slug in result.get("failed_slugs") or []:
+            report.issue("generate_failed", str(slug))
+    elif kind == "materialise":
+        report.ok(int(result.get("written") or 0))
+        report.count("pages_removed", int(result.get("deleted") or 0))
+
+
 def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
-    """Run the job one message asks for. Raises if it must be redelivered."""
+    """Run the job one message asks for. Raises if it must be redelivered.
+
+    One run report per job, as every cog sends one per run: quiet when the
+    job went cleanly, a WARN when it finished with work left undone, and on
+    an exception the report goes out on the way (``run_report``) before the
+    message returns to the queue.
+    """
     job = job_of(body)
     log.info("worker: run %s job=%s", run_id, job.get("job"))
-    with tempfile.TemporaryDirectory(prefix="wiki-state-") as tmp, deadline(budget_s):
+    with (
+        run_report(f"wiki-{job.get('job')}", repo=REPO, run_id=run_id) as report,
+        tempfile.TemporaryDirectory(prefix="wiki-state-") as tmp,
+        deadline(budget_s),
+    ):
         result = run(job, client=_state_client(), state_dir=Path(tmp))
+        record(report, job, result)
     log.info(
         "worker: done %s job=%s next=%s usage=%s",
         run_id,
@@ -203,6 +262,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 failures.append({"itemIdentifier": message_id})
             except Exception:  # noqa: BLE001 — every failure is a retry
                 timed.label(outcome="failed")
+                # Already reported by the job's run report on its way out.
                 log.exception("worker: job failed (attempt %s)", attempt)
                 failures.append({"itemIdentifier": message_id})
             else:

@@ -291,7 +291,8 @@ Three layers:
 
 1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`; one timing line per job.
 2. **Sentry** — the exception that fails a job (the shared cogs project, tagged `service:wiki-curator-cog`).
-3. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (from `module "wiki_curator"` in mini-app-polis/infra) says so. An unreadable message is also reported once as an ERROR finding.
+3. **Run report** — one per job (`wiki-link`, `wiki-generate`, …), as every cog sends one per run: model calls and cost as counts, quiet when the job went cleanly, a WARN when it finished with paid-for work left undone (a failed link or consolidation batch, an entity whose prose failed), and sent on the way out when a job raises. An unreadable message, which never reaches a job, is reported once by the worker.
+4. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (from `module "wiki_curator"` in mini-app-polis/infra) says so.
 
 ---
 

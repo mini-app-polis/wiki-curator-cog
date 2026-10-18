@@ -63,7 +63,8 @@ Every model pass is watermarked in the API, so a repeated job makes no model cal
 | ----- | ------ | ----- |
 | L1 | Structured logs, one timing line per job | `mini_app_polis` JSON logger |
 | L2 | The exception that fails a job | Sentry (shared cogs project, `service:wiki-curator-cog`) |
-| L3 | A job that keeps failing | the dead-letter queue and its alarm (`module "wiki_curator"`, mini-app-polis/infra) |
+| L3 | Each job's outcome: counts, cost, work left undone (WARN), a raise | one run report per job (`run_report`), as every cog sends |
+| L4 | A job that keeps failing | the dead-letter queue and its alarm (`module "wiki_curator"`, mini-app-polis/infra) |
 
 ## Concurrency and the job budget
 

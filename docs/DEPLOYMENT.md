@@ -39,7 +39,8 @@ production without the queue.
 | ----- | ------ | ----- |
 | L1 | Structured logs, one timing line per job | the function's CloudWatch log group |
 | L2 | The exception that fails a job | Sentry, shared cogs project, `service:wiki-curator-cog` |
-| L3 | A job that keeps failing | the dead-letter queue and its alarm |
+| L3 | Each job's outcome | one run report per job: quiet when clean, WARN for work left undone, sent on a raise |
+| L4 | A job that keeps failing | the dead-letter queue and its alarm |
 
 An unreadable message is reported once as an ERROR finding and then
 dead-lettered: it is a producer bug, and retrying it changes nothing.
