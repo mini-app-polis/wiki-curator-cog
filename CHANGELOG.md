@@ -1,3 +1,10 @@
+# [3.5.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.4.1...v3.5.0) (2026-10-18)
+
+
+### Features
+
+* a wiki job's run report names what it changed, not only what it processed ([c1ca7f5](https://github.com/mini-app-polis/wiki-curator-cog/commit/c1ca7f5fcd56335b113f8916df656cd9f2f08407))
+
 ## [3.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.4.0...v3.4.1) (2026-10-18)
 
 
