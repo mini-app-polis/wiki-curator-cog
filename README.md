@@ -3,18 +3,9 @@
 [![CI](https://github.com/mini-app-polis/wiki-curator-cog/actions/workflows/ci.yml/badge.svg)](https://github.com/mini-app-polis/wiki-curator-cog/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/github/v/tag/mini-app-polis/wiki-curator-cog?label=version)](https://github.com/mini-app-polis/wiki-curator-cog/releases)
 
-Renders the [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown knowledge base from the canonical WCS corpus in `api-kaianolevine-com`.
+Builds the WCS wiki from the canonical corpus in `api-kaianolevine-com`, and stores each page in the API as a document that the API serves filtered by what each reader may see.
 
-Reads the canonical WCS entity graph from `api-kaianolevine-com` in one call (`GET /v1/wcs/wiki/export`, read-only), deterministically renders it onto source / concept / technique / instructor / terminology pages and views in a clone of `wcs-wiki`, and pushes to GitHub. The curator does not call any LLM at runtime — upstream `transcription-cog` has already extracted the structured data from raw transcripts. The schema this cog implements is defined in `wcs-wiki/CLAUDE.md`; the strategic intent and queued work live in `wcs-wiki/ROADMAP.md`.
-
-**One mode, `export`.** A run takes no arguments: it fetches the whole corpus,
-re-renders every page from it, removes derived pages that are no longer
-produced, commits what changed and pushes. Running it twice over unchanged
-upstream data produces the same bundle and the second run commits nothing —
-which is why the trigger is allowed to be crude. The three-mode split this
-README used to document was retired by ADR-002 and ADR-004.
-
-The `export` run is triggered manually on Railway: one wake renders once and exits. It renders the bare export only — no links, folds or generated prose — so it shows none of the worker's work. Per-source work is the wiki-jobs worker's (below, ADR-006): the API enqueues a job when a source is composed, and each page ends as a document stored in the API (`materialise`, MINI-96). The Railway service and its git push retire next: the wcs-wiki repo stays only as a local export written by `render` from the same page documents (MINI-99).
+It runs as the wiki-jobs Lambda worker (ADR-006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all (MINI-99). The Railway `export` run that cloned, rendered and pushed it was retired with its service (MINI-95). The page schema is defined in `wcs-wiki/CLAUDE.md`.
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
@@ -35,12 +26,16 @@ Drive transcript drop
         │
         ▼
 transcription-cog (LLM extraction) ──► api-kaianolevine-com (transcripts + sources)
-                                            │
-                                            ▼ (HTTP API, read-only)
-                                    wiki-curator-cog
-                                            │
+                                            │  composed → link job
+                                            ▼  wiki-curator-jobs.fifo
+                                    wiki-curator-worker (Lambda)
+                                      link → consolidate → generate → materialise
+                                            │  state and page documents
                                             ▼
-                                      wcs-wiki repo
+                                    api-kaianolevine-com ──► wcs.kaianolevine.com
+                                            │
+                                            ▼  `render`, locally
+                                      wcs-wiki repo (markdown export)
 ```
 
 The curator never accesses the database directly. All upstream data is fetched over HTTP from `api-kaianolevine-com`, authenticated with this cog's own named machine key.
@@ -281,28 +276,15 @@ The page is the base: if an overview was edited on the page, the next run
 builds on the edit rather than replacing it. Editing is optional —
 corrections normally arrive as notes.
 
-### Run an export locally
-
-`WIKI_REPO_PATH` is not in Doppler; point it at your wcs-wiki clone in the
-shell. `doppler run` passes it through because Doppler holds no value for
-that name; if it did, Doppler's would win:
-
-```bash
-WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main export
-```
-
 ---
 
 ## Observability
 
 Three layers:
 
-1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`.
-2. **Sentry** — the unhandled exception that ends a run.
-3. **Run report** — one per run, sent however it ends: SUCCESS or WARN out of a
-   good run, ERROR out of a failed one.
-
-Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surfaced in the existing pipeline-evaluations UI on `website-astro-software`.
+1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`; one timing line per job.
+2. **Sentry** — the exception that fails a job (the shared cogs project, tagged `service:wiki-curator-cog`).
+3. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (from `module "wiki_curator"` in mini-app-polis/infra) says so. An unreadable message is also reported once as an ERROR finding.
 
 ---
 
@@ -310,12 +292,12 @@ Pipeline-evaluation findings are emitted to `pipeline_evaluations` per run, surf
 
 **The curator does not invent content.** Every wiki claim traces to an upstream source. The schema in `wcs-wiki/CLAUDE.md` is the operating manual; this cog implements it.
 
-**A deterministic render over model-written state.** `render` and `export` call no model: given the same export and the same state (references, facets, prose), they produce the same pages. The model calls are in `link`, `consolidate` and `generate` — locally or in the worker — each watermarked, so a re-run pays only for what is new.
+**A deterministic render over model-written state.** `render` and `materialise` call no model: given the same export and the same state (references, facets, prose), they produce the same pages. The model calls are in `link`, `consolidate` and `generate` — locally or in the worker — each watermarked, so a re-run pays only for what is new.
 
-**Idempotency.** The render is a pure function of the export it fetched: every page is rewritten each run, derived pages no longer produced are removed, and an unchanged corpus yields an unchanged tree with nothing to commit. There is no per-item skip to get wrong, which is what lets a redundant run cost time rather than correctness.
+**Idempotency.** Every model pass is watermarked in the API, so a repeated job makes no model call, and `materialise` rewrites the same document. The render is a pure function of the export and the state: an unchanged corpus yields an unchanged tree.
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
-**Single-instance concurrency.** Each run is its own process with its own clone, so there is no shared working tree to race on, and Railway will not start the service again while a previous start is `Active`. Two overlapping runs could still race on the push, where git rejects the loser non-fast-forward (ADR-004).
+**One job at a time.** The queue is FIFO with one message group and the function has a reserved concurrency of 1, so two jobs never race on one state document or pay twice for one entity.
 
-**Read-only against the corpus.** The curator reads note content with `GET` only. It writes its own state (`/v1/wcs/wiki/state/*`), asks for follow-on jobs (`/v1/wcs/wiki/jobs`), and posts pipeline-evaluation findings (`/v1/evaluations`).
+**Read-only against the corpus.** The curator reads note content with `GET` only. It writes its own state (`/v1/wcs/wiki/state/*`) and page documents (`/v1/wcs/wiki/pages`), and asks for follow-on jobs (`/v1/wcs/wiki/jobs`).

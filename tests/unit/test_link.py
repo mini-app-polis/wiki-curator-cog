@@ -416,14 +416,11 @@ def test_link_local_saves_links_and_a_review(tmp_path: Path) -> None:
     assert (tmp_path / "links-review.md").exists()
 
 
-def test_link_mode_runs_without_the_gate_or_config(
+def test_link_mode_runs_the_local_pass(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     out = tmp_path / "l.json"
-    with (
-        patch.object(main, "load_config", side_effect=AssertionError("no config")),
-        patch.object(main, "link_local", return_value={"linked": 0}) as run,
-    ):
+    with patch.object(main, "link_local", return_value={"linked": 0}) as run:
         assert (
             main.main(
                 ["link", "--sample", "20", "--links-file", str(out), "--state", "files"]

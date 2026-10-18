@@ -16,7 +16,7 @@ def test_every_module_imports_with_no_git_on_the_path(tmp_path) -> None:
         "    importlib.import_module(f'wiki_curator_cog.{m.name}')\n"
         "print('ok')\n"
     )
-    env = {k: v for k, v in os.environ.items() if k != "GIT_PYTHON_REFRESH"}
+    env = dict(os.environ)
     env["PATH"] = str(tmp_path)
     out = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True

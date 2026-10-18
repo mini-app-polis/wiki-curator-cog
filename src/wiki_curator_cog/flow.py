@@ -1,48 +1,16 @@
-"""The export run: fetch the canonical entity graph, render, commit, push.
+"""The local commands, and what the wiki-jobs worker shares with them.
 
-This was a Prefect flow. What each Prefect facility did, and what does it
-now:
+Every command here runs on a laptop against the production API: ``render``
+writes the wcs-wiki markdown export from the page documents, and ``link``,
+``consolidate``, ``generate``, ``materialise`` and ``job`` run the curator's
+passes, with their state held by the API (ADR-006). The worker
+(:mod:`wiki_curator_cog.worker`) uses the same export read, corpus check and
+state client.
 
-``@flow`` / ``serve()`` / the ``wiki_curator_router`` dispatcher
-    Nothing. One wake is one run of one mode, so there is nothing to
-    dispatch to and no resident process to dispatch from. ``main`` calls
-    :func:`export_run` once and exits.
-
-``concurrency("wiki-curator-cog", occupy=1)``
-    Removed, not replaced, and deliberately. The slot existed because two
-    runs would race on one working tree; a one-shot process clones into
-    its own container's ``/tmp`` and shares nothing, so the race it
-    prevented cannot happen. What two overlapping runs *could* still race
-    on is the push, and git already arbitrates that: the loser is rejected
-    non-fast-forward and fails visibly. That is weaker than a lock and
-    strong enough for a manually-triggered rebuild; it would not be enough
-    for anything automatic and frequent.
-
-``@task(retries=...)``
-    There were none in this flow. The one external call with a retry of
-    its own is the push (``WikiRepo.push``, three attempts with backoff).
-    The export GET retries inside ``KaianoApiClient``. Nothing else here
-    is retried, and with no queue behind the run there is no redelivery
-    to fall back on — a failed run is re-triggered by hand.
-
-``on_failure`` / ``on_crashed`` (``make_failure_hook``)
-    The explicit failure path in :func:`export_run`, which posts one ERROR
-    carrying whatever the run had managed to do, and re-raises.
-
-    Not ``pipeline_status.run_report``, though it is the obvious fit and was
-    used first. Its severity is derived from the report, and a report has no
-    verb for ERROR — the library says so, because ERROR used to mean "a flow
-    died" and that was the Prefect hook's to say. Through ``run_report`` a
-    run that died on a rejected push reported WARN, the same severity as one
-    that merely dropped a dangling reference. So the report is built here and
-    sent on exactly one of the two paths: ``send()`` on success, an explicit
-    ERROR on failure. One run, one message, at the severity it deserves.
-
-``get_run_id()``
-    A uuid4 minted by ``main`` and threaded in. The library's fallback
-    resolves Prefect's ids and answers ``"local-run"`` without them, which
-    would make every report unattributable and unjoinable to the findings
-    the same run filed.
+There is no deployed run here. The Railway ``export`` mode, which cloned
+wcs-wiki, rendered and pushed, was retired with its service (MINI-95,
+MINI-99): the worker stores each page as a document in the API, and the
+markdown repo is only a local export.
 """
 
 from __future__ import annotations
@@ -54,7 +22,6 @@ from typing import Any
 from mini_app_polis import logger as log
 from mini_app_polis.api import KaianoApiClient
 from mini_app_polis.api.contract import WcsWikiExportItem
-from mini_app_polis.pipeline_status import RunReport, post_run_finding
 
 from . import (
     consolidate,
@@ -66,10 +33,6 @@ from . import (
     units,
     usage,
 )
-from ._deadline import deadline
-from .boot import assert_push_access, ensure_wiki_clone, mask_url
-from .config import Config, assert_wiki_clone_ready, load_config
-from .git_ops import WikiRepo
 from .render import (
     build_indexes,
     corpus_quality,
@@ -82,9 +45,6 @@ LOG = log.get_logger()
 
 REPO = "wiki-curator-cog"
 """Machine name this cog reports under; also names its API key variable."""
-
-FLOW_NAME = "wiki-curator-cog-export"
-"""What the run reports call themselves. Unchanged from the Prefect name."""
 
 
 #: This cog's name in api-kaianolevine-com's identity_registry.MACHINES. The
@@ -136,83 +96,6 @@ def _write_bundle(wiki_repo_path: Path, bundle: dict[str, str]) -> list[Path]:
     return written
 
 
-def _export(config: Config) -> dict:
-    """Fetch the canonical export and re-render the full wiki bundle."""
-    LOG.info(
-        "export.start branch=%s repo=%s",
-        config.wiki_branch,
-        mask_url(config.wiki_repo_url),
-    )
-
-    # Before the clone, not after the render: a credential that reads but
-    # cannot write is otherwise discovered once the whole bundle is on disk
-    # and committed. See boot.assert_push_access.
-    assert_push_access(config)
-
-    ensure_wiki_clone(config)
-    assert_wiki_clone_ready(config)
-
-    wiki_repo = WikiRepo(config)
-
-    export = _fetch_export()
-    _require_corpus(export)
-    log_path = config.wiki_repo_path / "log.md"
-    existing_log = log_path.read_text() if log_path.exists() else ""
-
-    rendered_at = dt.date.today()
-    bundle, stats = render_bundle(
-        export,
-        rendered_at=rendered_at,
-        existing_log=existing_log,
-    )
-
-    expected_paths = set(bundle.keys())
-    stale = list_stale_derived_paths(config.wiki_repo_path, expected_paths)
-    for path in stale:
-        path.unlink(missing_ok=True)
-
-    written = _write_bundle(config.wiki_repo_path, bundle)
-
-    if stale:
-        wiki_repo.stage_removal(stale)
-    if written:
-        wiki_repo.stage(written)
-
-    # After staging and before committing: this is the only moment the
-    # index holds the whole changeset and HEAD still holds the old one.
-    changes = wiki_repo.staged_changes()
-
-    commit_msg = (
-        f"render: {rendered_at.isoformat()} "
-        f"({stats.entity_count} entities, {stats.source_count} sources)"
-    )
-    committed = wiki_repo.has_changes()
-    if committed:
-        wiki_repo.commit(commit_msg)
-
-    wiki_repo.push()
-
-    summary = {
-        "entities": stats.entity_count,
-        "sources": stats.source_count,
-        "instructors": stats.instructor_count,
-        # How much was rendered, and separately what that actually changed.
-        # The first is very nearly a constant — every page is rewritten
-        # every run — so only the second says whether the wiki moved.
-        "pages_rendered": len(written),
-        "added": changes["added"],
-        "modified": changes["modified"],
-        "removed": changes["removed"],
-        "committed": committed,
-        # Pages actually in the bundle, which is not the same as
-        # len(export.sources) once two sources collide on a slug.
-        "source_pages": sum(1 for p in bundle if p.startswith("sources/")),
-        "dropped": list(stats.dropped),
-    }
-    LOG.info("export.complete %s", summary)
-    return summary
-
-
 def _existing_markdown(wiki_repo_path: Path) -> set[str]:
     return {
         str(p.relative_to(wiki_repo_path))
@@ -249,15 +132,13 @@ def render_local(
     the paths given, or (``ApiState``) the API, with those paths as its
     cache. A path left out means that layer is not used either way.
 
-    The proof-of-concept loop (ADR-005, MINI-83): run it, read the result in
-    Obsidian or ``git diff``, change something, run it again. Nothing leaves
-    the machine except the export GET, so it needs the API key and nothing
-    else — no GH_TOKEN, and no Discord message per iteration.
+    The wcs-wiki repo is a local export (MINI-99): run this, read the result
+    in Obsidian or ``git diff``, commit by hand if you want to. Entity pages
+    are written from the page documents ``materialise`` stores. Nothing
+    leaves the machine except the API reads.
 
-    ``log.md`` is not touched: a local iteration is not an event in the
-    wiki's history. Stale derived pages are removed from the working tree,
-    as an export would, so ``git status`` shows exactly what an export would
-    commit.
+    ``log.md`` is not touched. Stale derived pages are removed from the
+    working tree, so ``git status`` shows everything that changed.
     """
     if not (wiki_repo_path / "CLAUDE.md").exists():
         raise RuntimeError(
@@ -797,81 +678,4 @@ def _dry_summary(command: str, llm: Any, counts: dict) -> dict:
         "usage": usage.usage_of(llm),
     }
     LOG.info("%s.dry_run %s", command, summary)
-    return summary
-
-
-def record_summary(report: RunReport, summary: dict) -> None:
-    """Translate one export summary onto the run report.
-
-    Outcomes are what git recorded, not what the renderer wrote. A page
-    that was rewritten with identical bytes is not an outcome, and the
-    run that rewrote 2505 of them and changed none has nothing to
-    announce — which is what makes a SUCCESS worth staying quiet about.
-    The work done is still visible, as the ``rendered`` counter.
-
-    Severity is derived, never asserted: any dangling reference,
-    colliding slug or unresolved instructor makes the run WARN, which is
-    what this module means by "results worth a human look".
-    """
-    added = list(summary.get("added", []))
-    modified = list(summary.get("modified", []))
-    removed = list(summary.get("removed", []))
-
-    report.ok(len(added) + len(modified) + len(removed))
-    for reason, ref in summary.get("dropped", []):
-        report.issue(str(reason), str(ref))
-
-    report.count("rendered", summary.get("pages_rendered", 0))
-    report.count("entities", summary.get("entities", 0))
-    report.count("sources", summary.get("sources", 0))
-    source_pages = summary.get("source_pages")
-    if source_pages is not None and source_pages != summary.get("sources"):
-        report.count("source_pages", source_pages)
-
-    # Which pages moved, and how — a rewrite is an update, not a creation.
-    for path in added:
-        report.created("wiki page", str(path))
-    for path in modified:
-        report.updated("wiki page", str(path))
-    for path in removed:
-        report.removed("wiki page", str(path))
-
-
-def export_run(*, run_id: str) -> dict:
-    """Run one export and report it, however it ends.
-
-    The report is opened before the export rather than after, so the
-    duration on it is the export's and not the microsecond it takes to fill
-    in. No explicit notability on the success path: an export whose commit
-    was empty recorded no outcome and stays quiet; one that added, changed
-    or removed a page has one, and that is what makes it worth sending. A
-    WARN is sent either way.
-
-    Exactly one message leaves this function. ``report.send()`` is never
-    reached on the failure path, and the ERROR below is never posted on the
-    success path.
-    """
-    config = load_config()
-    report = RunReport(flow_name=FLOW_NAME, repo=REPO, run_id=run_id)
-
-    try:
-        with deadline(config.run_timeout_seconds):
-            summary = _export(config)
-    except BaseException as exc:  # noqa: BLE001 — reported, then re-raised
-        # BaseException, not Exception: a run killed by SIGTERM mid-render
-        # should still say what it had managed to do. Re-raised either way.
-        report.issue("export_failed", type(exc).__name__, detail=str(exc))
-        post_run_finding(
-            FLOW_NAME,
-            "ERROR",
-            text=report.text(),
-            repo=REPO,
-            run_id=run_id,
-            notable=True,
-            **report.counters,
-        )
-        raise
-
-    record_summary(report, summary)
-    report.send()
     return summary

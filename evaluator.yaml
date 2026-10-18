@@ -3,123 +3,25 @@
 
 type: pipeline-cog
 
-# ADR-009 defines `pipeline-cog` as a queue-driven Lambda worker declared in
-# the repo's infra/. This cog is a one-shot Railway process with no queue and
-# no infra/ — see docs/decisions/ADR-004-one-shot-on-railway-no-prefect.md for
-# why, and for the Lambda fit check that failed before any of it was decided.
-#
-# The AWS-shaped rules below are exemptions, not deferrals. A deferral says
-# "unmet, and known"; these are not unmet. There is no queue to give a
-# dead-letter target, no function whose memory to declare, no mapping to bound.
-# The rules describe a runtime this cog does not have.
-#
-# Six exemptions for one structural reason is, by ADR-002's own test, the
-# signal that the taxonomy has fallen behind rather than that the cog has. The
-# Layer 2 polish pass described in ADR-001 will be the second thing shaped like
-# this — a periodic whole-corpus rebuild with no per-item work. This file is
-# the evidence for that conversation, not a way of avoiding it.
+# A queue-driven Lambda worker, like the other pipeline cogs (ADR-006 here):
+# wiki-curator-jobs.fifo and its dead-letter queue, the function, the event
+# source mapping, reserved concurrency and the alarms are `module
+# "wiki_curator"` in mini-app-polis/infra. The Railway one-shot process that
+# needed the runtime exemptions this file used to hold was retired with its
+# service (MINI-95); they went with it.
 
 exemptions:
-  - rule: PIPE-016
-    reason: >
-      Requires infra/ declaring a queue, a function and an event source
-      mapping. There is no queue because a run takes no arguments: the export
-      is a full idempotent re-render of the whole corpus, so every message
-      would be identical and a consumer would collapse N of them into one
-      run. In the other cogs a message names a distinct unit of work — a
-      drive_file_id, a repo — and there is no such unit here. The half of
-      PIPE-016 that is about Prefect is satisfied outright: the dependency is
-      gone.
-
-  - rule: PIPE-017
-    reason: >
-      Per-record failure reporting, a dead-letter queue and a visibility
-      timeout longer than the function timeout. There are no records — one
-      wake is one run of one mode. What the rule protects against, a failure
-      nobody hears about, is covered by run reporting (one run, one message,
-      sent on the way out of a failure at ERROR), Sentry, and a non-zero
-      exit.
-
-  - rule: PIPE-018
-    reason: >
-      A concurrency ceiling declared in infra/. There is no infra/ and no
-      reservation to declare. Serialisation comes from the shape instead: one
-      wake is one process with its own clone, and Railway will not start the
-      service again while a previous start is Active. Two overlapping runs
-      could still race on the push, where git rejects the loser
-      non-fast-forward and it fails visibly.
-
-  - rule: PIPE-020
-    reason: >
-      The only one of these where the rule's concern applies and it is the
-      check that does not fit. A run here does stop before its ceiling and
-      does say so — src/wiki_curator_cog/_deadline.py raises inside the run a
-      margin before RUN_TIMEOUT_SECONDS, so the report is sent and main exits
-      non-zero. The check looks for get_remaining_time_in_millis, which reads
-      Lambda's own clock; there is no runtime clock on Railway, so the budget
-      is declared instead. It matters more here than on Lambda: Railway
-      silently skips every later start while one is still Active, so a run
-      that hangs takes all its successors with it. Worth a non-Lambda branch
-      in the rule rather than an exemption per cog.
-
-  - rule: CD-010
-    reason: >
-      ADR-009 makes a pipeline cog's liveness layer a dead-letter-queue alarm
-      with an action. There is no queue to alarm on, and no external
-      liveness check stands in for one. Sentry covers the unhandled
-      exception, the run report covers everything the process lived long
-      enough to say, and _deadline.py turns a hang into a reported failure.
-      A process killed outright (OOM) is not caught; the planned Lambda move
-      (see CD-021) brings the DLQ alarm this rule asks for.
-
-  - rule: PIPE-015
-    reason: >
-      Requires a pipeline cog's work to arrive on a queue the API enqueues
-      onto. There is no queue (see PIPE-016): a run takes no arguments and
-      re-renders the whole corpus, so a run per message would collapse into
-      one. A run starts on a Railway deploy (RUN_ON_START) or from the CLI
-      (`main.py export`), as ADR-004 decides. ADR-004 also names the
-      direction of travel — a run asked for by api-kaianolevine-com per
-      source change — and that, if built, is where this exemption ends.
-
-  - rule: CD-024
-    reason: >
-      Reads a pipeline cog's infra/ Terraform — memory_size and timeout — as
-      its platform descriptor. There is no infra/. The equivalent
-      declarations are .railway/railway.ts (startCommand, restartPolicyType: NEVER)
-      and RUN_TIMEOUT_SECONDS, which is the ceiling a run is actually stopped
-      against.
-
-  # ── Not about the runtime: a build this cog is leaving ──
-
-  - rule: CD-021
-    reason: >
-      The rule's concern is real while the Railway build exists: Railpack
-      infers the base image, the interpreter patch and the system packages
-      (git, from railpack.json) at build time and records them nowhere. It is
-      exempt rather than deferred because the fix it asks for has no future
-      here. This cog is moving to Lambda (decided 2026-10-14), the Lambda
-      cogs deploy as zips rather than images, and that move deletes
-      .railway/ and railpack.json. A root Dockerfile would be written only
-      to be removed, and would describe a runtime the cog is not going to
-      have. This exemption comes out in the change that retires the Railway
-      service. If the Lambda move is dropped, it stops being true: replace it
-      with a root Dockerfile modelled on db-ops's.
-
-  # ── Not about the runtime: this one describes a file-processing cog ──
-
   - rule: PY-013
     reason: >
       Taken from the rule's own exemption path: a cog whose inputs cannot
       contain duplicates by construction declares that here with a reason
       naming why.
 
-      One run reads one document — the whole corpus in a single call — and
-      re-renders every page from it deterministically. There is no stream of
-      arriving items to see twice, so there is nothing to deduplicate. Two
-      runs over unchanged upstream data produce byte-identical output and the
-      second commits nothing; the render is a pure function of its input,
-      which is what makes the trigger allowed to be crude. Duplicate
-      suppression that does matter — one source row per extraction — is
-      upstream in api-kaianolevine-com, enforced by a unique index
-      (PIPE-002, migration 030), not here.
+      A job names a unit of work — a source, or entity slugs — not a file.
+      Every pass is watermarked in the API (statements linked, entities
+      decided, statements integrated, under a prompt version), so a job seen
+      twice finds nothing left to do and makes no model call; materialise
+      rewrites the same page document. Duplicate suppression of the inputs
+      themselves — one source row per extraction — is upstream in
+      api-kaianolevine-com, enforced by a unique index (PIPE-002,
+      migration 030), not here.

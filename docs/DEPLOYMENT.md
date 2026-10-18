@@ -1,181 +1,55 @@
 # Deployment — wiki-curator-cog
 
-`wiki-curator-cog` runs on Railway as a **one-shot process**: one wake is one
-run. It clones `wcs-wiki`, re-renders the whole corpus, commits, pushes,
-reports, and exits. Nothing stays resident between runs, and there is no queue.
+`wiki-curator-cog` runs as the **wiki-jobs Lambda worker**
+(`wiki_curator_cog.worker.lambda_handler`), like the other pipeline cogs: one
+SQS message is one job, and each job names the jobs that follow it (ADR-006).
+The Railway one-shot `export` process that cloned, rendered and pushed the
+markdown wiki was retired with its service (MINI-95); see ADR-004 for what it
+was and why it is gone.
 
-See `docs/decisions/ADR-004-one-shot-on-railway-no-prefect.md` for why this cog
-stayed on Railway when the rest of the fleet moved to SQS + Lambda.
+## What runs where
 
-## What the cog needs
+| Piece | Where it is declared |
+|---|---|
+| `wiki-curator-jobs.fifo`, its dead-letter queue, the function (`wiki-curator-worker`), the event source mapping, reserved concurrency 1, the alarms | `module "wiki_curator"` in mini-app-polis/infra |
+| The function's code | this repo, deployed by CI on each release (`deploy` in `.github/workflows/ci.yml`, the shared `lambda-deploy.yml`) |
+| Its secrets | SSM, read by `load_secrets` at each invocation |
+| Who enqueues | api-kaianolevine-com only: a `link` job when a source is composed (behind `flags.wcs.wiki_jobs_enabled`), and the follow-ons a job posts to `POST /v1/wcs/wiki/jobs` |
 
-1. A clone of `wcs-wiki` from GitHub, made fresh on every run — Railway's
-   filesystem is ephemeral, which is exactly what this wants.
-2. The canonical WCS corpus from `api-kaianolevine-com` over HTTPS, in one
-   call (`GET /v1/wcs/wiki/export`).
-3. Write access to push the rendered bundle back to the configured branch.
+The deploy job needs three repository variables, set from `terraform output
+cogs` in mini-app-polis/infra: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` and
+`AWS_FUNCTION_NAME`. Its handler, architecture (arm64) and Python version must
+match the function's block in infra; the deploy refuses a function whose
+architecture differs.
 
-The cog runs no LLM. The upstream has already extracted the structured data;
-this is deterministic routing of those fields onto pages. `anthropic` and the
-common-utils `[llm]` extra were declared but never called, and are gone.
+## Starting and stopping the flow of jobs
 
-## One-time setup
+`flags.wcs.wiki_jobs_enabled` (migration 055 in api-kaianolevine-com) decides
+whether a composed source enqueues a `link` job. Turning it off stops new
+work at the source; jobs already queued, and the follow-ons they name, still
+run. Changing it takes `config.flags.write`, a human admin scope.
 
-### 1. GitHub fine-grained PAT for `wcs-wiki`
-
-Create a fine-grained personal access token scoped to `wcs-wiki` only, at
-https://github.com/settings/personal-access-tokens/new:
-
-- **Token name**: `wiki-curator-cog`
-- **Resource owner**: `mini-app-polis`
-- **Repository access**: Only select repositories → `mini-app-polis/wcs-wiki`
-- **Repository permissions**: `Contents: Read and write`
-- **Expiration**: 90 days, or whatever your rotation cadence allows
-
-It reaches the cog as `GH_TOKEN`, through Doppler like every other secret. It
-is consumed only in `boot.py`, never logged, and masked wherever the repo URL
-is echoed.
-
-### 2. Railway service
-
-A Railway service backed by this repo, Railpack builder, its production
-settings declared in `.railway/railway.ts` and applied by CI: a pull request
-into `main` that changes `.railway/` is planned, and merging it applies —
-removals only with the `allow-destroy` label (`.railway/README.md`). The development service keeps the
-settings its dashboard holds.
-
-- `.railway/railway.ts` declares `python -m wiki_curator_cog.main`, which
-  renders once and exits.
-- `restartPolicyType` is **`NEVER`**, deliberately. Each restart would be a
-  fresh clone, a full render and another push attempt, and — since the run
-  reports on its way out — another report for the same triggered run. A
-  failure should be seen and re-triggered, not multiplied.
-- `railpack.json` declares `git` as a runtime apt package. `boot.py` uses
-  GitPython, which shells out to `git`; without this entry the image lacks the
-  binary and the cog crashes **on import**. This is load-bearing and is the
-  single reason the cog did not move to Lambda — see ADR-004.
-
-### 3. Environment variables
-
-Required:
-
-```
-KAIANO_API_BASE_URL=https://api.kaianolevine.com
-WIKI_CURATOR_COG_API_KEY=ak_…                      # this cog's own named key
-GH_TOKEN=github_pat_…                              # from step 1
-WIKI_REPO_URL=https://github.com/mini-app-polis/wcs-wiki.git
-WIKI_BRANCH=main
-WIKI_REPO_PATH=/tmp/wcs-wiki
-WIKI_GIT_AUTHOR_NAME=wiki-curator-cog
-WIKI_GIT_AUTHOR_EMAIL=wiki-curator@kaianolevine.com
-```
-
-Optional:
-
-```
-SENTRY_DSN_COGS=https://…@sentry.io/…              # the shared cogs project — see below
-RUN_TIMEOUT_SECONDS=600                            # the run budget; see below
-RUN_ON_START=                                      # see "Triggering a run"
-LOGGING_LEVEL=INFO
-```
-
-**Sentry is the shared cogs project**, read from `SENTRY_DSN_COGS` like every
-other cog. Events from this service carry `service:wiki-curator-cog`; filter
-on that tag in Sentry.
-
-The curator version is derived at runtime from `pyproject.toml` via
-`importlib.metadata.version("wiki-curator-cog")`; semantic-release bumps it on
-push to main.
-
-## Triggering a run
-
-The trigger is **manual** for now: starting the container is the run. Redeploy
-the service, or start it from the Railway dashboard.
-
-**That is gated outside production.** A development deploy is someone shipping
-code, not asking for a rebuild — and there is no development wiki, so a run
-there would clone the real `wcs-wiki`, re-render the whole corpus and push to a
-branch of it. So a bare `python -m wiki_curator_cog.main` runs only when
-`_auto_run_enabled()` says so:
-
-| `RUN_ON_START` | Production | Anywhere else |
-|---|---|---|
-| unset | runs | **skips, exits 0** |
-| `true` / `1` / `yes` / `on` | runs | runs |
-| `false` / `0` / `no` / `off` | skips | skips |
-
-To render from a development deploy, set `RUN_ON_START=true` for that deploy.
-A skipped start logs `export.skipped reason=auto_run_disabled` and exits 0
-before `load_config`, so it needs no secrets in place.
-
-Naming the mode — `python -m wiki_curator_cog.main export` — is an explicit
-request and always runs, gate or no gate. That is the local path.
-
-A run that happens exits with `status: 0` and a JSON summary on stdout:
-
-```json
-{
-  "entities": 1723,
-  "sources": 90,
-  "instructors": 16,
-  "paths_written": 812,
-  "paths_removed": 3
-}
-```
-
-The direction of travel is a run per source change, asked for by
-api-kaianolevine-com. Nothing is built for that yet.
-
-Locally: `uv run python -m wiki_curator_cog.main export`.
-
-## The run budget, and why it exists
-
-Railway will not start this service again while a previous start is still
-`Active`. A run that hangs therefore does not merely run long — it takes every
-later run with it, silently, with the service showing green.
-
-`RUN_TIMEOUT_SECONDS` (default 600) is the budget. The 2026-09-23 run
-reached the push in 15 seconds — a 3s clone, a 6s export GET, a 1s render — so
-600 is roughly a 40x margin. Lower it further once a successful full run with
-a real push has been timed. `_deadline.py` raises
-`RunOutOfTime` inside the run 30 seconds before it, so the failure travels the
-ordinary path: the run report is sent, `main` exits non-zero, and the next
-start is free to happen.
-
-There is no external liveness check. A process killed outright (OOM) sends no
-run report and leaves nothing in Sentry; the only signs are Railway's
-deployment status and a missing run report.
+To run one job by hand, post it to `POST /v1/wcs/wiki/jobs`, or run it
+locally with the `job` command (README), which uses the same code against
+production without the queue.
 
 ## Observability
 
-| Layer | Signal               | Where                                             |
-| ----- | -------------------- | ------------------------------------------------- |
-| L1    | Structured logs      | `mini_app_polis` JSON logger                      |
-| L2    | Unhandled exceptions | Sentry                                            |
-| L3    | Run outcome          | One `RunReport` per run, sent however it ends     |
-| L4    | Quality signals      | `pipeline_evaluations` via `POST /v1/evaluations` |
+| Layer | Signal | Where |
+| ----- | ------ | ----- |
+| L1 | Structured logs, one timing line per job | the function's CloudWatch log group |
+| L2 | The exception that fails a job | Sentry, shared cogs project, `service:wiki-curator-cog` |
+| L3 | A job that keeps failing | the dead-letter queue and its alarm |
 
-`flow.export_run` owns both L3 paths — `report.send()` on success, an explicit
-ERROR finding on failure — so there is exactly one message per run, and a run
-that died reads as ERROR rather than as the WARN a derived severity would have
-produced.
-
-**A credential preflight runs before the clone.** `boot.assert_push_access`
-makes the same request `git push` makes first, so a token that reads but
-cannot write fails in a second instead of after the clone, the full render and
-the commit.
+An unreadable message is reported once as an ERROR finding and then
+dead-lettered: it is a producer bug, and retrying it changes nothing.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `WIKI_REPO_URL is HTTPS but GH_TOKEN is not set` at boot | PAT not configured | Set `GH_TOKEN` in Doppler |
-| `Permission denied` on git push | PAT lacks `contents:write` or wrong repo scope | Recreate the PAT with the scope from step 1 |
-| `ImportError: Bad git executable` on boot | runtime image lacks the `git` binary | Confirm `railpack.json` declares `deploy.aptPackages: ["git"]` |
-| `GH_TOKEN cannot push to … (git-receive-pack answered 403)` at boot | the PAT reads but does not write | Reissue it with `Contents: Read and write`. Note that `GET /repos/{owner}/{repo}` will *not* show this — its `permissions` block reports your own role on the repo, not the token's grants |
-| A deploy finishes but nothing rendered | the auto-run gate, outside production | Expected. `export.skipped reason=auto_run_disabled` in the logs; set `RUN_ON_START=true` for that deploy |
-| `error: RPC failed; curl 92 HTTP/2 stream … was not closed cleanly` on push | large push trips libcurl's HTTP/2 stream error | Already mitigated: `boot.ensure_wiki_clone` sets `http.version=HTTP/1.1` and `http.postBuffer=500MB`, and `WikiRepo.push` retries three times with backoff |
-| `RunOutOfTime` in the logs, run reported as failed | the render plus clone and push exceeded `RUN_TIMEOUT_SECONDS` | Working as intended — it failed instead of hanging. Raise the budget once a real run has been timed, or find what got slow |
-| A new run never starts and the service shows `Active` | a previous run neither finished nor failed | This is what the budget exists to prevent; if it happens the budget is unset or too high. Stop the service, then check why the run hung |
-| Every call returns 401 | `WIKI_CURATOR_COG_API_KEY` unset, stale, or not matching the API's copy | Compare Doppler against the API's environment. There is no fallback credential — rotation must land on both sides |
-| Sentry is silent on a failed run | `SENTRY_DSN_COGS` not set | Set it in Doppler. In Sentry, filter the cogs project on `service:wiki-curator-cog` |
+| A job fails and comes back | the export, a state read or a model call failed | Retries are safe: every pass is watermarked, so the finished parts are no-ops. Read the error in Sentry or the log group |
+| Messages in the dead-letter queue | a job failed on every receive, or the message was unreadable | Read the message and its last error; fix the cause, then re-send the job through `POST /v1/wcs/wiki/jobs` |
+| `StateMismatchError` locally | a local cache file and the API disagree | Run `state-verify`; if the file is the one to keep, `state-import` (README) |
+| Every call returns 401 | `WIKI_CURATOR_COG_API_KEY` unset, stale, or not matching the API's copy | Compare SSM (worker) or Doppler (local) against the API. There is no fallback credential |
+| A new lesson changes no pages | `flags.wcs.wiki_jobs_enabled` is off, or the source was not composed | Check the flag, then the API's dispatch log for the source |
