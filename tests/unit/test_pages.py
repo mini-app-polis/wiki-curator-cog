@@ -118,6 +118,23 @@ def test_a_folded_page_goes_when_its_parent_is_materialised(tmp_path: Path) -> N
     assert not (tmp_path / "pages" / "anchor-step.json").exists()
     doc = json.loads((tmp_path / "pages" / "stretch.json").read_text())
     assert [d["slug"] for d in doc["details"]] == ["anchor-step"]
+    # a lookup of the folded slug can be served this page (MINI-100)
+    assert doc["folded"] == ["anchor-step"]
+    assert doc["requested_slug"] is None
+
+
+def test_a_same_idea_fold_is_listed_though_not_a_detail(tmp_path: Path) -> None:
+    # Same-idea names fold as aliases with no Details line, so ``folded`` is
+    # the only place a page names them (MINI-100).
+    facets = consolidate.FacetsFile()
+    facets.record("anchor-step", "stretch", "the same idea", "m", same=True)
+    facets.save(tmp_path / "facets.json")
+    units.handle(
+        {"job": "materialise", "entities": ["stretch"]}, _ctx(tmp_path, RouterLLM())
+    )
+    doc = json.loads((tmp_path / "pages" / "stretch.json").read_text())
+    assert doc["details"] == []
+    assert doc["folded"] == ["anchor-step"]
 
 
 def test_generate_names_materialise_for_every_page_asked_about(tmp_path: Path) -> None:
