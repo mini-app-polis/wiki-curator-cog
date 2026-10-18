@@ -1,3 +1,15 @@
+# [3.0.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.4.1...v3.0.0) (2026-10-18)
+
+
+### Code Refactoring
+
+* retire the Railway export run; the curator is the wiki-jobs worker (MINI-95) ([359beb2](https://github.com/mini-app-polis/wiki-curator-cog/commit/359beb2945de98a0e1d4984991e8f05bf96a5a46))
+
+
+### BREAKING CHANGES
+
+* the export mode and the bare invocation of python -m wiki_curator_cog.main are removed, along with boot.py, git_ops.py, config.py and the GitPython dependency. The deployed curator is the wiki-jobs Lambda worker; the CLI keeps only the local commands (render, link, consolidate, generate, materialise, job, state-import, state-verify) and now requires one.
+
 ## [2.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.4.0...v2.4.1) (2026-10-18)
 
 
