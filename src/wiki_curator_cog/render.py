@@ -583,7 +583,6 @@ def render_source_page(
             "title": source.title,
             "is_default_visible": bool(source.is_default_visible),
             "visibility": source.visibility,
-            "rendered_at": rendered_at.isoformat(),
         }
     )
 
@@ -790,7 +789,6 @@ def render_instructor_page(
             "sources_count": len(source_ids),
             "concepts_taught": concepts,
             "techniques_taught": techniques,
-            "rendered_at": rendered_at.isoformat(),
         }
     )
 
@@ -851,7 +849,6 @@ def render_view_page(
             "type": "view",
             "slug": spec.slug,
             "filter": spec.filter_description,
-            "rendered_at": rendered_at.isoformat(),
         }
     )
 
@@ -916,8 +913,6 @@ def render_index(
     """Render the wiki's top-level index page."""
     lines = [
         "# WCS Wiki Index",
-        "",
-        f"_Regenerated {rendered_at.isoformat()}._",
         "",
     ]
 
