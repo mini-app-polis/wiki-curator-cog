@@ -95,25 +95,37 @@ class FileState:
 
     def save_pages(
         self, pages: list[WcsWikiPage], remove: list[str], folder: Path
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         """Write each page document to ``folder/<slug>.json``; delete the removed.
 
-        Page documents are not state the passes read back, so there is no
-        document to compare against: the files are only a copy to read.
+        Page documents are not state the passes read back: the files are only
+        a copy to read. Each is compared with the file it replaces, so a
+        local run says which pages are new, changed or gone, as the API does.
         """
         folder.mkdir(parents=True, exist_ok=True)
+        created: list[str] = []
+        changed: list[str] = []
         for page in pages:
-            (folder / f"{page.slug}.json").write_text(
-                json.dumps(page.model_dump(mode="json"), indent=2, ensure_ascii=False)
-                + "\n"
-            )
-        removed = 0
+            path = folder / f"{page.slug}.json"
+            document = page.model_dump(mode="json")
+            if not path.exists():
+                created.append(page.slug)
+            elif json.loads(path.read_text()) != document:
+                changed.append(page.slug)
+            path.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n")
+        removed_slugs: list[str] = []
         for slug in remove:
             path = folder / f"{slug}.json"
             if path.exists():
                 path.unlink()
-                removed += 1
-        return {"written": len(pages), "removed": removed}
+                removed_slugs.append(slug)
+        return {
+            "written": len(pages),
+            "removed": len(removed_slugs),
+            "created": sorted(created),
+            "changed": sorted(changed),
+            "removed_slugs": sorted(removed_slugs),
+        }
 
 
 # ── Between the file objects and the API's documents ──
@@ -258,12 +270,14 @@ class ApiState(FileState):
 
     def save_pages(
         self, pages: list[WcsWikiPage], remove: list[str], folder: Path
-    ) -> dict[str, int]:
+    ) -> dict[str, Any]:
         """Send the page documents to the API, in chunks; keep a copy in ``folder``.
 
         Pages go first, then the removals, so a run cut short never leaves a
         page removed and its replacement unwritten. A refused POST raises, and
-        the job is retried; a re-sent page is a no-op.
+        the job is retried; a re-sent page is a no-op. What is new, changed or
+        gone is the API's answer, compared with what it stored; the copy here
+        is a fresh folder each run and has nothing to compare against.
         """
         super().save_pages(pages, remove, folder)
         posts = [
@@ -274,12 +288,30 @@ class ApiState(FileState):
             for i in range(0, len(remove), REMOVES_PER_POST)
         ]
         written = removed = 0
+        created: list[str] = []
+        changed: list[str] = []
+        removed_slugs: list[str] = []
         for post in posts:
             result = self.client.put_wcs_wiki_pages(post)
             written += result.written
             removed += result.removed
-        LOG.info("pages.write written=%s removed=%s", written, removed)
-        return {"written": written, "removed": removed}
+            created += result.created
+            changed += result.changed
+            removed_slugs += result.removed_slugs
+        LOG.info(
+            "pages.write written=%s created=%s changed=%s removed=%s",
+            written,
+            len(created),
+            len(changed),
+            removed,
+        )
+        return {
+            "written": written,
+            "removed": removed,
+            "created": sorted(created),
+            "changed": sorted(changed),
+            "removed_slugs": sorted(removed_slugs),
+        }
 
     def save(self, obj: StateObject, path: Path, *, final: bool = False) -> None:
         """Write the cache; send what changed once enough has, or at the end."""

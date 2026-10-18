@@ -48,11 +48,22 @@ class FakeApi:
 
     def put_wcs_wiki_pages(self, payload: Any) -> WcsWikiPagesWriteResult:
         self.page_posts.append(payload)
+        created, changed = [], []
         for page in payload.pages:
-            self.pages[page.slug] = page.model_dump(mode="json")
+            document = page.model_dump(mode="json")
+            if page.slug not in self.pages:
+                created.append(page.slug)
+            elif self.pages[page.slug] != document:
+                changed.append(page.slug)
+            self.pages[page.slug] = document
         gone = [s for s in payload.remove if self.pages.pop(s, None) is not None]
         return WcsWikiPagesWriteResult(
-            written=len(payload.pages), removed=len(gone), total=len(self.pages)
+            written=len(payload.pages),
+            removed=len(gone),
+            total=len(self.pages),
+            created=sorted(created),
+            changed=sorted(changed),
+            removed_slugs=sorted(gone),
         )
 
     def __getattr__(self, attr: str) -> Any:

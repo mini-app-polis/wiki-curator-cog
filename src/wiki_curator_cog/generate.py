@@ -763,6 +763,7 @@ def run_generation(
     generated = 0
     done = 0
     failed: list[str] = []
+    made_for: list[str] = []
 
     def work(entity: WcsEntity) -> None:
         nonlocal generated, done
@@ -794,6 +795,7 @@ def run_generation(
             done += 1
             if made:
                 generated += 1
+                made_for.append(entity.slug)
             if not ok:
                 failed.append(entity.slug)
             if on_entity is not None:
@@ -811,6 +813,7 @@ def run_generation(
         "entities": len(entities),
         "pending": len(entities),
         "generated": generated,
+        "generated_slugs": sorted(made_for),
         "failed": len(failed),
         "failed_slugs": sorted(failed),
     }

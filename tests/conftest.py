@@ -166,6 +166,9 @@ def _install_mini_app_polis_stub() -> None:
         def created(self, kind: str, item: str | None = None) -> None:
             self.outcomes.append(_StubOutcome("created", kind, item))
 
+        def updated(self, kind: str, item: str | None = None) -> None:
+            self.outcomes.append(_StubOutcome("updated", kind, item))
+
         def removed(self, kind: str, item: str | None = None) -> None:
             self.outcomes.append(_StubOutcome("removed", kind, item))
 
