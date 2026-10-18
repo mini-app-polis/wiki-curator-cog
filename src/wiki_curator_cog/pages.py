@@ -254,13 +254,16 @@ def page_document(
     context: str = "",
     details: Sequence[tuple[Any, ...]] = (),
     detail_slugs: dict[str, str] | None = None,
+    folded: Iterable[str] = (),
     evidence: Iterable[uuid.UUID] = (),
     paths: dict[str, str] | None = None,
 ) -> WcsWikiPage:
     """One entity's page as a document.
 
     ``details`` are the facets folded into it, as ``(name, gist, depth)``;
-    ``detail_slugs`` names each one's own slug. ``evidence`` is every source
+    ``detail_slugs`` names each one's own slug. ``folded`` is every slug
+    folded into it, facets and same-idea names alike, so a lookup of one can
+    be served this page (MINI-100). ``evidence`` is every source
     the page's prose was built from — its own statements' and those of the
     statements elsewhere that refer to it. With an ``overlay`` the page gets
     Mentions and Referenced by. ``paths`` (every page's repo path, by slug)
@@ -339,6 +342,7 @@ def page_document(
         referenced_by=referenced_by,
         sources=_sources(entity, indexes),
         evidence_sources=sorted(set(evidence), key=str),
+        folded=sorted(set(folded)),
     )
 
 
@@ -361,6 +365,9 @@ def build_documents(
     paths = paths_of(export)
     wanted = set(only) if only is not None else None
     facets = getattr(merges, "facets", None) or {}
+    folded: dict[str, list[str]] = {}
+    for name, into in (getattr(merges, "by_slug", None) or {}).items():
+        folded.setdefault(into, []).append(name)
     out: dict[str, WcsWikiPage] = {}
     for entity in sorted(export.entities, key=lambda e: e.slug):
         if wanted is not None and entity.slug not in wanted:
@@ -372,6 +379,7 @@ def build_documents(
             context=(context or {}).get(entity.id, ""),
             details=(details or {}).get(entity.id, ()),
             detail_slugs={f.name: f.slug for f in facets.get(entity.id, [])},
+            folded=folded.get(entity.slug, ()),
             evidence=(evidence or {}).get(entity.slug, set()),
             paths=paths,
         )
