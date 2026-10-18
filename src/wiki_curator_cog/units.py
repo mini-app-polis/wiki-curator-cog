@@ -356,6 +356,27 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
     }
 
 
+def materialise_every_page(ctx: RunContext) -> dict[str, Any]:
+    """Queue every page for materialising, in jobs of :data:`MATERIALISE_PER_JOB`.
+
+    The rebuild an operator asks for from /admin/wiki (MINI-103): after the
+    page logic changes, or to backfill a new field. This job builds nothing
+    itself — one invocation could not build every page inside a Lambda's
+    time — it names the pages, linker-proposed concepts included, and the
+    follow-on jobs build them. No model call anywhere.
+    """
+    links = ctx.store.links(ctx.paths.links)
+    assert links is not None
+    export, _, _ = link.build_overlay(ctx.export, links, ctx.merges)
+    every = {e.slug for e in export.entities}
+    return {
+        "job": "materialise",
+        "entities": [],
+        "pages": len(every),
+        "next": _materialise_jobs(every),
+    }
+
+
 # ── The worker's entry ──
 
 
@@ -380,9 +401,13 @@ def validate(job: dict[str, Any]) -> str:
         if not job.get("entity") and not (isinstance(entities, list) and entities):
             raise JobError("generate needs entity or a non-empty entities list")
     elif kind == "materialise":
+        # No entities at all is "every page" (fanned out, MINI-103); an
+        # empty list is a producer that meant to name some and named none.
         entities = job.get("entities")
-        if not isinstance(entities, list) or not entities:
-            raise JobError("materialise needs a non-empty entities list")
+        if entities is not None and (not isinstance(entities, list) or not entities):
+            raise JobError(
+                "materialise needs a non-empty entities list, or none for every page"
+            )
     else:
         raise JobError(f"unknown job {kind!r}; expected one of {', '.join(JOBS)}")
     return str(kind)
@@ -396,7 +421,10 @@ def handle(job: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
     elif kind == "consolidate":
         result = consolidate_entities(ctx, [str(e) for e in job["entities"]])
     elif kind == "materialise":
-        result = materialise_pages(ctx, [str(e) for e in job["entities"]])
+        if job.get("entities") is None:
+            result = materialise_every_page(ctx)
+        else:
+            result = materialise_pages(ctx, [str(e) for e in job["entities"]])
     else:
         named = job.get("entities") or [job["entity"]]
         result = generate_entities(ctx, [str(e) for e in named])

@@ -146,8 +146,29 @@ def test_generate_names_materialise_for_every_page_asked_about(tmp_path: Path) -
 
 
 def test_a_bad_materialise_job_is_refused(tmp_path: Path) -> None:
-    with pytest.raises(units.JobError):
-        units.handle({"job": "materialise"}, _ctx(tmp_path, RouterLLM()))
+    # An empty list named nothing; no list at all is every page.
+    with pytest.raises(units.JobError, match="non-empty entities list"):
+        units.handle(
+            {"job": "materialise", "entities": []}, _ctx(tmp_path, RouterLLM())
+        )
+
+
+def test_materialise_with_no_entities_queues_every_page(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The /admin/wiki rebuild (MINI-103): this job builds nothing itself,
+    # it names every page in follow-on jobs of MATERIALISE_PER_JOB.
+    monkeypatch.setattr(units, "MATERIALISE_PER_JOB", 1)
+    llm = RouterLLM()
+    result = units.handle({"job": "materialise"}, _ctx(tmp_path, llm))
+    every = sorted(e.slug for e in _export().entities)
+    assert result["pages"] == len(every)
+    assert result["entities"] == []
+    assert result["next"] == [
+        {"job": "materialise", "entities": [slug]} for slug in every
+    ]
+    assert not (tmp_path / "pages").exists() or not any((tmp_path / "pages").iterdir())
+    assert sum(llm.calls.values()) == 0
 
 
 def test_pages_go_to_the_api_in_chunks_removals_last(
