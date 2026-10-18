@@ -1,3 +1,10 @@
+# [3.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.0.1...v3.1.0) (2026-10-18)
+
+
+### Features
+
+* a run report per wiki job — counts, cost, and a WARN for work left undone ([80d9a00](https://github.com/mini-app-polis/wiki-curator-cog/commit/80d9a00ab19c089d3e43c1321f1356ef3c916c5b))
+
 ## [3.0.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.0.0...v3.0.1) (2026-10-18)
 
 
