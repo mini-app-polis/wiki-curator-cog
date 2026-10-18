@@ -153,21 +153,16 @@ def test_a_bad_materialise_job_is_refused(tmp_path: Path) -> None:
         )
 
 
-def test_materialise_with_no_entities_queues_every_page(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The /admin/wiki rebuild (MINI-103): this job builds nothing itself,
-    # it names every page in follow-on jobs of MATERIALISE_PER_JOB.
-    monkeypatch.setattr(units, "MATERIALISE_PER_JOB", 1)
+def test_materialise_with_no_entities_builds_every_page(tmp_path: Path) -> None:
+    # The /admin/wiki rebuild (MINI-103): every page in this one job, with
+    # one export read, and nothing to follow.
     llm = RouterLLM()
     result = units.handle({"job": "materialise"}, _ctx(tmp_path, llm))
     every = sorted(e.slug for e in _export().entities)
-    assert result["pages"] == len(every)
-    assert result["entities"] == []
-    assert result["next"] == [
-        {"job": "materialise", "entities": [slug]} for slug in every
-    ]
-    assert not (tmp_path / "pages").exists() or not any((tmp_path / "pages").iterdir())
+    assert result["entities"] == every
+    assert result["written"] == len(every)
+    assert result["next"] == []
+    assert sorted(p.stem for p in (tmp_path / "pages").iterdir()) == every
     assert sum(llm.calls.values()) == 0
 
 

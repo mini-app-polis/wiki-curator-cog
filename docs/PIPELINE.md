@@ -47,7 +47,7 @@ Locally: `render` writes the same pages as markdown into a wcs-wiki clone.
 | `link` | one source's statements | references | `consolidate` for its undecided entities; `generate` for every page its newly linked statements touched |
 | `consolidate` | named entities | facet decisions | `generate` for each page that gained a fold |
 | `generate` | named entities | prose revisions | `materialise` for every page it was asked about |
-| `materialise` | named pages, or none for every page | page documents; removes pages folded away | with none named: `materialise` for every page, in chunks (the /admin/wiki rebuild) |
+| `materialise` | named pages, or none for every page (the /admin/wiki rebuild, one job) | page documents; removes pages folded away | — |
 
 Every model pass is watermarked in the API, so a repeated job makes no model call. `materialise` calls no model. The same functions run locally through the `job`, `link`, `consolidate`, `generate` and `materialise` commands (README).
 

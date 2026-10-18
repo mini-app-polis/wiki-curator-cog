@@ -300,7 +300,9 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
     No model call. A slug folded into another page is materialised as that
     page; every name folded into a page goes when the page is written, and a
     slug that is no page at all is removed. ``None`` is every page, the
-    linker's proposed concepts included: the local backfill.
+    linker's proposed concepts included: the local backfill, and the
+    /admin/wiki rebuild — one job, since the export read every job pays
+    costs more than building the pages.
     """
     links = ctx.store.links(ctx.paths.links)
     prose = ctx.store.prose(ctx.paths.prose)
@@ -356,27 +358,6 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
     }
 
 
-def materialise_every_page(ctx: RunContext) -> dict[str, Any]:
-    """Queue every page for materialising, in jobs of :data:`MATERIALISE_PER_JOB`.
-
-    The rebuild an operator asks for from /admin/wiki (MINI-103): after the
-    page logic changes, or to backfill a new field. This job builds nothing
-    itself — one invocation could not build every page inside a Lambda's
-    time — it names the pages, linker-proposed concepts included, and the
-    follow-on jobs build them. No model call anywhere.
-    """
-    links = ctx.store.links(ctx.paths.links)
-    assert links is not None
-    export, _, _ = link.build_overlay(ctx.export, links, ctx.merges)
-    every = {e.slug for e in export.entities}
-    return {
-        "job": "materialise",
-        "entities": [],
-        "pages": len(every),
-        "next": _materialise_jobs(every),
-    }
-
-
 # ── The worker's entry ──
 
 
@@ -401,8 +382,10 @@ def validate(job: dict[str, Any]) -> str:
         if not job.get("entity") and not (isinstance(entities, list) and entities):
             raise JobError("generate needs entity or a non-empty entities list")
     elif kind == "materialise":
-        # No entities at all is "every page" (fanned out, MINI-103); an
-        # empty list is a producer that meant to name some and named none.
+        # No entities at all is "every page", built in this one job (the
+        # /admin/wiki rebuild, MINI-103): one export read rather than one per
+        # batch, which is what the job's time goes on. An empty list is a
+        # producer that meant to name some and named none.
         entities = job.get("entities")
         if entities is not None and (not isinstance(entities, list) or not entities):
             raise JobError(
@@ -421,10 +404,10 @@ def handle(job: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
     elif kind == "consolidate":
         result = consolidate_entities(ctx, [str(e) for e in job["entities"]])
     elif kind == "materialise":
-        if job.get("entities") is None:
-            result = materialise_every_page(ctx)
-        else:
-            result = materialise_pages(ctx, [str(e) for e in job["entities"]])
+        named = job.get("entities")
+        result = materialise_pages(
+            ctx, None if named is None else [str(e) for e in named]
+        )
     else:
         named = job.get("entities") or [job["entity"]]
         result = generate_entities(ctx, [str(e) for e in named])

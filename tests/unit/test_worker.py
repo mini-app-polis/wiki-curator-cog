@@ -113,21 +113,18 @@ def test_generate_sends_materialise_and_materialise_sends_nothing(
 def test_follow_ons_go_in_requests_the_contract_allows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A rebuild of every page can name more follow-ons than one request
-    # carries (MINI-103).
+    # A job can name more follow-ons than one enqueue request carries.
     monkeypatch.setattr(worker, "_ENQUEUE_PER_REQUEST", 2)
-    monkeypatch.setattr(worker.units, "MATERIALISE_PER_JOB", 1)
+    follow = [{"job": "materialise", "entities": [f"p{i}"]} for i in range(5)]
     api = Api()
     with (
         patch.object(worker, "_fetch_export", return_value=_export()),
         patch.object(worker.link, "llm_from_env", return_value=(RouterLLM(), "f/m")),
+        patch.object(worker.units, "handle", return_value={"job": "x", "next": follow}),
     ):
         result = worker.run({"job": "materialise"}, client=api, state_dir=tmp_path)
-    pages = result["pages"]
-    assert [len(batch) for batch in api.enqueued] == [2] * (pages // 2) + (
-        [1] if pages % 2 else []
-    )
-    assert len(result["enqueued"]) == pages
+    assert [len(batch) for batch in api.enqueued] == [2, 2, 1]
+    assert len(result["enqueued"]) == 5
 
 
 # ── The handler ──
