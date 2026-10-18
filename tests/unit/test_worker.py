@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -155,3 +156,90 @@ def test_the_budget_is_lambdas_remaining_time() -> None:
 
     assert worker._budget(Ctx()) == 900
     assert worker._budget(None) == 0  # local: no guard
+
+
+# ── Run reports ──
+
+
+class _Report:
+    """Records what a job's run report was told."""
+
+    def __init__(self) -> None:
+        self.oks = 0
+        self.issues: list[tuple[str, str]] = []
+        self.counts: dict[str, int] = {}
+
+    def ok(self, n: int = 1) -> None:
+        self.oks += n
+
+    def issue(self, reason: str, item: str, detail: str = "") -> None:
+        self.issues.append((reason, item))
+
+    def count(self, key: str, value: int) -> None:
+        self.counts[key] = value
+
+
+def test_a_clean_job_reports_counts_and_no_issue() -> None:
+    report = _Report()
+    worker.record(
+        report,
+        {"job": "generate", "entities": ["a"]},
+        {
+            "generated": 2,
+            "failed": 0,
+            "failed_slugs": [],
+            "usage": {"calls": 2, "cost_usd": 0.0314},
+            "enqueued": ["q-0"],
+        },
+    )
+    assert report.oks == 2 and report.issues == []
+    assert report.counts == {"model_calls": 2, "cost_usd_cents": 3, "jobs_enqueued": 1}
+
+
+@pytest.mark.parametrize(
+    ("job", "result", "issue"),
+    [
+        (
+            {"job": "link", "source_id": SOURCE},
+            {"source_id": SOURCE, "linked": 3, "failed_batches": 1},
+            ("link_batch_failed", SOURCE),
+        ),
+        (
+            {"job": "consolidate", "entities": ["a", "b"]},
+            {"entities": ["a", "b"], "decided": 0, "failed_batches": 1},
+            ("consolidate_batch_failed", "a, b"),
+        ),
+        (
+            {"job": "generate", "entities": ["a"]},
+            {"generated": 0, "failed": 1, "failed_slugs": ["a"]},
+            ("generate_failed", "a"),
+        ),
+    ],
+)
+def test_work_left_undone_is_an_issue(job: dict, result: dict, issue: tuple) -> None:
+    report = _Report()
+    worker.record(report, job, result)
+    assert report.issues == [issue]
+
+
+def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
+    opened: list[tuple[str, str]] = []
+
+    @contextmanager
+    def fake_report(flow_name: str, *, repo: str, run_id: str):
+        opened.append((flow_name, run_id))
+        yield _Report()
+
+    api = Api()
+    with (
+        patch.object(worker, "run_report", fake_report),
+        patch.object(worker, "_state_client", return_value=api),
+        patch.object(worker, "_fetch_export", return_value=_export()),
+        patch.object(worker.link, "llm_from_env", return_value=(RouterLLM(), "f/m")),
+    ):
+        worker.process_message(
+            _body({"job": "materialise", "entities": ["stretch"]}),
+            budget_s=0,
+            run_id="m-9",
+        )
+    assert opened == [("wiki-materialise", "m-9")]
