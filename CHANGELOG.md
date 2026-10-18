@@ -1,3 +1,10 @@
+## [3.3.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.3.0...v3.3.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* rebuild every page in one job, and load secrets before Sentry starts (MINI-105, CD-038) ([5ccdc2e](https://github.com/mini-app-polis/wiki-curator-cog/commit/5ccdc2ee345d18d466e95032aac12a672b47c292))
+
 # [3.3.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.2.0...v3.3.0) (2026-10-18)
 
 
