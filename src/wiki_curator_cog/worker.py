@@ -63,6 +63,13 @@ log = logger_mod.get_logger()
 
 #: Must match api-kaianolevine-com's wiki_dispatch.
 MESSAGE_VERSION = 1
+
+#: The most jobs one enqueue request may carry, read from the contract.
+_ENQUEUE_PER_REQUEST: int = next(
+    m.max_length
+    for m in WcsWikiJobsRequest.model_fields["jobs"].metadata
+    if getattr(m, "max_length", None) is not None
+)
 TYPE_JOB = "wiki.job"
 
 # At import, once per cold start (see transcription-cog's worker).
@@ -114,12 +121,17 @@ def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
     )
     result = units.handle(job, ctx)
     result["usage"] = usage.usage_of(llm)
-    follow = result.get("next") or []
+    follow = [WcsWikiJob.model_validate(j) for j in result.get("next") or []]
     if follow:
-        accepted = client.enqueue_wcs_wiki_jobs(
-            WcsWikiJobsRequest(jobs=[WcsWikiJob.model_validate(j) for j in follow])
-        )
-        result["enqueued"] = accepted.message_ids
+        # A rebuild of every page names more follow-ons than one request
+        # carries, so they go in requests of the contract's maximum.
+        enqueued: list[str] = []
+        for i in range(0, len(follow), _ENQUEUE_PER_REQUEST):
+            accepted = client.enqueue_wcs_wiki_jobs(
+                WcsWikiJobsRequest(jobs=follow[i : i + _ENQUEUE_PER_REQUEST])
+            )
+            enqueued += accepted.message_ids
+        result["enqueued"] = enqueued
     return result
 
 
@@ -161,6 +173,8 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> No
     elif kind == "materialise":
         report.ok(int(result.get("written") or 0))
         report.count("pages_removed", int(result.get("deleted") or 0))
+        if "pages" in result:  # a rebuild of every page: what it queued
+            report.count("pages_queued", int(result["pages"]))
 
 
 def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:

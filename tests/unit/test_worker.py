@@ -110,6 +110,26 @@ def test_generate_sends_materialise_and_materialise_sends_nothing(
     assert api.pages["stretch"]["definition"] == "A definition."
 
 
+def test_follow_ons_go_in_requests_the_contract_allows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A rebuild of every page can name more follow-ons than one request
+    # carries (MINI-103).
+    monkeypatch.setattr(worker, "_ENQUEUE_PER_REQUEST", 2)
+    monkeypatch.setattr(worker.units, "MATERIALISE_PER_JOB", 1)
+    api = Api()
+    with (
+        patch.object(worker, "_fetch_export", return_value=_export()),
+        patch.object(worker.link, "llm_from_env", return_value=(RouterLLM(), "f/m")),
+    ):
+        result = worker.run({"job": "materialise"}, client=api, state_dir=tmp_path)
+    pages = result["pages"]
+    assert [len(batch) for batch in api.enqueued] == [2] * (pages // 2) + (
+        [1] if pages % 2 else []
+    )
+    assert len(result["enqueued"]) == pages
+
+
 # ── The handler ──
 
 
