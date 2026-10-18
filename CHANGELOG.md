@@ -1,3 +1,15 @@
+# [3.2.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.1.0...v3.2.0) (2026-10-18)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.6.0 ([1baa0d7](https://github.com/mini-app-polis/wiki-curator-cog/commit/1baa0d7dbf7144d19fd15ee107a3b846c3f05eba))
+
+
+### Features
+
+* page documents list the slugs folded into them (MINI-100) ([9b41a2a](https://github.com/mini-app-polis/wiki-curator-cog/commit/9b41a2ad38852dabb60d586692bb1ff4fcc24434))
+
 # [3.1.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.0.1...v3.1.0) (2026-10-18)
 
 
