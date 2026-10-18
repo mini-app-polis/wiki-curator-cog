@@ -1,3 +1,10 @@
+## [3.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.4.0...v3.4.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* a wiki job that did something posts its run report, as other cogs do ([fbbadae](https://github.com/mini-app-polis/wiki-curator-cog/commit/fbbadae9263b24a1f0cbef23cf19d5322d7aac84))
+
 # [3.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.3.1...v3.4.0) (2026-10-18)
 
 
