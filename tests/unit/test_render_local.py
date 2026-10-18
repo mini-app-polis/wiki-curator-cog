@@ -169,26 +169,6 @@ def test_render_local_writes_pages_removes_stale_and_leaves_the_log(
     assert summary["quality"]["thin"]["slugs"] == ["frame"]
 
 
-def test_render_local_never_touches_git(tmp_path: Path) -> None:
-    wiki = _clone(tmp_path)
-    with (
-        patch.object(flow, "_fetch_export", return_value=_export()) as fetch,
-        patch.object(flow, "WikiRepo", side_effect=AssertionError("no git")) as repo,
-        patch.object(
-            flow, "assert_push_access", side_effect=AssertionError("no push")
-        ) as push,
-        patch.object(
-            flow, "ensure_wiki_clone", side_effect=AssertionError("no clone")
-        ) as clone,
-    ):
-        flow.render_local(wiki)
-
-    fetch.assert_called_once()
-    repo.assert_not_called()
-    push.assert_not_called()
-    clone.assert_not_called()
-
-
 @pytest.mark.parametrize(
     "export",
     [
@@ -227,15 +207,11 @@ def _summary(broken: int) -> dict:
     return {"broken_links": {"count": broken, "links": []}}
 
 
-def test_render_mode_skips_the_gate_config_and_reporting(
+def test_render_mode_renders_into_the_wiki_path(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
-    with (
-        patch.object(main, "load_config", side_effect=AssertionError("no config")),
-        patch.object(main, "export_run", side_effect=AssertionError("no export")),
-        patch.object(main, "render_local", return_value=_summary(0)) as render,
-    ):
+    with patch.object(main, "render_local", return_value=_summary(0)) as render:
         assert main.main(["render", "--state", "files"]) == 0
     render.assert_called_once_with(tmp_path.resolve(), None, None, None)
     assert json.loads(capsys.readouterr().out) == _summary(0)

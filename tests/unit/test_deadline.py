@@ -1,9 +1,8 @@
-"""The run budget, and why it exists here at all.
+"""The job budget: a job stops itself before Lambda kills the invocation.
 
-Railway will not start this service again while a previous start is
-still ``Active``. A run that hangs therefore does not merely run long —
-it takes every later run with it, and nothing says so. The deadline is
-what turns that into an ordinary failure.
+The worker passes the invocation's remaining time. A job that reaches it
+fails like any other — its record goes back to the queue — instead of being
+cut off mid-write.
 """
 
 from __future__ import annotations

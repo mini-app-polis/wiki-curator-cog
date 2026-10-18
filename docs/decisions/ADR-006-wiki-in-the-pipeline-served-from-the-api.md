@@ -1,7 +1,7 @@
 # ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
-**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The site's /wiki pages (MINI-97) and retiring the Railway service are open; the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
+**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The Railway service and its `export` code are retired (MINI-95); the site's /wiki pages (MINI-97) are open; the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
 **Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
 **Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time); Asana MINI-89, MINI-94 – MINI-99
 
@@ -120,8 +120,11 @@ seeded off (migration 055), because every job costs model calls — and
 the worker posts back, keeping the API the only producer. The worker
 (`worker.lambda_handler`) reads state into a fresh temporary folder per
 invocation, sends a job's follow-ons before it counts as done, and returns
-failed records to the queue. The Railway service and its git-push render are
-not retired yet: that waits until the worker has run on real lessons.
+failed records to the queue. The Railway service and its git-push render
+were retired on 2026-10-17, once page documents existed (MINI-96) and the
+markdown repo became a local export only (MINI-99): the service by hand, and
+`.railway/`, `railpack.json`, the `export` mode, `boot.py`, `git_ops.py`,
+`config.py` and GitPython from this repo.
 
 **MINI-96 (2026-10-17): page documents.** `materialise` (`units.materialise_pages`)
 builds each named page with `pages.page_document` and posts it to

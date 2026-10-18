@@ -1,7 +1,8 @@
 # ADR-004 — One shot on Railway, no Prefect, no queue
 
 **Date:** 2026-09-23
-**Status:** Accepted — amended 2026-10-16
+**Status:** Superseded by ADR-006 (2026-10-17): the curator runs as the wiki-jobs Lambda worker, and the Railway service and its `export` mode are retired (MINI-95). The Prefect removal stands. Kept for the record.
+**Earlier status:** Accepted — amended 2026-10-16
 **Amendment (2026-10-16):** Two parts of this ADR no longer hold. (1) "Healthchecks.io per run, not per boot" is reversed: no Healthchecks check exists for this cog, and the ping code and `HEALTHCHECKS_URL_WIKI_CURATOR_COG` were removed. There is no external liveness check; see `evaluator.yaml` CD-010. (2) Staying on Railway was revisited on 2026-10-14: the cog is to move to Lambda (see `evaluator.yaml` CD-021); its design is ADR-006 (proposed 2026-10-16). Smaller drift: the run budget default is 600s, not 1800s, and the restart policy lives in `.railway/railway.ts`, not `railway.json`. The Prefect removal stands.
 **Amendment (2026-10-16, ADR-005):** the expectation that the Layer 2 pass is "a periodic whole-corpus rebuild with no per-item work" does not hold. Generation is per entity, integrating new statements, so each changed entity is a distinct unit of work. The Lambda move stays deferred until the proof of concept in ADR-005 is done.
 **Supersedes:** ADR-001's "Three operating modes" and its `wiki_curator_router`

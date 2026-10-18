@@ -38,9 +38,8 @@
 # `ci(deps)` prefix, which cuts no release.
 #
 # `target-branch` points version updates at `dev`, not `main`. An upgrade
-# should land where it can be exercised before a release cuts: `dev`
-# publishes to the Cloudflare preview URL and to the Railway development
-# environment, so a bad bump surfaces there instead of in production.
+# should land where it can be exercised before a release cuts: CI runs on
+# `dev`, so a bad bump surfaces there instead of in a release.
 #
 # Dependabot reads this file from the *default* branch only, so this
 # config has to be on `main` to take effect even though every

@@ -1,22 +1,11 @@
-"""Stop a run before it outlives the thing that started it.
+"""Stop a job before Lambda does.
 
-transcription-cog's ``_deadline.py`` reads Lambda's own clock: the
-runtime hands the handler ``get_remaining_time_in_millis`` and kills the
-invocation outright when it reaches zero. This cog has no runtime
-clock — it is a one-shot process on Railway — so the budget is declared
-rather than discovered, and the reason for having one is different.
-
-Railway skips a scheduled or repeated start while the previous one is
-still ``Active``. A run that hangs therefore does not merely take a long
-time: every later start is silently skipped, the service sits ``Active``,
-and nothing says so. That is the failure this guards. A run that reaches
-its budget raises :class:`RunOutOfTime` inside the run, so it travels the
-ordinary failure path — the flow reports it and re-raises, ``main`` exits
-non-zero, and the next start is free to happen.
-
-The margin exists for the same reason as transcription-cog's: the report
-is one POST with the API client's own timeout, and a budget spent to the
-last second leaves no room to send it.
+The wiki-jobs worker passes the invocation's remaining time (from
+``get_remaining_time_in_millis``) as the budget. A job that reaches it
+raises :class:`RunOutOfTime` inside the job, a margin before Lambda would
+kill the invocation outright, so it travels the ordinary failure path: the
+record is returned to the queue and retried, rather than cut off
+mid-write. A non-positive budget — a local command — disables the guard.
 """
 
 from __future__ import annotations
@@ -25,18 +14,17 @@ import signal
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-#: How long before the declared budget a run is stopped, so that it can
-#: still send its report before the process ends.
+#: How long before the budget a job is stopped, so that it can still fail
+#: cleanly before Lambda ends the invocation.
 DEADLINE_MARGIN_SECONDS = 30
 
 
 class RunOutOfTime(Exception):  # noqa: N818 — named for what happened
     """The run reached its time budget and was stopped deliberately.
 
-    Distinct from a run that failed on its own: nothing is known to be
-    wrong except that it took too long. It is raised inside the run so
-    the flow reports it like any other failure, rather than leaving a
-    process that never ends and a service that never starts again.
+    Distinct from a job that failed on its own: nothing is known to be
+    wrong except that it took too long. It is raised inside the job so it
+    fails like any other, rather than being killed mid-write.
     """
 
 
@@ -44,16 +32,10 @@ class RunOutOfTime(Exception):  # noqa: N818 — named for what happened
 def deadline(budget_seconds: int) -> Iterator[None]:
     """Raise :class:`RunOutOfTime` a margin before ``budget_seconds``.
 
-    SIGALRM, because the run is blocking I/O on the main thread — the
-    export GET, the clone, the push — which is where the signal is
-    delivered. A non-positive budget disables the guard, which is what a
-    local run wants.
-
-    The git subprocess: a push interrupted this way leaves GitPython's
-    child running until the process exits. That is acceptable here and
-    only here, because the process does exit — immediately, and by
-    design. It would not be acceptable on a runtime that reuses the
-    container.
+    SIGALRM, because the job is blocking I/O on the main thread — the
+    export GET, the state reads and writes, the model calls — which is
+    where the signal is delivered. A non-positive budget disables the
+    guard, which is what a local run wants.
     """
     if budget_seconds <= 0:
         yield
