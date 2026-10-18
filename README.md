@@ -80,6 +80,13 @@ uv run check-doppler-keys                  # every required .env.example name is
 uv run pytest
 ```
 
+`tests/unit` runs each pass and job against an in-process store.
+`tests/integration` delivers real SQS-shaped messages to
+`worker.lambda_handler` and drains the jobs they ask for — link, consolidate,
+generate, materialise — with every API call going over HTTP through the shared
+client to an in-memory API (respx) that validates each body against the
+contract and refuses a field it would drop. No network, no model.
+
 ### Render locally (no commit, no push)
 
 The proof-of-concept loop (ADR-005). Writes into your existing clone and
