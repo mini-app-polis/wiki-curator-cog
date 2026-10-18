@@ -177,8 +177,6 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> No
     elif kind == "materialise":
         report.ok(int(result.get("written") or 0))
         report.count("pages_removed", int(result.get("deleted") or 0))
-        if "pages" in result:  # a rebuild of every page: what it queued
-            report.count("pages_queued", int(result["pages"]))
 
 
 def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
