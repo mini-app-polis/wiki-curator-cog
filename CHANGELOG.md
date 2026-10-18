@@ -1,3 +1,10 @@
+# [3.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.3.1...v3.4.0) (2026-10-18)
+
+
+### Features
+
+* read the wiki export by ETag through common-utils 6.7 (MINI-106) ([a60a3af](https://github.com/mini-app-polis/wiki-curator-cog/commit/a60a3affe3035f552ce7653f29c7385fa9c4f26a))
+
 ## [3.3.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.3.0...v3.3.1) (2026-10-18)
 
 
