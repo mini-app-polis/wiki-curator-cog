@@ -18,10 +18,14 @@ source; ``materialise`` only writes page documents and spreads over a few
 groups. A job writes back only the state entries it changed, so jobs in
 different groups do not overwrite each other.
 
-**State in the API, no cache between invocations.** Each invocation reads the
+**State in the API, checked on every invocation.** Each invocation reads the
 export and the state documents from the API and writes back what it changed.
-Its cache folder is a fresh temporary directory, so a warm container never
-compares the API with what it saw an invocation ago.
+Its cache folder is a fresh temporary directory. The one thing a warm
+container keeps is the shared client's last export body, sent back by ETag:
+the API answers 304 when the corpus is unchanged, so nothing is used without
+the API confirming it current. The export is the expensive read (about 30 MB,
+built once per corpus revision in the API); the incident of 2026-10-18 was
+five jobs building it at once.
 
 **Nothing is deleted until the work is done.** The event source mapping
 deletes every record the handler does not name in ``batchItemFailures``, so
