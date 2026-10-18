@@ -195,10 +195,13 @@ class _Report:
     def count(self, key: str, value: int) -> None:
         self.counts[key] = value
 
+    def send(self, *, notable: bool = False, **_kw: Any) -> None:
+        self.sent_notable = notable
+
 
 def test_a_clean_job_reports_counts_and_no_issue() -> None:
     report = _Report()
-    worker.record(
+    assert worker.record(
         report,
         {"job": "generate", "entities": ["a"]},
         {
@@ -239,13 +242,43 @@ def test_work_left_undone_is_an_issue(job: dict, result: dict, issue: tuple) -> 
     assert report.issues == [issue]
 
 
+@pytest.mark.parametrize(
+    ("job", "result"),
+    [
+        ({"job": "materialise"}, {"written": 1061, "deleted": 0}),
+        ({"job": "materialise", "entities": ["a"]}, {"written": 0, "deleted": 1}),
+        ({"job": "link", "source_id": SOURCE}, {"linked": 4}),
+        (
+            {"job": "consolidate", "entities": ["a"]},
+            {"decided": 0, "usage": {"calls": 1}},
+        ),
+        ({"job": "generate", "entities": ["a"]}, {"generated": 0, "enqueued": ["q-0"]}),
+    ],
+)
+def test_a_job_that_did_something_is_posted(job: dict, result: dict) -> None:
+    """A clean rebuild of every page used to be a log line and nothing in
+    Discord (2026-10-18); every other queue-driven cog posts such a run."""
+    assert worker.record(_Report(), job, result) is True
+
+
+def test_a_job_with_nothing_left_to_do_stays_a_log_line() -> None:
+    """A duplicate delivery meeting its watermark is not news."""
+    result = {"linked": 0, "usage": {"calls": 0}, "enqueued": []}
+    assert (
+        worker.record(_Report(), {"job": "link", "source_id": SOURCE}, result) is False
+    )
+
+
 def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
     opened: list[tuple[str, str]] = []
+    sent: list[bool] = []
 
     @contextmanager
     def fake_report(flow_name: str, *, repo: str, run_id: str):
         opened.append((flow_name, run_id))
-        yield _Report()
+        report = _Report()
+        yield report
+        sent.append(report.sent_notable)
 
     api = Api()
     with (
@@ -260,3 +293,4 @@ def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
             run_id="m-9",
         )
     assert opened == [("wiki-materialise", "m-9")]
+    assert sent == [True]
