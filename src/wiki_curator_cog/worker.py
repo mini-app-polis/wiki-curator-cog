@@ -38,7 +38,8 @@ its receives and lands in the dead-letter queue, where someone can see what
 produced it.
 
 **One run report per job, as every cog sends one per run.** It counts the
-model calls and their cost, and is quiet when the job went cleanly. Work
+model calls and their cost, and is posted whenever the job did something;
+only a job that found nothing to do stays a log line. Work
 the job paid for and left undone — a failed link or consolidation batch, an
 entity whose prose failed — is an issue, so the report is a WARN: nothing
 retries it on its own, because the job succeeded. A job that raises is
@@ -143,21 +144,32 @@ def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
     return result
 
 
-def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> None:
-    """Translate one job's result onto its run report.
+def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bool:
+    """Translate one job's result onto its run report; return whether it is notable.
 
     Counts are counts. What a person should look at is an issue: work the
     job paid for and could not finish — a batch the model answered badly, an
     entity whose prose failed twice — which nothing retries on its own,
     because the job itself succeeded and its message is gone.
+
+    A job that did something — linked, decided, generated, wrote or removed
+    pages, paid for a model call, or queued a follow-on — is notable, so its
+    report goes to Discord even when it is clean, as every other queue-driven
+    cog's does (transcription-cog marks each asked-for run notable). A job
+    that found nothing left to do, a duplicate delivery meeting its
+    watermark, stays a log line.
     """
     kind = str(job.get("job"))
     spent = result.get("usage") or {}
-    report.count("model_calls", int(spent.get("calls") or 0))
+    calls = int(spent.get("calls") or 0)
+    enqueued = len(result.get("enqueued") or [])
+    report.count("model_calls", calls)
     report.count("cost_usd_cents", round(float(spent.get("cost_usd") or 0) * 100))
-    report.count("jobs_enqueued", len(result.get("enqueued") or []))
+    report.count("jobs_enqueued", enqueued)
+    done = 0
     if kind == "link":
-        report.ok(int(result.get("linked") or 0))
+        done = int(result.get("linked") or 0)
+        report.ok(done)
         report.count("statements", int(result.get("statements") or 0))
         if result.get("failed_batches"):
             report.issue(
@@ -167,7 +179,8 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> No
                 "re-send this link job to retry them",
             )
     elif kind == "consolidate":
-        report.ok(int(result.get("decided") or 0))
+        done = int(result.get("decided") or 0)
+        report.ok(done)
         if result.get("failed_batches"):
             report.issue(
                 "consolidate_batch_failed",
@@ -175,21 +188,26 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> No
                 detail=f"{result['failed_batches']} batch(es) left undecided",
             )
     elif kind == "generate":
-        report.ok(int(result.get("generated") or 0))
+        done = int(result.get("generated") or 0)
+        report.ok(done)
         for slug in result.get("failed_slugs") or []:
             report.issue("generate_failed", str(slug))
     elif kind == "materialise":
+        removed = int(result.get("deleted") or 0)
+        done = int(result.get("written") or 0) + removed
         report.ok(int(result.get("written") or 0))
-        report.count("pages_removed", int(result.get("deleted") or 0))
+        report.count("pages_removed", removed)
+    return bool(done or calls or enqueued)
 
 
 def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
     """Run the job one message asks for. Raises if it must be redelivered.
 
-    One run report per job, as every cog sends one per run: quiet when the
-    job went cleanly, a WARN when it finished with work left undone, and on
-    an exception the report goes out on the way (``run_report``) before the
-    message returns to the queue.
+    One run report per job, as every cog sends one per run: posted when the
+    job did something (see :func:`record`), a WARN when it finished with work
+    left undone, a log line when it found nothing to do, and on an exception
+    the report goes out on the way (``run_report``) before the message
+    returns to the queue.
     """
     job = job_of(body)
     log.info("worker: run %s job=%s", run_id, job.get("job"))
@@ -199,7 +217,7 @@ def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
         deadline(budget_s),
     ):
         result = run(job, client=_state_client(), state_dir=Path(tmp))
-        record(report, job, result)
+        report.send(notable=record(report, job, result))
     log.info(
         "worker: done %s job=%s next=%s usage=%s",
         run_id,
