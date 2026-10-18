@@ -1,3 +1,10 @@
+## [2.4.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.4.0...v2.4.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* materialise summary separates names gone from pages deleted (MINI-96) ([0effc41](https://github.com/mini-app-polis/wiki-curator-cog/commit/0effc418a7eac8026062b1e526ed9a08d37484e8))
+
 # [2.4.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v2.3.3...v2.4.0) (2026-10-17)
 
 
