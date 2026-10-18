@@ -620,9 +620,15 @@ class _NoWrites(state_backend.FileState):
         """Discard the write: a dry run changes no state."""
         return None
 
-    def save_pages(self, pages, remove, folder: Path) -> dict[str, int]:  # type: ignore[no-untyped-def]
+    def save_pages(self, pages, remove, folder: Path) -> dict[str, Any]:  # type: ignore[no-untyped-def]
         """Discard the pages: a dry run stores nothing."""
-        return {"written": 0, "removed": 0}
+        return {
+            "written": 0,
+            "removed": 0,
+            "created": [],
+            "changed": [],
+            "removed_slugs": [],
+        }
 
 
 def api_state() -> state_backend.ApiState:

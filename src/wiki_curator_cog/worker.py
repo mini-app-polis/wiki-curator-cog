@@ -147,10 +147,14 @@ def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
 def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bool:
     """Translate one job's result onto its run report; return whether it is notable.
 
-    Counts are counts. What a person should look at is an issue: work the
-    job paid for and could not finish — a batch the model answered badly, an
-    entity whose prose failed twice — which nothing retries on its own,
-    because the job itself succeeded and its message is gone.
+    Counts are counts. What changed is an outcome, named: the references a
+    link found, the folds a consolidation moved, the pages whose prose was
+    generated, and the pages a materialise created, changed or removed —
+    a page rewritten identically is only counted. What a person should look
+    at is an issue: work the job paid for and could not finish — a batch the
+    model answered badly, an entity whose prose failed twice — which nothing
+    retries on its own, because the job itself succeeded and its message is
+    gone.
 
     A job that did something — linked, decided, generated, wrote or removed
     pages, paid for a model call, or queued a follow-on — is notable, so its
@@ -171,6 +175,8 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
         done = int(result.get("linked") or 0)
         report.ok(done)
         report.count("statements", int(result.get("statements") or 0))
+        for ref in result.get("references") or []:
+            report.created("reference", str(ref))
         if result.get("failed_batches"):
             report.issue(
                 "link_batch_failed",
@@ -181,6 +187,8 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
     elif kind == "consolidate":
         done = int(result.get("decided") or 0)
         report.ok(done)
+        for fold in result.get("folds") or []:
+            report.updated("fold", str(fold))
         if result.get("failed_batches"):
             report.issue(
                 "consolidate_batch_failed",
@@ -190,13 +198,25 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
     elif kind == "generate":
         done = int(result.get("generated") or 0)
         report.ok(done)
+        for slug in result.get("generated_slugs") or []:
+            report.updated("prose", str(slug))
         for slug in result.get("failed_slugs") or []:
             report.issue("generate_failed", str(slug))
     elif kind == "materialise":
         removed = int(result.get("deleted") or 0)
-        done = int(result.get("written") or 0) + removed
-        report.ok(int(result.get("written") or 0))
+        written = int(result.get("written") or 0)
+        created = list(result.get("created") or [])
+        changed = list(result.get("changed") or [])
+        done = written + removed
+        report.ok(written)
         report.count("pages_removed", removed)
+        report.count("pages_unchanged", max(0, written - len(created) - len(changed)))
+        for slug in created:
+            report.created("page", str(slug))
+        for slug in changed:
+            report.updated("page", str(slug))
+        for slug in result.get("removed_slugs") or []:
+            report.removed("page", str(slug))
     return bool(done or calls or enqueued)
 
 

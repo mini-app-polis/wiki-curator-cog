@@ -175,13 +175,22 @@ def test_pages_go_to_the_api_in_chunks_removals_last(
     store = state_backend.ApiState(api)
     docs = pages.build_documents(_export(), only={"stretch", "wall-drill"})
     counts = store.save_pages(list(docs.values()), ["old"], tmp_path / "pages")
-    assert counts == {"written": 2, "removed": 1}
+    assert counts == {
+        "written": 2,
+        "removed": 1,
+        "created": ["stretch", "wall-drill"],
+        "changed": [],
+        "removed_slugs": ["old"],
+    }
     assert [(len(p.pages), p.remove) for p in api.page_posts] == [
         (1, []),
         (1, []),
         (0, ["old"]),
     ]
     assert set(api.pages) == {"stretch", "wall-drill"}
+    # The same pages again: written, but nothing changed.
+    again = store.save_pages(list(docs.values()), [], tmp_path / "pages")
+    assert (again["written"], again["created"], again["changed"]) == (2, [], [])
 
 
 # ── Facets are read once per job (ride-along) ──

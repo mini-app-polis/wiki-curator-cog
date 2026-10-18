@@ -177,12 +177,16 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
     ctx.store.save(links, ctx.paths.links, final=True)
 
     touched: set[str] = set()
+    references: set[str] = set()
     for s in newly:
         if not links.is_linked(s):
             continue  # its batch failed; the next run tries it again
         touched.add(s.subject_slug)
         entry = links.statements.get(s.key) or {}
-        touched.update(r["target_slug"] for r in entry.get("references", []))
+        for r in entry.get("references", []):
+            touched.add(r["target_slug"])
+            denied = " (denied)" if r.get("polarity") == "deny" else ""
+            references.add(f"{s.subject_slug} → {r['target_slug']}{denied}")
 
     facets = ctx.facets
     version_of = {k: g.version for g in consolidate.GROUPS for k in g.kinds}
@@ -202,6 +206,8 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
         "source_id": str(sid),
         "statements": len(statements),
         **{k: counts[k] for k in ("skipped", "linked", "failed_batches")},
+        #: What this run found that was not there before: one per reference.
+        "references": sorted(references),
         "next": follow,
     }
 
@@ -231,17 +237,19 @@ def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         on_batch=lambda: ctx.store.save(facets, ctx.paths.facets),
     )
     ctx.store.save(facets, ctx.paths.facets, final=True)
-    gained = sorted(
-        {
-            parent
-            for slug, parent in facets.parents().items()
-            if slug in slugs and before.get(slug) != parent
-        }
-    )
+    after = facets.parents()
+    moved = {
+        slug: after.get(slug) for slug in slugs if before.get(slug) != after.get(slug)
+    }
+    gained = sorted({parent for parent in moved.values() if parent})
     return {
         "job": "consolidate",
         "entities": sorted(slugs),
         **{k: counts[k] for k in ("skipped", "decided", "failed_batches")},
+        #: Each entity whose fold changed, and where it folds now.
+        "folds": sorted(
+            f"{slug} → {parent or 'its own page'}" for slug, parent in moved.items()
+        ),
         "next": _generate_jobs(gained),
     }
 
@@ -285,7 +293,10 @@ def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         "job": "generate",
         "entities": sorted(targets),
         "skipped": sorted(skipped),
-        **{k: counts[k] for k in ("generated", "failed", "failed_slugs")},
+        **{
+            k: counts[k]
+            for k in ("generated", "generated_slugs", "failed", "failed_slugs")
+        },
         # a page gone since the job was enqueued is removed by materialise
         "next": _materialise_jobs(set(targets) | set(skipped)),
     }
@@ -354,6 +365,11 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
         "written": counts["written"],
         #: Of ``removed``, how many had a stored page to delete.
         "deleted": counts["removed"],
+        #: Of what was written, the pages that are new or differ, and the
+        #: pages actually deleted: what changed, not just what was processed.
+        "created": counts.get("created", []),
+        "changed": counts.get("changed", []),
+        "removed_slugs": counts.get("removed_slugs", []),
         "next": [],
     }
 

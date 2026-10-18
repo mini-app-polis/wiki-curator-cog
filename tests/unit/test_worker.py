@@ -185,6 +185,7 @@ class _Report:
         self.oks = 0
         self.issues: list[tuple[str, str]] = []
         self.counts: dict[str, int] = {}
+        self.outcomes: list[tuple[str, str, str]] = []
 
     def ok(self, n: int = 1) -> None:
         self.oks += n
@@ -197,6 +198,15 @@ class _Report:
 
     def send(self, *, notable: bool = False, **_kw: Any) -> None:
         self.sent_notable = notable
+
+    def created(self, kind: str, item: str) -> None:
+        self.outcomes.append(("+", kind, item))
+
+    def updated(self, kind: str, item: str) -> None:
+        self.outcomes.append(("~", kind, item))
+
+    def removed(self, kind: str, item: str) -> None:
+        self.outcomes.append(("-", kind, item))
 
 
 def test_a_clean_job_reports_counts_and_no_issue() -> None:
@@ -214,6 +224,54 @@ def test_a_clean_job_reports_counts_and_no_issue() -> None:
     )
     assert report.oks == 2 and report.issues == []
     assert report.counts == {"model_calls": 2, "cost_usd_cents": 3, "jobs_enqueued": 1}
+
+
+def test_a_rebuild_reports_what_changed_not_only_what_it_rewrote() -> None:
+    report = _Report()
+    worker.record(
+        report,
+        {"job": "materialise"},
+        {
+            "written": 1061,
+            "deleted": 1,
+            "created": ["stretch"],
+            "changed": ["anchor", "frame"],
+            "removed_slugs": ["old-name"],
+        },
+    )
+    assert report.oks == 1061
+    assert report.counts["pages_unchanged"] == 1058
+    assert report.outcomes == [
+        ("+", "page", "stretch"),
+        ("~", "page", "anchor"),
+        ("~", "page", "frame"),
+        ("-", "page", "old-name"),
+    ]
+
+
+def test_each_pass_names_what_it_changed() -> None:
+    link_report, fold_report, prose_report = _Report(), _Report(), _Report()
+    worker.record(
+        link_report,
+        {"job": "link", "source_id": SOURCE},
+        {"linked": 2, "references": ["anchor → frame", "stretch → anchor (denied)"]},
+    )
+    worker.record(
+        fold_report,
+        {"job": "consolidate", "entities": ["side-pass-left"]},
+        {"decided": 1, "folds": ["side-pass-left → side-pass"]},
+    )
+    worker.record(
+        prose_report,
+        {"job": "generate", "entities": ["anchor", "frame"]},
+        {"generated": 1, "generated_slugs": ["anchor"]},
+    )
+    assert link_report.outcomes == [
+        ("+", "reference", "anchor → frame"),
+        ("+", "reference", "stretch → anchor (denied)"),
+    ]
+    assert fold_report.outcomes == [("~", "fold", "side-pass-left → side-pass")]
+    assert prose_report.outcomes == [("~", "prose", "anchor")]
 
 
 @pytest.mark.parametrize(
