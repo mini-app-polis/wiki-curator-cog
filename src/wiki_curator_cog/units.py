@@ -350,6 +350,8 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
         "entities": sorted(targets),
         "removed": sorted(remove),
         "written": counts["written"],
+        #: Of ``removed``, how many had a stored page to delete.
+        "deleted": counts["removed"],
         "next": [],
     }
 

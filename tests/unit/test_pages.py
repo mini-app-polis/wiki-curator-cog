@@ -94,6 +94,7 @@ def test_materialise_writes_each_page_and_asks_for_nothing(tmp_path: Path) -> No
         {"job": "materialise", "entities": ["stretch", "gone"]}, _ctx(tmp_path, llm)
     )
     assert result["entities"] == ["stretch"] and result["removed"] == ["gone"]
+    assert result["deleted"] == 0  # it never had a page
     assert result["next"] == []
     doc = json.loads((tmp_path / "pages" / "stretch.json").read_text())
     assert doc["definition"] == "A definition."
@@ -113,7 +114,7 @@ def test_a_folded_page_goes_when_its_parent_is_materialised(tmp_path: Path) -> N
         _ctx(tmp_path, RouterLLM()),
     )
     assert result["entities"] == ["stretch"]
-    assert result["removed"] == ["anchor-step"]
+    assert result["removed"] == ["anchor-step"] and result["deleted"] == 1
     assert not (tmp_path / "pages" / "anchor-step.json").exists()
     doc = json.loads((tmp_path / "pages" / "stretch.json").read_text())
     assert [d["slug"] for d in doc["details"]] == ["anchor-step"]
@@ -174,7 +175,13 @@ def test_the_materialise_command_builds_every_page_dry(
         code = main.main(["materialise", "--state", "files", "--dry-run"])
     assert code == 0
     out = json.loads(capsys.readouterr().out)
-    assert out == {"dry_run": True, "pages": 3, "removed": 0, "written": 0}
+    assert out == {
+        "dry_run": True,
+        "pages": 3,
+        "gone": 0,
+        "written": 0,
+        "deleted": 0,
+    }
     assert not (tmp_path / ".curator" / "pages").exists()
 
 
