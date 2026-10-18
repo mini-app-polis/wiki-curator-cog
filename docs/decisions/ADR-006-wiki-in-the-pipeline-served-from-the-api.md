@@ -1,7 +1,7 @@
 # ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
-**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The Railway service and its `export` code are retired (MINI-95); the site's /wiki pages (MINI-97) are open; the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
+**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The Railway service and its `export` code are retired (MINI-95); the site's /wiki, /wiki/page and admin views shipped in website-astro-wcs 2.6.0 (MINI-97; admin review split to MINI-101); the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
 **Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
 **Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time); Asana MINI-89, MINI-94 – MINI-99
 
