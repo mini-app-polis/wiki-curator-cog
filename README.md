@@ -185,7 +185,7 @@ The import refuses a field the API does not store, goes up in chunks
 (`--batch-size`, default 250), and is safe to repeat. A run's writes refuse
 unknown fields the same way, and a refused write stops the run.
 
-### One job at a time (ADR-006, MINI-94)
+### One job per message (ADR-006, MINI-94)
 
 `units.handle` is the body of the wiki-jobs worker (MINI-95): one job in, its
 result and the jobs that should follow out. `link` takes one source;
@@ -233,7 +233,7 @@ the function, queue and alarms are `module "wiki_curator"` in
 mini-app-polis/infra). The API is the only producer: it enqueues a `link`
 when a source is composed — only while `flags.wcs.wiki_jobs_enabled` is on,
 seeded off — and the follow-on jobs each job names, which the worker posts to
-`POST /v1/wcs/wiki/jobs`. One job at a time; each reads the export and the
+`POST /v1/wcs/wiki/jobs`. Jobs run side by side only where they write different state entries (below); each reads the export and the
 state from the API into a fresh temporary folder, so a warm container never
 holds stale state. A failed job is returned to the queue and retried (its
 finished parts are no-ops), and an unreadable message is reported once and
@@ -306,6 +306,6 @@ Three layers:
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
-**One job at a time.** The queue is FIFO with one message group and the function has a reserved concurrency of 1, so two jobs never race on one state document or pay twice for one entity.
+**Side by side only where it is safe.** The queue is FIFO and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (api-kaianolevine-com `wiki_dispatch.group_for`; infra `module "wiki_curator"`).
 
 **Read-only against the corpus.** The curator reads note content with `GET` only. It writes its own state (`/v1/wcs/wiki/state/*`) and page documents (`/v1/wcs/wiki/pages`), and asks for follow-on jobs (`/v1/wcs/wiki/jobs`).

@@ -19,7 +19,7 @@ Drive transcript drop
 │   composition → canonical entity graph       │
 │   a composed source enqueues a `link` job    │
 └──────────┬───────────────────────────────────┘
-           │ wiki-curator-jobs.fifo (one message group)
+           │ wiki-curator-jobs.fifo (groups by what a job writes)
            ▼
 ┌──────────────────────────────────────────────┐
 │   wiki-curator-worker (Lambda, this repo)    │
@@ -68,7 +68,7 @@ Every model pass is watermarked in the API, so a repeated job makes no model cal
 
 ## Concurrency and the job budget
 
-The queue is FIFO with one message group, and the function's reserved concurrency is 1: jobs never run side by side, so two cannot race on one state document or pay twice for one entity. A job's budget is the invocation's remaining time; `_deadline.py` stops it a margin before Lambda would, so it fails cleanly and its record returns to the queue.
+The queue is FIFO, and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (api-kaianolevine-com `wiki_dispatch.group_for`; infra `module "wiki_curator"`). A job's budget is the invocation's remaining time; `_deadline.py` stops it a margin before Lambda would, so it fails cleanly and its record returns to the queue.
 
 The curator version is auto-derived at runtime from `pyproject.toml` via `importlib.metadata.version("wiki-curator-cog")`. semantic-release bumps it on push to main based on conventional commits (`feat:` → minor, `fix:` → patch), and CI deploys each release to the Lambda.
 

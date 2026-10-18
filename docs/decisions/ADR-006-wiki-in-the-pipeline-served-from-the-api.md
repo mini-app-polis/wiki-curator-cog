@@ -112,7 +112,12 @@ worker's reads prove slow.
 
 **MINI-95 (2026-10-17): the queue and the worker.** `wiki-curator-jobs.fifo`,
 one message group, reserved concurrency 1: jobs never run side by side, so
-two cannot pay for one entity or race on a document. Messages are
+two cannot pay for one entity or race on a document. *Revised 2026-10-18:*
+the worker writes back only the entries a job changed, so only jobs that
+write the same entries need to wait on each other. The API now picks each
+job's message group by what it writes — `consolidate` and `generate` in one
+group, `link` a group per source, `materialise` over a few page groups — and
+the function runs up to a concurrency ceiling instead of one at a time. Messages are
 `{"type": "wiki.job", "version": 1, "payload": <job>}`. The API enqueues a
 `link` after composing a source — behind `flags.wcs.wiki_jobs_enabled`,
 seeded off (migration 055), because every job costs model calls — and
