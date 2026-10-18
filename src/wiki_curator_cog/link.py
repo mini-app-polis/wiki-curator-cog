@@ -78,7 +78,7 @@ def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
     no client is built and no API key is needed: calls are counted and
     measured, never sent.
     """
-    from . import _lenient_json, usage
+    from . import usage
 
     provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
     if provider not in _DEFAULT_MODELS:
@@ -89,7 +89,6 @@ def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
     name = f"{provider}/{model}"
     if dry_run:
         return usage.DryRunLLM(name), name
-    _lenient_json.install()
     client = build_llm(
         provider=provider,
         model=model,
