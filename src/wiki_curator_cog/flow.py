@@ -706,8 +706,11 @@ def materialise_local(
     summary = {
         "dry_run": dry_run,
         "pages": len(result["entities"]),
-        "removed": len(result["removed"]),
+        # names folded into a page, or no longer pages: asked to be removed
+        "gone": len(result["removed"]),
         "written": result["written"],
+        # of those, the ones that had a stored page
+        "deleted": result["deleted"],
     }
     LOG.info("materialise.local %s", summary)
     return summary
