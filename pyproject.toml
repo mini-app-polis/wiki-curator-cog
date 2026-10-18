@@ -53,7 +53,7 @@ quote-style = "double"
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
 addopts = "--cov=wiki_curator_cog --cov-report=term-missing"
 
 [tool.mypy]

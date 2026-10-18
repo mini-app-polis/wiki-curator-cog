@@ -440,7 +440,6 @@ def page_markdown(
             "teachers": list(page.teachers),
             "sources": [c.source_slug for c in page.sources],
             "related": sorted({r.slug for r in page.related}),
-            "rendered_at": rendered_at.isoformat(),
         }
     )
     if page.definition:
