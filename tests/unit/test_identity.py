@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import wiki_curator_cog.flow as flow
-from wiki_curator_cog import generate, identity, link
+from wiki_curator_cog import generate, identity, link, pages
 from wiki_curator_cog.render import find_broken_links, render_bundle
 
 from .export_builders import (
@@ -292,3 +292,110 @@ def test_render_local_reports_merges(tmp_path: Path) -> None:
     assert summary["merged"] == {UT: RSP_UT}
     assert not (wiki / "patterns" / f"{UT}.md").exists()
     assert summary["broken_links"]["count"] == 0
+
+
+# ── "also called" leaves out facet names ──
+
+STRIKE = "strike"
+FOOT_STRIKE = "foot-strike"
+TOE_STRIKE = "toe-strike"
+HEEL_STEP = "heel-step"
+COP = "center-of-pressure"
+BALL_STRIKE = "ball-strike"
+
+
+def _strike_export(*relations: WcsRelation) -> WcsWikiExport:
+    """The strike page as a note left it: foot strike another name for strike,
+    the narrower ideas folded in as facets, some through foot strike."""
+    note = _source("strike-note", dt.date(2026, 10, 19))
+
+    def entity(slug: str, name: str, aliases: list[str]) -> WcsEntity:
+        return WcsEntity(
+            id=_id(slug),
+            slug=slug,
+            canonical_name=name,
+            kind="concept",
+            aliases=aliases,
+        )
+
+    return WcsWikiExport(
+        entities=[
+            entity(STRIKE, "Strike", []),
+            entity(FOOT_STRIKE, "foot strike", ["foot-strike"]),
+            entity(TOE_STRIKE, "toe strike", ["toe-first strike"]),
+            entity(HEEL_STEP, "heel step", ["heel-step"]),
+            entity(COP, "center of pressure", ["pronation and supination of the foot"]),
+            entity(BALL_STRIKE, "ball strike", []),
+        ],
+        sources=[note],
+        relations=[
+            _rel("s1", FOOT_STRIKE, STRIKE, "alias_of", note),
+            _rel("s2", TOE_STRIKE, FOOT_STRIKE, "facet_of", note),
+            _rel("s3", HEEL_STEP, STRIKE, "facet_of", note),
+            _rel("s4", COP, STRIKE, "facet_of", note),
+            # Another name for a facet is still the facet's name.
+            _rel("s5", BALL_STRIKE, TOE_STRIKE, "alias_of", note),
+            *relations,
+        ],
+    )
+
+
+def test_merges_record_the_names_facets_brought() -> None:
+    merges = identity.find_merges(_strike_export())
+    assert merges.facet_names[_id(STRIKE)] == {
+        "toe-strike",
+        "toe-first-strike",
+        "heel-step",
+        "center-of-pressure",
+        "pronation-and-supination-of-the-foot",
+        "ball-strike",
+    }
+
+
+def test_the_strike_page_is_also_called_only_foot_strike() -> None:
+    export, merges = identity.resolve(_strike_export())
+    strike = next(e for e in export.entities if e.slug == STRIKE)
+    # Matching keeps every name, facets included …
+    assert {"toe strike", "heel step", "center of pressure", "ball strike"} <= set(
+        strike.aliases
+    )
+    # … but the page lists only the same-idea name.
+    page = pages.build_documents(export, merges=merges)[STRIKE]
+    assert page.aliases == ["foot strike"]
+
+
+def test_the_markdown_export_lists_the_same_names() -> None:
+    export, merges = identity.resolve(_strike_export())
+    bundle, _ = render_bundle(export, rendered_at=dt.date(2026, 10, 19), merges=merges)
+    frontmatter = bundle["concepts/strike.md"].split("---")[1]
+    assert "foot strike" in frontmatter
+    assert "toe strike" not in frontmatter
+
+
+def test_a_facet_name_the_page_also_has_as_a_same_idea_name_stays() -> None:
+    export = _strike_export()
+    foot = next(e for e in export.entities if e.slug == FOOT_STRIKE)
+    foot.aliases = ["foot-strike", "heel step"]
+    export, merges = identity.resolve(export)
+    page = pages.build_documents(export, merges=merges)[STRIKE]
+    assert page.aliases == ["foot strike", "heel step"]
+
+
+def test_a_consolidation_fold_hides_its_names_too() -> None:
+    export = _strike_export()
+    export.relations = [r for r in export.relations if r.id != _id("s4")]
+    export, merges = identity.resolve(export, {COP: (STRIKE, True)})
+    page = pages.build_documents(export, merges=merges)[STRIKE]
+    assert page.aliases == ["foot strike"]
+
+
+def test_a_same_name_fold_from_consolidation_stays_listed() -> None:
+    export = _strike_export()
+    export.relations = [r for r in export.relations if r.id != _id("s4")]
+    export, merges = identity.resolve(export, {COP: (STRIKE, False)})
+    page = pages.build_documents(export, merges=merges)[STRIKE]
+    assert page.aliases == [
+        "foot strike",
+        "center of pressure",
+        "pronation and supination of the foot",
+    ]

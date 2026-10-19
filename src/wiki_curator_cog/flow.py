@@ -190,6 +190,7 @@ def render_local(
         overlay=overlay,
         context=context,
         details=details,
+        merges=merges,
     )
     bundle.pop("log.md", None)
 

@@ -31,7 +31,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 
-from .render import WcsEntity, WcsWikiExport
+from .render import WcsEntity, WcsWikiExport, slugify
 
 #: Relation kinds that merge, in the extraction's snake_case and the
 #: hyphenated form, both accepted.
@@ -103,6 +103,13 @@ class Merges:
     by_slug: dict[str, str] = field(default_factory=dict)
     #: preferred id → the facets folded into it (aliases are not listed)
     facets: dict[uuid.UUID, list[Facet]] = field(default_factory=dict)
+    #: preferred id → the slug forms of the names its facets brought: each
+    #: facet's name and aliases, and those of anything folded through a facet
+    #: on the way. :func:`apply_merges` adds them to the entity's aliases so
+    #: matching finds the page; "also called" leaves them out, since a facet
+    #: is a part of the idea, not another name for it. A name the page also
+    #: has as a same-idea name is not in here.
+    facet_names: dict[uuid.UUID, frozenset[str]] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.by_id)
@@ -168,6 +175,8 @@ def find_merges(
             edges[child.id] = (parent.id, listed)
 
     merges = Merges()
+    same_names: dict[uuid.UUID, list[str]] = {}
+    part_names: dict[uuid.UUID, list[str]] = {}
     for start in sorted(edges, key=lambda i: entities[i].slug):
         seen = [start]
         current: uuid.UUID | None = start
@@ -180,6 +189,10 @@ def find_merges(
             current = nxt
         if current is not None:
             merges.by_id[start] = current
+            names = [entities[start].canonical_name, *entities[start].aliases]
+            # Another name for the page only if every step to it is one.
+            same = not any(edges[n][1] for n in seen[:-1])
+            (same_names if same else part_names).setdefault(current, []).extend(names)
             if edges[start][1]:
                 e = entities[start]
                 via = next((n for n in seen[1:-1] if edges[n][1]), None)
@@ -193,6 +206,16 @@ def find_merges(
                 )
     for facets in merges.facets.values():
         facets.sort(key=lambda f: f.name.lower())
+    for target, names in part_names.items():
+        page = entities[target]
+        keep = {
+            slugify(n)
+            for n in [page.canonical_name, *page.aliases, *same_names.get(target, [])]
+            if n and n.strip()
+        }
+        hidden = {slugify(n) for n in names if n and n.strip()} - keep
+        if hidden:
+            merges.facet_names[target] = frozenset(hidden)
     merges.by_slug = {
         entities[frm].slug: entities[to].slug for frm, to in merges.by_id.items()
     }

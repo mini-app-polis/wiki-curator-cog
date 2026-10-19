@@ -120,7 +120,9 @@ writes the decisions to `facets.json` (watermarked; already-decided entities
 are skipped). Drills are asked the same about other drills; patterns only
 whether they are another name for an existing pattern, since a variation is
 its own figure. Nothing folds across kinds, and each kind has its own prompt. `render`, `generate` and `link` then fold each facet into its
-broader page, listed under `## Details`. They pick up `facets.json` from next
+broader page, listed under `## Details`. A facet's name and aliases stay on
+the broader entity for matching, but the page's "also called" lists only
+same-idea names, never a facet's (MINI-107). They pick up `facets.json` from next
 in the state folder by default, or take `--facets PATH`. A note's
 `facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
 see what was folded where. Each entity's support (sources taught in,

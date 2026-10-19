@@ -104,6 +104,13 @@ def test_also_called_leaves_out_slug_forms_and_repeats(
     assert pages.display_aliases(name, aliases) == expected
 
 
+def test_also_called_leaves_out_hidden_names_in_any_form() -> None:
+    aliases = ["foot strike", "Toe Strike", "toe-strike", "heel step"]
+    assert pages.display_aliases("Strike", aliases, ["toe strike", "heel-step"]) == [
+        "foot strike"
+    ]
+
+
 def test_a_document_lists_aliases_once_but_matching_keeps_them_all() -> None:
     export = _export()
     anchor = next(e for e in export.entities if e.slug == "anchor-step")
