@@ -687,7 +687,82 @@ def test_the_prompts_ask_for_one_idea_per_sentence() -> None:
         flat = " ".join(prompt.replace("\\\n", " ").split())
         assert "one idea each" in flat
         assert "never join two points with a dash, a semicolon" in flat
-    assert "never how the word is used" in generate.CONDENSE_PROMPT
+    flat = " ".join(generate.CONDENSE_PROMPT.replace("\\\n", " ").split())
+    assert "Reword, never reinterpret" in flat
+    assert 'never use "—" or ";" at all' in flat
+
+
+def test_word_talk_is_removed_from_a_definition() -> None:
+    strike = (
+        "The action of the foot pressing into the floor. "
+        "'Foot strike' is another name for it, but 'strike' is the preferred term."
+    )
+    assert generate.without_word_talk(strike) == (
+        "The action of the foot pressing into the floor."
+    )
+    assert generate.without_word_talk("Only the thing.") == "Only the thing."
+
+
+class RewritesEverythingLLM(FakeLLM):
+    """A condense answer that also rewrites the definition, as strike's did."""
+
+    def __init__(self, context: str) -> None:
+        super().__init__()
+        self.context = context
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        return LLMResult(
+            "fake",
+            "fake",
+            {"definition": "The moment the foot lands.", "context": self.context},
+            "",
+        )
+
+
+def _one_over_shape(definition: str) -> tuple[generate.Corpus, generate.ProseFile]:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    prose.entities["anchor-step"] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": definition,
+        "context": " ".join(f"S{i}." for i in range(8)),
+        "integrated": [],
+        "revisions": [],
+    }
+    return corpus, prose
+
+
+def test_condense_keeps_a_definition_within_its_shape() -> None:
+    """MINI-92: the rewrite undid strike's note-led definition."""
+    corpus, prose = _one_over_shape(
+        "The foot pressing into the floor. 'Foot strike' is another name for it."
+    )
+    generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One point. Another."), model="m"
+    )
+    assert prose.definition("anchor-step") == "The foot pressing into the floor."
+    assert prose.context("anchor-step") == "One point. Another."
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "One point — joined to another. Two.",
+        "One point; another. Two.",
+        "Still. " * 5,
+    ],
+)
+def test_a_rewrite_still_over_the_shape_is_not_stored(context: str) -> None:
+    corpus, prose = _one_over_shape("Def.")
+    before = prose.context("anchor-step")
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM(context.strip()), model="m"
+    )
+    assert result["not_kept_slugs"] == ["anchor-step"]
+    assert result["slugs"] == []
+    assert prose.context("anchor-step") == before
 
 
 class LongThenShortLLM(FakeLLM):
