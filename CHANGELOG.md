@@ -1,3 +1,20 @@
+# [3.11.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.10.0...v3.11.0) (2026-10-19)
+
+
+### Bug Fixes
+
+* a dry-run condense judges nothing, since nothing was rewritten (MINI-92) ([f11b380](https://github.com/mini-app-polis/wiki-curator-cog/commit/f11b380fd3c57fcb0b23808b3d7b864e7b5d5f12))
+* a revert is recorded as text a person chose, which the API accepts (MINI-92) ([c6e5102](https://github.com/mini-app-polis/wiki-curator-cog/commit/c6e5102991d851b3d9c69e6381417ae5252e1487))
+* a single semicolon no longer stops a rewrite being stored (MINI-92) ([70e8a07](https://github.com/mini-app-polis/wiki-curator-cog/commit/70e8a07c0f1c4ecc3298c97d1ab88667b78a9c53))
+* citations once and inside the full stop, and the review shows what each rewrite replaced (MINI-92) ([6ca6901](https://github.com/mini-app-polis/wiki-curator-cog/commit/6ca69015b7b0f6bc7249bc2b017409dfaae61b64))
+* condense keeps a definition within its shape, bans dashes and semicolons, and stores only what passes (MINI-92) ([f111e2a](https://github.com/mini-app-polis/wiki-curator-cog/commit/f111e2a85f9426a80fe27a3ae4fb702c071994a0))
+* prompts without dashes or semicolons, one retry told what to fix, and misses logged with their reason (MINI-92) ([4d14994](https://github.com/mini-app-polis/wiki-curator-cog/commit/4d14994cfbeb4dd43016f7b9354c06240d049c9f))
+
+
+### Features
+
+* generate --revert puts back a page's text from before a rewrite that changed its meaning (MINI-92) ([1ff5857](https://github.com/mini-app-polis/wiki-curator-cog/commit/1ff5857bd6c2453f0b9e1d9056bbecbd174d7500))
+
 # [3.10.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.9.0...v3.10.0) (2026-10-19)
 
 
