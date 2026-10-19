@@ -1,3 +1,15 @@
+# [3.6.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.5.0...v3.6.0) (2026-10-19)
+
+
+### Bug Fixes
+
+* **deps:** require miniapppolis-common-utils 6.9.0 for the wiki review contract (MINI-101) ([6df34b2](https://github.com/mini-app-polis/wiki-curator-cog/commit/6df34b25c352af5a673f3f27bb02d8c365178576))
+
+
+### Features
+
+* drop slug-form aliases, carry chain origin to page writes, store the thin list (MINI-104, MINI-101) ([3633545](https://github.com/mini-app-polis/wiki-curator-cog/commit/3633545748d6d56286ffcb2811bf25aad6f1a55e))
+
 # [3.5.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.4.1...v3.5.0) (2026-10-18)
 
 
