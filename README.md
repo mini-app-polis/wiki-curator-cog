@@ -305,6 +305,26 @@ corrections normally arrive as notes. A note outranks the page: the model
 sees which statements come from notes, and where a note says what an idea
 is, the definition follows it (MINI-92).
 
+**The shape, and rewriting to it (MINI-92).** A definition is one or two
+sentences; "In practice" is at most three sentences of one idea each, none
+over 30 words, with no long dashes. `generate --condense` rewrites only the
+pages over that shape, with no new evidence (`--entity` to try a few first).
+It keeps a definition that is within its shape, retries once with what was
+wrong, and stores nothing that still breaks the shape (`not_kept_why` says
+why). `prose-review.md` lists each rewrite with the text it replaced.
+
+A rewrite can change meaning: the full run on 2026-10-19 did on about one
+page in nine. Read `prose-review.md`, or have it reviewed, before trusting a
+mass rewrite. `generate --revert --entity SLUG` puts a page back to its text
+before its last rewrite, with no model call. It refuses a page whose last
+change took in new evidence, and records the text as chosen by a person
+(`page`), which later rewrite runs leave alone.
+
+```bash
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --condense --dry-run
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --revert --entity tuck-turn
+```
+
 ---
 
 ## Observability
