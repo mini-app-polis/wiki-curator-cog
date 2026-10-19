@@ -1016,10 +1016,10 @@ def test_revert_puts_back_the_text_before_the_rewrite() -> None:
     assert result["slugs"] == ["tuck-turn"]
     assert prose.context("tuck-turn") == "Accurate."
     assert prose.integrated("tuck-turn") == {"k1"}
-    assert prose.entities["tuck-turn"]["revisions"][-1]["by"] == "revert"
+    assert prose.entities["tuck-turn"]["revisions"][-1]["by"] == "page"
     # twice is a no-op, not a step further back
     again = generate.revert(prose, ["tuck-turn"])
-    assert again["refused"] == {"tuck-turn": "already reverted"}
+    assert again["refused"] == {"tuck-turn": "its text was last chosen by a person"}
     assert prose.context("tuck-turn") == "Accurate."
 
 
@@ -1035,7 +1035,7 @@ def test_revert_refuses_a_page_whose_last_change_was_new_evidence() -> None:
 def test_a_rewrite_pass_leaves_a_reverted_page_alone() -> None:
     corpus, prose = _one_over_shape("Def.")
     entry = prose.entities["anchor-step"]
-    entry["revisions"] = [{"by": "revert", "definition": "Def.", "context": "x"}]
+    entry["revisions"] = [{"by": "page", "definition": "Def.", "context": "x"}]
     result = generate.run_condense(
         corpus, prose, RewritesEverythingLLM("One. Two."), model="m"
     )
@@ -1069,3 +1069,13 @@ def test_revert_needs_named_pages(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="needs --entity"):
         with patch.object(flow, "_fetch_export", return_value=_export()):
             flow.generate_local(tmp_path / "prose.json", revert=True)
+
+
+def test_a_revert_is_a_revision_the_api_accepts() -> None:
+    """The API's contract knows only llm and page (the first revert run failed)."""
+    from mini_app_polis.api.contract import WcsWikiProseRevision
+
+    prose = generate.ProseFile()
+    _rewritten(prose, "tuck-turn")
+    generate.revert(prose, ["tuck-turn"], today="2026-10-19")
+    WcsWikiProseRevision.model_validate(prose.entities["tuck-turn"]["revisions"][-1])

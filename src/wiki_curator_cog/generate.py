@@ -983,14 +983,15 @@ def run_generation(
 
 
 def reverted(prose: ProseFile, slug: str) -> bool:
-    """Whether this page's text was last put back by :func:`revert`.
+    """Whether this page's text was last chosen by a person.
 
-    A rewrite pass leaves it alone: its rewrite was refused once already.
-    New evidence still regenerates it as usual.
+    That is an edit on the page, or :func:`revert` putting back the text
+    from before a rewrite (the API records both as ``page``). A rewrite pass
+    leaves such text alone; new evidence still regenerates it as usual.
     """
     entry = prose.entities.get(slug) or {}
     revisions = entry.get("revisions") or []
-    return bool(revisions) and revisions[-1].get("by") == "revert"
+    return bool(revisions) and revisions[-1].get("by") == "page"
 
 
 def revert(
@@ -1001,8 +1002,9 @@ def revert(
     No model call. Only a rewrite is undone, a revision that integrated no
     statements (``generate --condense``): a page whose last revision took in
     new evidence is refused, since going back would drop what it learned.
-    The text put back is recorded as a revision by ``revert``, and the
-    watermark is left as it is (MINI-92: rewrites that changed meaning).
+    The text put back is recorded as a revision by ``page``, text a person
+    chose (the API knows only ``llm`` and ``page``), and the watermark is
+    left as it is (MINI-92: rewrites that changed meaning).
     """
     day = today or dt.date.today().isoformat()
     done: list[str] = []
@@ -1014,8 +1016,8 @@ def revert(
             refused[slug] = "no earlier text to go back to"
             continue
         last, before = revisions[-1], revisions[-2]
-        if last.get("by") == "revert":
-            refused[slug] = "already reverted"
+        if last.get("by") == "page":
+            refused[slug] = "its text was last chosen by a person"
             continue
         if last.get("by") != "llm" or last.get("statements") != 0:
             refused[slug] = "its last change took in new evidence, not a rewrite"
@@ -1024,7 +1026,7 @@ def revert(
         entry["context"] = before.get("context", "")
         revisions.append(
             {
-                "by": "revert",
+                "by": "page",
                 "at": day,
                 "definition": entry["definition"],
                 "context": entry["context"],
