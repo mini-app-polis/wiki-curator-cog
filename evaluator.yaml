@@ -25,3 +25,14 @@ exemptions:
       themselves — one source row per extraction — is upstream in
       api-kaianolevine-com, enforced by a unique index (PIPE-002,
       migration 030), not here.
+  - rule: CD-026
+    reason: >
+      ci.yml has one job outside the canonical set: `rebuild`, after
+      `deploy` (MINI-109). A release can change how pages are built without
+      changing any of the curator's state, so it asks the API for one
+      rebuild of every page once the new code is live. That request can't
+      go in `deploy`, which calls the shared lambda-deploy.yml and takes no
+      extra steps. It isn't `test`, because it runs after the release, on
+      main only, against production. It holds its own key
+      (WIKI_CURATOR_DEPLOY_API_KEY, the wiki-curator-deploy machine), which
+      no other stage should hold.
