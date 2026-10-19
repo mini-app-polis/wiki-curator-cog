@@ -90,12 +90,17 @@ def test_a_link_job_links_one_source_and_names_what_follows(tmp_path: Path) -> N
 
     assert result["statements"] == 4 and result["linked"] == 4
     assert result["next"] == [
-        {"job": "consolidate", "entities": ["anchor-step", "stretch", "wall-drill"]},
+        {
+            "job": "consolidate",
+            "entities": ["anchor-step", "stretch", "wall-drill"],
+            "origin_source_id": str(SOURCE),
+        },
         # what it taught, and what it referred to — a new concept included —
         # in one job
         {
             "job": "generate",
             "entities": ["anchor-step", "connection", "stretch", "wall-drill"],
+            "origin_source_id": str(SOURCE),
         },
     ]
 
@@ -231,3 +236,104 @@ def test_follow_on_generate_jobs_come_in_chunks(
         {"job": "generate", "entities": ["a", "b"]},
         {"job": "generate", "entities": ["c"]},
     ]
+
+
+# ── Where a chain of jobs came from (MINI-101) ──
+
+ORIGIN = str(SOURCE)
+
+
+def test_the_origin_is_carried_down_the_chain(tmp_path: Path) -> None:
+    """link names itself; consolidate and generate pass on what they were given."""
+    llm = RouterLLM(parents={"anchor-step": "stretch"})
+    linked = units.handle({"job": "link", "source_id": ORIGIN}, _ctx(tmp_path, llm))
+    assert {j["origin_source_id"] for j in linked["next"]} == {ORIGIN}
+
+    consolidate_job = next(j for j in linked["next"] if j["job"] == "consolidate")
+    decided = units.handle(consolidate_job, _ctx(tmp_path, llm))
+    assert decided["next"] == [
+        {"job": "generate", "entities": ["stretch"], "origin_source_id": ORIGIN}
+    ]
+    generated = units.handle(decided["next"][0], _ctx(tmp_path, llm))
+    assert generated["next"] == [
+        {"job": "materialise", "entities": ["stretch"], "origin_source_id": ORIGIN}
+    ]
+
+
+def test_materialise_stores_the_origin_and_the_run_on_every_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(state_backend, "PAGES_PER_POST", 1)
+    api = FakeApi()
+    api.pages["gone"] = {}
+    ctx = _ctx(tmp_path, RouterLLM(), state_backend.ApiState(api))
+    ctx.job_id = "msg-1"
+    units.handle(
+        {
+            "job": "materialise",
+            "entities": ["stretch", "wall-drill", "gone"],
+            "origin_source_id": ORIGIN,
+        },
+        ctx,
+    )
+    assert len(api.page_posts) == 3  # two pages, then the removal
+    assert {(str(p.origin_source_id), p.origin_job_id) for p in api.page_posts} == {
+        (ORIGIN, "msg-1")
+    }
+
+
+def test_work_an_admin_started_has_no_origin(tmp_path: Path) -> None:
+    api = FakeApi()
+    llm = RouterLLM(parents={"anchor-step": "stretch"})
+
+    def ctx() -> units.RunContext:
+        return _ctx(tmp_path, llm, state_backend.ApiState(api))
+
+    decided = units.handle({"job": "consolidate", "entities": ["anchor-step"]}, ctx())
+    generated = units.handle(decided["next"][0], ctx())
+    assert all("origin_source_id" not in j for j in decided["next"] + generated["next"])
+    units.handle({"job": "materialise"}, ctx())
+    assert api.page_posts
+    assert all(p.origin_source_id is None for p in api.page_posts)
+
+
+def test_an_origin_that_is_no_uuid_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(units.JobError, match="origin_source_id"):
+        units.validate({"job": "materialise", "origin_source_id": "nope"})
+
+
+# ── The thin list (MINI-101) ──
+
+
+def test_a_consolidate_job_stores_the_thin_list_for_the_whole_corpus(
+    tmp_path: Path,
+) -> None:
+    api = FakeApi()
+    llm = RouterLLM(parents={"anchor-step": "stretch"})
+    store = state_backend.ApiState(api)
+    # an earlier job decided another entity: the list covers it too
+    units.handle(
+        {"job": "consolidate", "entities": ["wall-drill"]},
+        _ctx(tmp_path, llm, store),
+    )
+    result = units.handle(
+        {"job": "consolidate", "entities": ["anchor-step"]},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    assert set(api.thin) >= {"anchor-step", "wall-drill"}
+    assert api.thin["anchor-step"]["page"] == "stretch"
+    assert result["thin"]["total"] == len(api.thin)
+    # nothing about the corpus changed: nothing is sent again
+    again = units.handle(
+        {"job": "consolidate", "entities": ["anchor-step"]},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    assert (again["thin"]["written"], again["thin"]["removed"]) == (0, 0)
+
+
+def test_with_the_files_as_the_store_no_thin_list_is_sent(tmp_path: Path) -> None:
+    result = units.handle(
+        {"job": "consolidate", "entities": ["anchor-step"]},
+        _ctx(tmp_path, RouterLLM()),
+    )
+    assert "thin" not in result

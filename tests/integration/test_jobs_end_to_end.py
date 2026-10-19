@@ -56,6 +56,14 @@ def test_a_lesson_ends_as_stored_pages(harness: Harness, api: FakeApi) -> None:
     assert [r["slug"] for r in connection["referenced_by"]] == ["anchor-step"]
     assert connection["evidence_sources"] == [SOURCE]
 
+    # Every follow-on names the lesson as its origin, and every page write
+    # says so, with the message that wrote it (MINI-101).
+    assert {j.get("origin_source_id") for j in api.enqueued} == {SOURCE}
+    assert api.page_origins
+    assert all(o == SOURCE and str(j).startswith("m-") for o, j in api.page_origins)
+    # The consolidation stored the thin list, over the whole corpus.
+    assert api.thin and all(e["page"] for e in api.thin.values())
+
 
 def test_delivering_the_lesson_again_costs_nothing(
     harness: Harness, api: FakeApi

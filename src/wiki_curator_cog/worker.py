@@ -116,8 +116,14 @@ def job_of(body: str) -> dict[str, Any]:
     return payload
 
 
-def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
-    """Run one job against the API and send the follow-ons it names."""
+def run(
+    job: dict[str, Any], *, client: Any, state_dir: Path, run_id: str | None = None
+) -> dict[str, Any]:
+    """Run one job against the API and send the follow-ons it names.
+
+    ``run_id`` — the queue message id — is stored on the pages the job
+    writes, with the source that started its chain (MINI-101).
+    """
     export = _fetch_export()
     _require_corpus(export)
     llm, model = link.llm_from_env()
@@ -127,6 +133,7 @@ def run(job: dict[str, Any], *, client: Any, state_dir: Path) -> dict[str, Any]:
         units.StatePaths.under(state_dir),
         llm=llm,
         model=model,
+        job_id=run_id,
     )
     result = units.handle(job, ctx)
     result["usage"] = usage.usage_of(llm)
@@ -150,7 +157,9 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
     Counts are counts. What changed is an outcome, named: the references a
     link found, the folds a consolidation moved, the pages whose prose was
     generated, and the pages a materialise created, changed or removed —
-    a page rewritten identically is only counted. What a person should look
+    a page rewritten identically is only counted. A consolidation's refresh
+    of the thin list is counted too: how many are thin, and how many were
+    written and removed. What a person should look
     at is an issue: work the job paid for and could not finish — a batch the
     model answered badly, an entity whose prose failed twice — which nothing
     retries on its own, because the job itself succeeded and its message is
@@ -189,6 +198,11 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
         report.ok(done)
         for fold in result.get("folds") or []:
             report.updated("fold", str(fold))
+        thin = result.get("thin") or {}
+        if thin:
+            report.count("thin_entities", int(thin.get("total") or 0))
+            report.count("thin_written", int(thin.get("written") or 0))
+            report.count("thin_removed", int(thin.get("removed") or 0))
         if result.get("failed_batches"):
             report.issue(
                 "consolidate_batch_failed",
@@ -236,7 +250,7 @@ def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
         tempfile.TemporaryDirectory(prefix="wiki-state-") as tmp,
         deadline(budget_s),
     ):
-        result = run(job, client=_state_client(), state_dir=Path(tmp))
+        result = run(job, client=_state_client(), state_dir=Path(tmp), run_id=run_id)
         report.send(notable=record(report, job, result))
     log.info(
         "worker: done %s job=%s next=%s usage=%s",

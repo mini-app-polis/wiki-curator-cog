@@ -23,6 +23,12 @@ job                       unit                        follows with
 ``materialise``           named pages                 —
 ========================  ==========================  ===========================
 
+Every follow-on carries ``origin_source_id``, the source whose ``link`` job
+started the chain (MINI-101): a link job's follow-ons name its own source,
+every other job passes on the origin it was given, and work an admin or an
+operator started has none. ``materialise`` stores it, with the run that wrote
+them, on the pages it writes, so each revision can say what changed it.
+
 Every unit is idempotent under its pass's watermark: a statement already
 linked, an entity already decided, an entity with nothing new to integrate
 costs no model call and writes nothing. ``materialise`` calls no model; it
@@ -105,6 +111,9 @@ class RunContext:
     wiki_repo_path: Path | None = None
     #: The raw export, for passes that apply the folds themselves.
     raw_export: WcsWikiExport | None = field(default=None, repr=False)
+    #: The run writing: the queue message id on the worker, "local" for a
+    #: local command. Stored on the pages it writes (MINI-101).
+    job_id: str | None = None
 
 
 def build_context(
@@ -115,6 +124,7 @@ def build_context(
     llm: Any,
     model: str,
     wiki_repo_path: Path | None = None,
+    job_id: str | None = None,
 ) -> RunContext:
     """Apply the folds the facets state calls for, once, for this invocation."""
     facets = store.facets(paths.facets)
@@ -130,35 +140,51 @@ def build_context(
         facets=facets,
         wiki_repo_path=wiki_repo_path,
         raw_export=export,
+        job_id=job_id,
     )
 
 
-def _job(kind: str, **fields: Any) -> dict[str, Any]:
-    return {"job": kind, **fields}
+Origin = uuid.UUID | str | None
+
+
+def _job(kind: str, origin: Origin = None, **fields: Any) -> dict[str, Any]:
+    """A follow-on job; it names its origin only when there is one."""
+    job = {"job": kind, **fields}
+    if origin:
+        job["origin_source_id"] = str(origin)
+    return job
 
 
 def _entity_jobs(
-    kind: str, slugs: set[str] | list[str], per: int
+    kind: str, slugs: set[str] | list[str], per: int, origin: Origin
 ) -> list[dict[str, Any]]:
     ordered = sorted(set(slugs))
     return [
-        _job(kind, entities=ordered[i : i + per]) for i in range(0, len(ordered), per)
+        _job(kind, origin, entities=ordered[i : i + per])
+        for i in range(0, len(ordered), per)
     ]
 
 
-def _generate_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
-    return _entity_jobs("generate", slugs, GENERATE_PER_JOB)
+def _generate_jobs(
+    slugs: set[str] | list[str], origin: Origin = None
+) -> list[dict[str, Any]]:
+    return _entity_jobs("generate", slugs, GENERATE_PER_JOB, origin)
 
 
-def _materialise_jobs(slugs: set[str] | list[str]) -> list[dict[str, Any]]:
-    return _entity_jobs("materialise", slugs, MATERIALISE_PER_JOB)
+def _materialise_jobs(
+    slugs: set[str] | list[str], origin: Origin = None
+) -> list[dict[str, Any]]:
+    return _entity_jobs("materialise", slugs, MATERIALISE_PER_JOB, origin)
 
 
 # ── link ──
 
 
 def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
-    """Link one source's statements; follow with consolidate and generate."""
+    """Link one source's statements; follow with consolidate and generate.
+
+    This source is the origin of every follow-on.
+    """
     sid = uuid.UUID(str(source_id))
     statements = [s for s in link.collect_statements(ctx.export) if s.source_id == sid]
     links = ctx.store.links(ctx.paths.links)
@@ -198,8 +224,8 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
         and by_slug[slug].kind in version_of
         and not facets.is_decided(slug, version_of[by_slug[slug].kind])
     )
-    follow = ([_job("consolidate", entities=undecided)] if undecided else []) + (
-        _generate_jobs(touched)
+    follow = ([_job("consolidate", sid, entities=undecided)] if undecided else []) + (
+        _generate_jobs(touched, sid)
     )
     return {
         "job": "link",
@@ -215,11 +241,15 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
 # ── consolidate ──
 
 
-def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
+def consolidate_entities(
+    ctx: RunContext, slugs: list[str], origin: Origin = None
+) -> dict[str, Any]:
     """Decide these entities; follow with generate for each page that gained one.
 
     Run on the export with only the notes' merges applied, as the full pass
-    is, so an entity is decided by its own name and evidence.
+    is, so an entity is decided by its own name and evidence. Then, with the
+    API as the store, the thin list is refreshed for the whole corpus (see
+    :func:`_save_thin`).
     """
     raw = ctx.raw_export if ctx.raw_export is not None else ctx.export
     export, merges = identity.resolve(raw)
@@ -242,6 +272,7 @@ def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         slug: after.get(slug) for slug in slugs if before.get(slug) != after.get(slug)
     }
     gained = sorted({parent for parent in moved.values() if parent})
+    thin = _save_thin(ctx, export, facets, supports)
     return {
         "job": "consolidate",
         "entities": sorted(slugs),
@@ -250,14 +281,40 @@ def consolidate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
         "folds": sorted(
             f"{slug} → {parent or 'its own page'}" for slug, parent in moved.items()
         ),
-        "next": _generate_jobs(gained),
+        **({"thin": thin} if thin is not None else {}),
+        "next": _generate_jobs(gained, origin),
     }
+
+
+def _save_thin(
+    ctx: RunContext,
+    export: WcsWikiExport,
+    facets: consolidate.FacetsFile,
+    supports: dict[str, consolidate.Support],
+) -> dict[str, int] | None:
+    """Store the thin list, over the whole corpus, when the API is the store.
+
+    The same list ``consolidate`` writes to ``thin-review.md`` locally, built
+    from what the job already holds — the whole export, links and facets —
+    plus the prose document, for the generated definitions. No model call.
+    Elsewhere (the files, a dry run) nothing is read or written.
+    """
+    if not isinstance(ctx.store, state_backend.ApiState):
+        return None
+    prose = ctx.store.prose(ctx.paths.prose)
+    assert prose is not None
+    definitions = {e.slug: prose.definition(e.slug) for e in export.entities}
+    return ctx.store.save_thin(
+        consolidate.thin_entities(export, facets, supports, definitions)
+    )
 
 
 # ── generate ──
 
 
-def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
+def generate_entities(
+    ctx: RunContext, slugs: list[str], origin: Origin = None
+) -> dict[str, Any]:
     """Integrate these entities' pending statements. No call for one with none.
 
     A slug folded away since the job was enqueued is generated as the page it
@@ -298,14 +355,16 @@ def generate_entities(ctx: RunContext, slugs: list[str]) -> dict[str, Any]:
             for k in ("generated", "generated_slugs", "failed", "failed_slugs")
         },
         # a page gone since the job was enqueued is removed by materialise
-        "next": _materialise_jobs(set(targets) | set(skipped)),
+        "next": _materialise_jobs(set(targets) | set(skipped), origin),
     }
 
 
 # ── materialise ──
 
 
-def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any]:
+def materialise_pages(
+    ctx: RunContext, slugs: list[str] | None, origin: Origin = None
+) -> dict[str, Any]:
     """Build these pages' documents from the state as it stands, and store them.
 
     No model call. A slug folded into another page is materialised as that
@@ -313,7 +372,8 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
     slug that is no page at all is removed. ``None`` is every page, the
     linker's proposed concepts included: the local backfill, and the
     /admin/wiki rebuild — one job, since the export read every job pays
-    costs more than building the pages.
+    costs more than building the pages. The pages are stored with
+    ``origin`` and the context's ``job_id``.
     """
     links = ctx.store.links(ctx.paths.links)
     prose = ctx.store.prose(ctx.paths.prose)
@@ -356,7 +416,11 @@ def materialise_pages(ctx: RunContext, slugs: list[str] | None) -> dict[str, Any
         only=targets,
     )
     counts = ctx.store.save_pages(
-        [documents[s] for s in sorted(documents)], sorted(remove), ctx.paths.pages
+        [documents[s] for s in sorted(documents)],
+        sorted(remove),
+        ctx.paths.pages,
+        origin_source_id=origin,
+        origin_job_id=ctx.job_id,
     )
     return {
         "job": "materialise",
@@ -409,23 +473,29 @@ def validate(job: dict[str, Any]) -> str:
             )
     else:
         raise JobError(f"unknown job {kind!r}; expected one of {', '.join(JOBS)}")
+    if job.get("origin_source_id") is not None:
+        try:
+            uuid.UUID(str(job["origin_source_id"]))
+        except ValueError as exc:
+            raise JobError("origin_source_id is not a UUID") from exc
     return str(kind)
 
 
 def handle(job: dict[str, Any], ctx: RunContext) -> dict[str, Any]:
     """Run one job message. Returns its result and the jobs to enqueue next."""
     kind = validate(job)
+    origin = job.get("origin_source_id")
     if kind == "link":
         result = link_source(ctx, job["source_id"])
     elif kind == "consolidate":
-        result = consolidate_entities(ctx, [str(e) for e in job["entities"]])
+        result = consolidate_entities(ctx, [str(e) for e in job["entities"]], origin)
     elif kind == "materialise":
         named = job.get("entities")
         result = materialise_pages(
-            ctx, None if named is None else [str(e) for e in named]
+            ctx, None if named is None else [str(e) for e in named], origin
         )
     else:
         named = job.get("entities") or [job["entity"]]
-        result = generate_entities(ctx, [str(e) for e in named])
+        result = generate_entities(ctx, [str(e) for e in named], origin)
     LOG.info("unit.done job=%s next=%s", kind, len(result.get("next", [])))
     return result

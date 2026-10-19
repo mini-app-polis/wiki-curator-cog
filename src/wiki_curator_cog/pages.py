@@ -246,6 +246,32 @@ def _sources(entity: WcsEntity, indexes: ExportIndexes) -> list[WcsWikiPageCitat
     return sorted(cited, key=lambda c: c.source_slug)
 
 
+def display_aliases(name: str, aliases: Iterable[str]) -> list[str]:
+    """The names a page lists under "also called", in their stored order.
+
+    Entities carry slug-form aliases for matching (link.py resolves targets
+    through them, and identity.apply_merges adds a folded entity's names), so
+    they stay on the entity. A reader needs each name once (MINI-104): this
+    leaves out an alias equal to the page's name ignoring case, a repeat
+    ignoring case, and one that is only the slug form of the page's name or
+    of another alias listed ("lateral-push" beside "lateral push").
+    """
+    listed = [a.strip() for a in aliases if a and a.strip()]
+    own = name.strip().casefold()
+    slug_forms = {slugify(name)} | {slugify(a) for a in listed if a != slugify(a)}
+    seen: set[str] = set()
+    kept: list[str] = []
+    for alias in listed:
+        key = alias.casefold()
+        if key == own or key in seen:
+            continue
+        if alias == slugify(alias) and alias in slug_forms:
+            continue
+        seen.add(key)
+        kept.append(alias)
+    return kept
+
+
 def page_document(
     entity: WcsEntity,
     indexes: ExportIndexes,
@@ -300,7 +326,7 @@ def page_document(
         name=entity.canonical_name,
         kind=entity.kind,
         status=entity.status,
-        aliases=list(entity.aliases),
+        aliases=display_aliases(entity.canonical_name, entity.aliases),
         teachers=_collect_entity_teachers(entity.id, indexes),
         definition=neutral(entity.overview_md.strip()),
         in_practice=neutral(context.strip()),

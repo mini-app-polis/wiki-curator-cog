@@ -658,3 +658,31 @@ def test_thin_review_shows_what_was_said_where_and_where_it_went() -> None:
     assert "> Stay over your feet.\n> — 2026-01-01 · lesson" in folded
     # anchor has two sources: not thin
     assert "### Anchor\n" not in text
+
+
+def test_the_thin_list_is_what_the_review_shows() -> None:
+    """The API's thin list (MINI-101) and thin-review.md are one selection."""
+    facets = consolidate.FacetsFile()
+    facets.record(STATIONARY, ANCHOR, "", "fake")
+    facets.record(DIRECTIONAL, None, "", "fake")
+    facets.record(ANCHOR, None, "", "fake")
+    supports = consolidate.support(_export())
+    definitions = {DIRECTIONAL: "Intent kept through the anchor."}
+    thin = consolidate.thin_entities(_export(), facets, supports, definitions)
+    text = consolidate.thin_review_markdown(_export(), facets, supports, definitions)
+
+    # the review groups them (own page first); the list is by name
+    assert {f"### {t.name}" for t in thin} == {
+        line for line in text.splitlines() if line.startswith("### ")
+    }
+    by_slug = {t.slug: t for t in thin}
+    assert set(by_slug) == {DIRECTIONAL, STATIONARY}
+    assert by_slug[DIRECTIONAL].page == DIRECTIONAL
+    assert by_slug[DIRECTIONAL].definition == "Intent kept through the anchor."
+    stationary = by_slug[STATIONARY]
+    assert (stationary.page, stationary.same) == (ANCHOR, False)
+    assert stationary.sources == 1
+    quote = stationary.quotes[0]
+    assert quote.text == "Stay over your feet."
+    assert (quote.session_date, quote.source_title) == (dt.date(2026, 1, 1), "lesson")
+    assert quote.source_id is not None

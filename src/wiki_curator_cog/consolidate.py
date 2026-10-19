@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from mini_app_polis import logger as log
+from mini_app_polis.api.contract import WcsWikiThinEntity, WcsWikiThinQuote
 from mini_app_polis.llm import LLMMessage
 from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
@@ -648,35 +649,39 @@ def _page_of(slug: str, parents: dict[str, str]) -> str | None:
     return None if end in seen and end != slug else end
 
 
-def thin_review_markdown(
+def thin_entities(
     export: WcsWikiExport,
     facets: FacetsFile,
     supports: dict[str, Support],
     definitions: dict[str, str] | None = None,
-) -> str:
-    """Every thin entity, for a person to scan: is any of it important?
+) -> list[WcsWikiThinEntity]:
+    """Every thin entity, by name: what was said, where, and where it went.
 
     Thin means taught in one source at most and referred to at most once
-    elsewhere. Each entry gives what was said, where it came from and where
-    it ended up — its own page, or folded into a broader one — so an idea
-    that matters more than the corpus shows can be given weight with a note.
-    Entities on their own page come first: they are the likeliest to be
-    asides rather than concepts.
+    elsewhere; only decided entities of a foldable kind are listed. Each
+    gives the page it ended on — its own, or the broader one it folds into —
+    its definition (the generated one, else the export's overview), and
+    what each source said about it. The API stores this list for
+    /admin/wiki (MINI-101); :func:`thin_review_markdown` renders the same.
     """
-    from .render import _entity_path  # the renderer owns paths
-
     definitions = definitions or {}
     by_slug = {e.slug: e for e in export.entities}
     sources = {s.id: s for s in export.sources}
-    said: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    said: dict[str, list[WcsWikiThinQuote]] = defaultdict(list)
     id_to_slug = {e.id: e.slug for e in export.entities}
     for a in export.attributions:
         slug = id_to_slug.get(a.entity_id)
         src = sources.get(a.source_id)
         if slug is None or src is None:
             continue
-        when = src.session_date.isoformat() if src.session_date else "undated"
-        said[slug].append((f"{when} · {src.title or 'untitled'}", a.prose.strip()))
+        said[slug].append(
+            WcsWikiThinQuote(
+                text=a.prose.strip(),
+                source_id=src.id,
+                session_date=src.session_date,
+                source_title=src.title or "",
+            )
+        )
 
     parents = facets.parents()
     thin = sorted(
@@ -690,35 +695,78 @@ def thin_review_markdown(
         ),
         key=lambda slug: by_slug[slug].canonical_name.lower(),
     )
-    standalone = [slug for slug in thin if slug not in parents]
-    folded = [slug for slug in thin if slug in parents]
-
-    def block(slug: str) -> list[str]:
+    out: list[WcsWikiThinEntity] = []
+    for slug in thin:
         e = by_slug[slug]
         s = supports[slug]
-        out = [f"### {e.canonical_name}", ""]
-        page = _page_of(slug, parents) if slug in parents else slug
+        folded = slug in parents
+        end = _page_of(slug, parents) if folded else slug
+        # a fold that ends on a cycle or on no entity leaves it standing
+        page = end if end in by_slug else slug
+        out.append(
+            WcsWikiThinEntity(
+                slug=slug,
+                name=e.canonical_name,
+                kind=e.kind,
+                sources=s.sources,
+                references=s.references,
+                page=page,
+                same=folded and bool(facets.entities[slug].get("same")),
+                definition=" ".join(
+                    (definitions.get(slug) or e.overview_md or "").split()
+                ),
+                quotes=said.get(slug, []),
+            )
+        )
+    return out
+
+
+def thin_review_markdown(
+    export: WcsWikiExport,
+    facets: FacetsFile,
+    supports: dict[str, Support],
+    definitions: dict[str, str] | None = None,
+) -> str:
+    """Every thin entity, for a person to scan: is any of it important?
+
+    The :func:`thin_entities` list as markdown. Each entry gives what was
+    said, where it came from and where it ended up — its own page, or folded
+    into a broader one — so an idea that matters more than the corpus shows
+    can be given weight with a note. Entities on their own page come first:
+    they are the likeliest to be asides rather than concepts.
+    """
+    from .render import _entity_path  # the renderer owns paths
+
+    by_slug = {e.slug: e for e in export.entities}
+    parents = facets.parents()
+    thin = thin_entities(export, facets, supports, definitions)
+    standalone = [t for t in thin if t.slug not in parents]
+    folded = [t for t in thin if t.slug in parents]
+
+    def block(t: WcsWikiThinEntity) -> list[str]:
+        out = [f"### {t.name}", ""]
+        page = _page_of(t.slug, parents) if t.slug in parents else t.slug
         if page and page in by_slug:
             target = by_slug[page]
             where = (
                 "own page"
-                if page == slug
+                if page == t.slug
                 else f"folded into **{target.canonical_name}**"
-                + (" as another name" if facets.entities[slug].get("same") else "")
+                + (" as another name" if t.same else "")
             )
             out.append(
                 f"{where} · [{_entity_path(target)}](../{_entity_path(target)}) · "
-                f"{e.kind} · {s.sources} source, {s.references} references"
+                f"{t.kind} · {t.sources} source, {t.references} references"
             )
         else:
-            out.append(f"{e.kind} · {s.sources} source, {s.references} references")
+            out.append(f"{t.kind} · {t.sources} source, {t.references} references")
         out.append("")
-        definition = " ".join((definitions.get(slug) or e.overview_md or "").split())
-        if definition:
-            out += [f"**Definition.** {definition}", ""]
-        for where_from, prose in said.get(slug, []):
-            out.append(f"> {prose}" if prose else "> _(named without elaboration)_")
-            out.append(f"> — {where_from}")
+        if t.definition:
+            out += [f"**Definition.** {t.definition}", ""]
+        for q in t.quotes:
+            when = q.session_date.isoformat() if q.session_date else "undated"
+            out.append(f"> {q.text}" if q.text else "> _(named without elaboration)_")
+            out.append(f"> — {when} · {q.source_title or 'untitled'}")
             out.append("")
         return out
 
@@ -737,16 +785,16 @@ def thin_review_markdown(
         "No broader page was found. The likeliest to be a note on another topic.",
         "",
     ]
-    for slug in standalone:
-        lines += block(slug)
+    for t in standalone:
+        lines += block(t)
     lines += [
         f"## Folded into a broader page ({len(folded)})",
         "",
         "Kept as a line under that page's Details (or as another name).",
         "",
     ]
-    for slug in folded:
-        lines += block(slug)
+    for t in folded:
+        lines += block(t)
     return "\n".join(lines)
 
 

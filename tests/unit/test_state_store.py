@@ -18,6 +18,8 @@ from mini_app_polis.api.contract import (
     WcsWikiPagesWriteResult,
     WcsWikiProseState,
     WcsWikiStateWriteResult,
+    WcsWikiThinState,
+    WcsWikiThinWriteResult,
 )
 
 from wiki_curator_cog import main, state_store
@@ -45,6 +47,23 @@ class FakeApi:
         #: Page documents as the API stores them, by slug (MINI-96).
         self.pages: dict[str, dict[str, Any]] = {}
         self.page_posts: list[Any] = []
+        #: Thin entities as the API stores them, by slug (MINI-101).
+        self.thin: dict[str, dict[str, Any]] = {}
+        self.thin_posts: list[Any] = []
+
+    def get_wcs_wiki_thin(self) -> WcsWikiThinState:
+        return WcsWikiThinState.model_validate(
+            {"entities": [self.thin[s] for s in sorted(self.thin)]}
+        )
+
+    def put_wcs_wiki_thin(self, payload: Any) -> WcsWikiThinWriteResult:
+        self.thin_posts.append(payload)
+        for e in payload.entities:
+            self.thin[e.slug] = e.model_dump(mode="json")
+        gone = [s for s in payload.remove if self.thin.pop(s, None) is not None]
+        return WcsWikiThinWriteResult(
+            written=len(payload.entities), removed=len(gone), total=len(self.thin)
+        )
 
     def put_wcs_wiki_pages(self, payload: Any) -> WcsWikiPagesWriteResult:
         self.page_posts.append(payload)

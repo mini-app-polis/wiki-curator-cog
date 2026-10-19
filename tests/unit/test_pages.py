@@ -70,6 +70,54 @@ def test_a_document_cites_its_sources() -> None:
     assert sorted(r.skill for r in doc.requires) == ["", "Settle over the foot"]
 
 
+@pytest.mark.parametrize(
+    ("name", "aliases", "expected"),
+    [
+        # MINI-104: the lateral-pushing page as seen on 2026-10-18.
+        (
+            "lateral pushing",
+            [
+                "lateral-pushing",
+                "lateral push",
+                "lateral-push",
+                "lateral pushing direction",
+                "lateral-pushing-direction",
+            ],
+            ["lateral push", "lateral pushing direction"],
+        ),
+        # The page's own name, in any case, is not an alias.
+        (
+            "Anchor Step",
+            ["anchor step", "ANCHOR STEP", "Anchor Footwork"],
+            ["Anchor Footwork"],
+        ),
+        # A slug form with no spelled-out twin is the only form of that name.
+        ("Anchor Step", ["anchor-footwork"], ["anchor-footwork"]),
+        # Repeats ignoring case go; the first spelling stays.
+        ("Sugar Push", ["Push Break", "push break"], ["Push Break"]),
+        ("Sugar Push", [], []),
+    ],
+)
+def test_also_called_leaves_out_slug_forms_and_repeats(
+    name: str, aliases: list[str], expected: list[str]
+) -> None:
+    assert pages.display_aliases(name, aliases) == expected
+
+
+def test_a_document_lists_aliases_once_but_matching_keeps_them_all() -> None:
+    export = _export()
+    anchor = next(e for e in export.entities if e.slug == "anchor-step")
+    anchor.aliases = ["anchor-step", "Anchor Footwork", "anchor-footwork"]
+    indexes = build_indexes(export)
+    doc = pages.page_document(indexes.entities_by_slug["anchor-step"], indexes)
+    assert doc.aliases == ["Anchor Footwork"]
+    assert indexes.entities_by_slug["anchor-step"].aliases == [
+        "anchor-step",
+        "Anchor Footwork",
+        "anchor-footwork",
+    ]
+
+
 def test_generated_prose_links_survive_the_export() -> None:
     export = _export()
     slug = build_indexes(export).source_slug_by_id[SOURCE]

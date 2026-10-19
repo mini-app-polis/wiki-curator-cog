@@ -129,7 +129,9 @@ the state folder) guides the call: thin entities fold readily, nothing folds int
 less-supported page, and thin entities with no home are listed at the end of
 the review. `thin-review.md`, written beside the facets file, lists every thin
 entity — what was said, which source, and where it ended up — for a private
-scan; give one weight with a note. A rerun with nothing new to decide makes no
+scan; give one weight with a note. With the API as the store, the same list is
+stored there for /admin/wiki (MINI-101), and every worker `consolidate` job
+refreshes it over the whole corpus. A rerun with nothing new to decide makes no
 model calls, so it is a free way to refresh both reviews.
 
 ```bash
@@ -191,7 +193,10 @@ unknown fields the same way, and a refused write stops the run.
 result and the jobs that should follow out. `link` takes one source;
 `consolidate`, `generate` and `materialise` take named entities. Each is a
 no-op when its watermark says there is nothing new, so a retried or
-duplicated message costs nothing. The `job` command runs one locally, against
+duplicated message costs nothing. Every follow-on carries `origin_source_id`,
+the source whose `link` started the chain (none for admin or operator work),
+and `materialise` stores it on each page write with the run that wrote it: the
+queue message id, or `local` (MINI-101). The `job` command runs one locally, against
 production and the state store — the way to see what one new note costs:
 
 ```bash
@@ -295,7 +300,7 @@ Three layers:
 
 1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`; one timing line per job.
 2. **Sentry** — the exception that fails a job (the shared cogs project, tagged `service:wiki-curator-cog`).
-3. **Run report** — one per job (`wiki-link`, `wiki-generate`, …), as every cog sends one per run. It names what changed: references a link found, folds a consolidation moved, pages whose prose was generated, and pages a materialise created, changed or removed. A page rewritten identically only counts toward `pages_unchanged`. It also gives model calls and cost as counts, posted whenever the job did something (pages written or removed, statements linked, decisions or prose made, a model call, a follow-on queued) and a log line only when it found nothing to do, a WARN when it finished with paid-for work left undone (a failed link or consolidation batch, an entity whose prose failed), and sent on the way out when a job raises. An unreadable message, which never reaches a job, is reported once by the worker.
+3. **Run report** — one per job (`wiki-link`, `wiki-generate`, …), as every cog sends one per run. It names what changed: references a link found, folds a consolidation moved, pages whose prose was generated, and pages a materialise created, changed or removed. A page rewritten identically only counts toward `pages_unchanged`. A `consolidate` job also counts its thin-list refresh (`thin_entities`, `thin_written`, `thin_removed`). It also gives model calls and cost as counts, posted whenever the job did something (pages written or removed, statements linked, decisions or prose made, a model call, a follow-on queued) and a log line only when it found nothing to do, a WARN when it finished with paid-for work left undone (a failed link or consolidation batch, an entity whose prose failed), and sent on the way out when a job raises. An unreadable message, which never reaches a job, is reported once by the worker.
 4. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (from `module "wiki_curator"` in mini-app-polis/infra) says so.
 
 ---
