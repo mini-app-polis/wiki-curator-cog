@@ -597,6 +597,28 @@ def without_word_talk(definition: str) -> str:
     return " ".join(kept) if kept else definition
 
 
+_CITATION = re.compile(r"\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\)")
+_AFTER_STOP = re.compile(r"([.!?])(\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\))")
+
+
+def tidy_citations(context: str) -> str:
+    """Each citation once, before its sentence's full stop.
+
+    A rewrite sometimes cites one source after every sentence, and puts the
+    citation after the full stop ("early. ([[sources/x]])"). The same group
+    is kept only at its last place, and moved inside the sentence.
+    """
+    groups = [m.group(0).strip() for m in _CITATION.finditer(context)]
+    for group in set(groups):
+        while context.count(group) > 1:
+            at = context.index(group)
+            start = at
+            while start > 0 and context[start - 1] == " ":
+                start -= 1
+            context = context[:start] + context[at + len(group) :]
+    return _AFTER_STOP.sub(lambda m: m.group(2) + m.group(1), context).strip()
+
+
 def shape_problems(definition: str, context: str) -> list[str]:
     """What keeps prose out of the shape, in words the model can act on."""
     problems: list[str] = []
@@ -809,6 +831,7 @@ def generate_one(
     if corpus.pages is not None:
         definition = corpus.pages.repair(definition)
         context = corpus.pages.repair(context)
+    context = tidy_citations(context)
     with guard:
         _record(
             prose,
@@ -999,7 +1022,7 @@ def run_condense(
         if corpus.pages is not None:
             definition = corpus.pages.repair(definition)
             context = corpus.pages.repair(context)
-        return definition, context
+        return definition, tidy_citations(context)
 
     def work(entity: WcsEntity) -> None:
         try:
@@ -1143,7 +1166,7 @@ def _by_name(facets: Iterable[Any], *, reverse: bool = False) -> list[Any]:
 
 
 def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
-    """Each generated overview, for reading before rendering."""
+    """Each generated overview, and what it replaced, for reading."""
     lines = [f"# Generation review — version {GENERATOR_VERSION}", ""]
     for slug in slugs:
         entry = prose.current(slug)
@@ -1161,4 +1184,19 @@ def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
             f"**In practice.** {entry.get('context') or '_(none)_'}",
             "",
         ]
+        before = (
+            entry["revisions"][-2] if len(entry.get("revisions") or []) > 1 else None
+        )
+        if before is not None:
+            # What the run replaced, to read for drift in meaning (MINI-92).
+            if before.get("definition") != entry.get("definition"):
+                lines += [
+                    f"_Definition before:_ {before.get('definition') or '(empty)'}",
+                    "",
+                ]
+            if before.get("context") != entry.get("context"):
+                lines += [
+                    f"_In practice before:_ {before.get('context') or '(none)'}",
+                    "",
+                ]
     return "\n".join(lines)

@@ -804,6 +804,32 @@ def test_a_rejected_rewrite_gets_one_more_try_told_what_to_fix() -> None:
     assert prose.context("anchor-step") == "Short point. Another short point."
 
 
+def test_a_citation_is_kept_once_before_the_full_stop() -> None:
+    """The sugar push rewrite cited one source after every sentence."""
+    src = "([[sources/2026-09-23-level-3-week-4]])"
+    messy = f"First point. {src} Second point. {src} Third point. {src}"
+    assert (
+        generate.tidy_citations(messy)
+        == f"First point. Second point. Third point {src}."
+    )
+    two = "One ([[sources/a]], [[sources/b]]). Two ([[sources/c]])."
+    assert generate.tidy_citations(two) == two
+
+
+def test_the_review_shows_what_a_rewrite_replaced() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    before = prose.context("anchor-step")
+    entry = prose.entities["anchor-step"]
+    entry["revisions"] = [{"by": "llm", "definition": "Def.", "context": before}]
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One point. Another."), model="m"
+    )
+    review = generate.review_markdown(prose, result["slugs"])
+    assert "**In practice.** One point. Another." in review
+    assert f"_In practice before:_ {before}" in review
+    assert "_Definition before:_" not in review
+
+
 def test_shape_problems_say_what_to_fix() -> None:
     long = "Word " + " ".join(["word"] * 34) + "."
     assert generate.shape_problems("D.", f"{long} Two; three — four.") == [
