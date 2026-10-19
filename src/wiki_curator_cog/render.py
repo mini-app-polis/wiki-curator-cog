@@ -1038,6 +1038,7 @@ def render_bundle(
     context: dict[uuid.UUID, str] | None = None,
     details: dict[uuid.UUID, list[tuple[Any, ...]]] | None = None,
     documents: dict[str, Any] | None = None,
+    merges: Any = None,
 ) -> tuple[dict[str, str], RenderStats]:
     """Render the full wiki bundle. Keys are repo-relative paths.
 
@@ -1046,7 +1047,9 @@ def render_bundle(
 
     Entity pages are written from their page documents (MINI-96):
     ``documents``, by slug, when the caller built them — the same ones
-    ``materialise`` stores — or built here from the other arguments.
+    ``materialise`` stores — or built here from the other arguments, with
+    ``merges`` (from :mod:`wiki_curator_cog.identity`) for what each page
+    folded in.
     """
     from . import pages  # pages builds on this module
 
@@ -1075,7 +1078,7 @@ def render_bundle(
 
     if documents is None:
         documents = pages.build_documents(
-            export, overlay=overlay, context=context, details=details
+            export, overlay=overlay, context=context, details=details, merges=merges
         )
     paths = pages.paths_of(export)
     for entity in sorted(export.entities, key=lambda e: e.slug):

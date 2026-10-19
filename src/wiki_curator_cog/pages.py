@@ -246,7 +246,9 @@ def _sources(entity: WcsEntity, indexes: ExportIndexes) -> list[WcsWikiPageCitat
     return sorted(cited, key=lambda c: c.source_slug)
 
 
-def display_aliases(name: str, aliases: Iterable[str]) -> list[str]:
+def display_aliases(
+    name: str, aliases: Iterable[str], hidden: Iterable[str] = ()
+) -> list[str]:
     """The names a page lists under "also called", in their stored order.
 
     Entities carry slug-form aliases for matching (link.py resolves targets
@@ -255,8 +257,16 @@ def display_aliases(name: str, aliases: Iterable[str]) -> list[str]:
     leaves out an alias equal to the page's name ignoring case, a repeat
     ignoring case, and one that is only the slug form of the page's name or
     of another alias listed ("lateral-push" beside "lateral push").
+
+    ``hidden`` are the names of facets folded into the page, and their own
+    aliases (``Merges.facet_names``): matching needs them, but a facet is a
+    part of the idea, not another name for it, so any alias whose slug form
+    is one of them is left out too ("toe strike" on the strike page).
     """
-    listed = [a.strip() for a in aliases if a and a.strip()]
+    gone = {slugify(h) for h in hidden if h and h.strip()}
+    listed = [
+        a.strip() for a in aliases if a and a.strip() and slugify(a.strip()) not in gone
+    ]
     own = name.strip().casefold()
     slug_forms = {slugify(name)} | {slugify(a) for a in listed if a != slugify(a)}
     seen: set[str] = set()
@@ -283,13 +293,15 @@ def page_document(
     folded: Iterable[str] = (),
     evidence: Iterable[uuid.UUID] = (),
     paths: dict[str, str] | None = None,
+    hidden_aliases: Iterable[str] = (),
 ) -> WcsWikiPage:
     """One entity's page as a document.
 
     ``details`` are the facets folded into it, as ``(name, gist, depth)``;
     ``detail_slugs`` names each one's own slug. ``folded`` is every slug
     folded into it, facets and same-idea names alike, so a lookup of one can
-    be served this page (MINI-100). ``evidence`` is every source
+    be served this page (MINI-100). ``hidden_aliases`` are the facets'
+    names, left out of "also called" (:func:`display_aliases`). ``evidence`` is every source
     the page's prose was built from — its own statements' and those of the
     statements elsewhere that refer to it. With an ``overlay`` the page gets
     Mentions and Referenced by. ``paths`` (every page's repo path, by slug)
@@ -326,7 +338,7 @@ def page_document(
         name=entity.canonical_name,
         kind=entity.kind,
         status=entity.status,
-        aliases=display_aliases(entity.canonical_name, entity.aliases),
+        aliases=display_aliases(entity.canonical_name, entity.aliases, hidden_aliases),
         teachers=_collect_entity_teachers(entity.id, indexes),
         definition=neutral(entity.overview_md.strip()),
         in_practice=neutral(context.strip()),
@@ -391,6 +403,7 @@ def build_documents(
     paths = paths_of(export)
     wanted = set(only) if only is not None else None
     facets = getattr(merges, "facets", None) or {}
+    facet_names = getattr(merges, "facet_names", None) or {}
     folded: dict[str, list[str]] = {}
     for name, into in (getattr(merges, "by_slug", None) or {}).items():
         folded.setdefault(into, []).append(name)
@@ -408,6 +421,7 @@ def build_documents(
             folded=folded.get(entity.slug, ()),
             evidence=(evidence or {}).get(entity.slug, set()),
             paths=paths,
+            hidden_aliases=facet_names.get(entity.id, ()),
         )
     return out
 
