@@ -1,3 +1,10 @@
+# [3.9.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.8.0...v3.9.0) (2026-10-19)
+
+
+### Features
+
+* **wcs:** a wiki-operator role and the wiki-curator-deploy machine for rebuilds after a deploy (MINI-109) ([6768b61](https://github.com/mini-app-polis/wiki-curator-cog/commit/6768b61463f746ffca2c85694358247214ca565e))
+
 # [3.8.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.7.1...v3.8.0) (2026-10-19)
 
 
