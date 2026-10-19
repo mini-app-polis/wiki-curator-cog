@@ -331,6 +331,47 @@ def test_a_consolidate_job_stores_the_thin_list_for_the_whole_corpus(
     assert (again["thin"]["written"], again["thin"]["removed"]) == (0, 0)
 
 
+def test_a_link_job_refreshes_the_thin_list(tmp_path: Path) -> None:
+    """New references change what is thin, so a link that linked refreshes it."""
+    api = FakeApi()
+    llm = RouterLLM()
+    linked = units.handle(
+        {"job": "link", "source_id": ORIGIN},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    assert linked["linked"] > 0
+    assert "thin" in linked and linked["thin"]["total"] == len(api.thin)
+    posts = len(api.thin_posts)
+    # Delivered again: nothing newly linked, nothing read or written.
+    again = units.handle(
+        {"job": "link", "source_id": ORIGIN},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    assert "thin" not in again
+    assert len(api.thin_posts) == posts
+
+
+def test_rebuilding_every_page_refreshes_the_thin_list(tmp_path: Path) -> None:
+    """The /admin/wiki rebuild is the free way to bring the list up to date."""
+    api = FakeApi()
+    llm = RouterLLM(parents={"anchor-step": "stretch"})
+    units.handle(
+        {"job": "consolidate", "entities": ["anchor-step", "wall-drill"]},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    api.thin.clear()
+    named = units.handle(
+        {"job": "materialise", "entities": ["stretch"]},
+        _ctx(tmp_path, llm, state_backend.ApiState(api)),
+    )
+    assert "thin" not in named and not api.thin
+    every = units.handle(
+        {"job": "materialise"}, _ctx(tmp_path, llm, state_backend.ApiState(api))
+    )
+    assert every["thin"]["total"] == len(api.thin) > 0
+    assert api.thin["anchor-step"]["page"] == "stretch"
+
+
 def test_with_the_files_as_the_store_no_thin_list_is_sent(tmp_path: Path) -> None:
     result = units.handle(
         {"job": "consolidate", "entities": ["anchor-step"]},

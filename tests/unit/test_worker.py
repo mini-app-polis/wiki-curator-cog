@@ -368,6 +368,22 @@ def test_a_consolidation_counts_its_thin_list() -> None:
     ) == (12, 2, 1)
 
 
+@pytest.mark.parametrize(
+    ("job", "result"),
+    [
+        ({"job": "link", "source_id": SOURCE}, {"linked": 3}),
+        ({"job": "materialise"}, {"written": 9}),
+    ],
+)
+def test_any_job_counts_a_thin_list_refresh(job: dict, result: dict) -> None:
+    report = _Report()
+    worker.record(
+        report, job, {**result, "thin": {"total": 5, "written": 1, "removed": 0}}
+    )
+    assert report.counts["thin_entities"] == 5
+    assert report.counts["thin_written"] == 1
+
+
 def test_the_worker_stores_its_message_id_on_the_pages(tmp_path: Path) -> None:
     api = Api()
     with (

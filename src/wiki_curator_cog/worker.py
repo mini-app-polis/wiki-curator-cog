@@ -157,9 +157,9 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
     Counts are counts. What changed is an outcome, named: the references a
     link found, the folds a consolidation moved, the pages whose prose was
     generated, and the pages a materialise created, changed or removed —
-    a page rewritten identically is only counted. A consolidation's refresh
-    of the thin list is counted too: how many are thin, and how many were
-    written and removed. What a person should look
+    a page rewritten identically is only counted. A refresh of the thin list
+    (consolidate, link, the every-page rebuild) is counted too: how many are
+    thin, and how many were written and removed. What a person should look
     at is an issue: work the job paid for and could not finish — a batch the
     model answered badly, an entity whose prose failed twice — which nothing
     retries on its own, because the job itself succeeded and its message is
@@ -198,11 +198,6 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
         report.ok(done)
         for fold in result.get("folds") or []:
             report.updated("fold", str(fold))
-        thin = result.get("thin") or {}
-        if thin:
-            report.count("thin_entities", int(thin.get("total") or 0))
-            report.count("thin_written", int(thin.get("written") or 0))
-            report.count("thin_removed", int(thin.get("removed") or 0))
         if result.get("failed_batches"):
             report.issue(
                 "consolidate_batch_failed",
@@ -231,6 +226,11 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
             report.updated("page", str(slug))
         for slug in result.get("removed_slugs") or []:
             report.removed("page", str(slug))
+    thin = result.get("thin") or {}
+    if thin:
+        report.count("thin_entities", int(thin.get("total") or 0))
+        report.count("thin_written", int(thin.get("written") or 0))
+        report.count("thin_removed", int(thin.get("removed") or 0))
     return bool(done or calls or enqueued)
 
 
