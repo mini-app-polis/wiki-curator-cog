@@ -12,6 +12,12 @@ lesson. But if a page's overview was edited by hand, the next run starts from
 the page as it stands — the edit is noticed (it matches no revision this pass
 wrote), kept in the revision history, and integrated on top of.
 
+**Notes outrank the page.** A statement from an authored note (session
+type ``correction``) is shown to the model as from a note, and the prompt
+puts a note's word on what an idea is ahead of the current definition
+(MINI-92). Raising :data:`NOTE_RULE_VERSION` re-sends every note's
+statements, so only the pages notes speak to are regenerated.
+
 **Two kinds of evidence.** An entity's own statements (what sources said
 about it) and the statements that refer to it (from the linking pass) — the
 second is what gives *connection*, which almost nothing is "about", a
@@ -61,6 +67,16 @@ LOG = log.get_logger()
 #: from scratch. Entities generated under another version start over.
 GENERATOR_VERSION = "4"
 
+#: The session type of an authored note (transcription-cog): a teacher's
+#: deliberate word on what the wiki should say, which the model is told
+#: outranks the current text (MINI-92).
+NOTE_SESSION_TYPE = "correction"
+#: Raised when the prompt changes how notes are read. A note's statements
+#: carry it in their key, so raising it makes them pending again: the next
+#: run regenerates only the pages a note speaks to, on top of their current
+#: text, instead of every page as :data:`GENERATOR_VERSION` would.
+NOTE_RULE_VERSION = "1"
+
 #: The shape the prose must keep (prompt revision 4.1, 2026-10-16). Over
 #: these limits a result gets one condense call before it is stored. Word
 #: counts are generous: the prompt asks for ~40 and ~80.
@@ -99,6 +115,9 @@ class Evidence:
     #: The statement's source, for the page's evidence (MINI-96). Not shown
     #: to the model.
     source_id: uuid.UUID | None = None
+    #: From an authored note, not a lesson: shown to the model as
+    #: ``"from": "note"``.
+    note: bool = False
 
     def as_prompt(self) -> dict[str, str]:
         """The fields the model is shown."""
@@ -110,6 +129,8 @@ class Evidence:
             "role": self.role,
             "text": self.text,
         }
+        if self.note:
+            out["from"] = "note"
         if self.role == "refers":
             out["about"] = self.subject
         return out
@@ -225,10 +246,13 @@ def build_corpus(
     instructor_ids = _instructor_ids(export)
     statements = link.collect_statements(export)
     by_key = {s.key: s for s in statements}
+    notes = {src.id for src in export.sources if src.session_type == NOTE_SESSION_TYPE}
 
     def evidence(s: link.Statement, role: str) -> Evidence:
+        note = s.source_id in notes
         return Evidence(
-            key=s.key,
+            # A note's statement is watermarked under the note rule too.
+            key=f"{s.key}#note-{NOTE_RULE_VERSION}" if note else s.key,
             date=s.session_date.isoformat() if s.session_date else "",
             teacher=_teacher(instructor_ids.get(s.key), s.source_id, indexes),
             source_slug=indexes.source_slug_by_id.get(s.source_id, "")
@@ -238,6 +262,7 @@ def build_corpus(
             subject=_link(by_slug.get(s.subject_slug)),
             text=s.text,
             source_id=s.source_id,
+            note=note,
         )
 
     corpus = Corpus(
@@ -459,6 +484,11 @@ Rules:
 - Do not drop a point the current text makes unless a better one replaces \
 it or a newer statement contradicts it. Most new statements will not change \
 a good definition.
+- A statement with "from": "note" is a teacher's deliberate word on what \
+this page should say. Where a note says what this idea is, the definition \
+says what the note says, leading with the meaning the note puts first, even \
+when the current definition reads well. A sense the note does not reject \
+stays, after the main one or in the context.
 - Newer statements win. If a newer one contradicts an older idea, state the \
 newer idea; mention the change only if it is itself worth knowing.
 - Name a teacher only when teachers genuinely disagree.
@@ -469,6 +499,8 @@ context only, link at most two of the most important, exactly as given in \
 - In the context only, cite sparingly: at most three citations, each the \
 exact source link given, e.g. ([[sources/2026-03-01-anchor-step]]). Never \
 invent a source, fact or quote.
+- Say what the thing is, never how the word is used: no "the term", "the \
+word", "is used in two senses", "can also mean".
 - No headings, no bullet lists, no preamble. Never end with "See also" or \
 any list of related pages — the page lists those itself. Do not mention \
 statements, sources, lessons or this process.

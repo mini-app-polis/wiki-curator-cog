@@ -158,7 +158,9 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 Dollars use a per-model default price; set `LLM_PRICE_INPUT_PER_MTOK` and
 `LLM_PRICE_OUTPUT_PER_MTOK` to override. Version bumps are the expensive
 moves: raising `LINKER_VERSION` or `GENERATOR_VERSION` replays the whole
-corpus. `consolidate` keeps one version per kind group
+corpus. `NOTE_RULE_VERSION` is the cheap one: raising it re-sends only the
+authored notes' statements, so only the pages notes speak to are
+regenerated. `consolidate` keeps one version per kind group
 (`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
 ### Where the state lives: the API (ADR-006, MINI-89, MINI-94)
@@ -293,7 +295,9 @@ limit is the account's rate limit — rate-limited calls are retried.
 
 The page is the base: if an overview was edited on the page, the next run
 builds on the edit rather than replacing it. Editing is optional —
-corrections normally arrive as notes.
+corrections normally arrive as notes. A note outranks the page: the model
+sees which statements come from notes, and where a note says what an idea
+is, the definition follows it (MINI-92).
 
 ---
 
