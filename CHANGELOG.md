@@ -1,3 +1,10 @@
+# [3.10.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.9.0...v3.10.0) (2026-10-19)
+
+
+### Features
+
+* In practice keeps to one idea per sentence, and condense can try a sample first (MINI-92) ([8f29b6b](https://github.com/mini-app-polis/wiki-curator-cog/commit/8f29b6b028f5933f18b989aeeb8a8ad711a45471))
+
 # [3.9.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.8.0...v3.9.0) (2026-10-19)
 
 
