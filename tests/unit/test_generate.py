@@ -981,3 +981,91 @@ def test_a_local_link_or_consolidate_rebuilds_every_page_when_it_changed_any(
         mat.assert_called_once_with(tmp_path / ".curator", entities=None, state="api")
     else:
         mat.assert_not_called()
+
+
+# ── putting back a rewrite that changed meaning (MINI-92) ──
+
+
+def _rewritten(prose: generate.ProseFile, slug: str, *, statements: int = 0) -> None:
+    prose.entities[slug] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": "Def.",
+        "context": "Rewritten, wrongly.",
+        "integrated": ["k1"],
+        "revisions": [
+            {
+                "by": "llm",
+                "statements": 3,
+                "definition": "Def.",
+                "context": "Accurate.",
+            },
+            {
+                "by": "llm",
+                "statements": statements,
+                "definition": "Def.",
+                "context": "Rewritten, wrongly.",
+            },
+        ],
+    }
+
+
+def test_revert_puts_back_the_text_before_the_rewrite() -> None:
+    prose = generate.ProseFile()
+    _rewritten(prose, "tuck-turn")
+    result = generate.revert(prose, ["tuck-turn"], today="2026-10-19")
+    assert result["slugs"] == ["tuck-turn"]
+    assert prose.context("tuck-turn") == "Accurate."
+    assert prose.integrated("tuck-turn") == {"k1"}
+    assert prose.entities["tuck-turn"]["revisions"][-1]["by"] == "revert"
+    # twice is a no-op, not a step further back
+    again = generate.revert(prose, ["tuck-turn"])
+    assert again["refused"] == {"tuck-turn": "already reverted"}
+    assert prose.context("tuck-turn") == "Accurate."
+
+
+def test_revert_refuses_a_page_whose_last_change_was_new_evidence() -> None:
+    prose = generate.ProseFile()
+    _rewritten(prose, "strike", statements=2)
+    result = generate.revert(prose, ["strike", "nowhere"])
+    assert result["slugs"] == []
+    assert set(result["refused"]) == {"strike", "nowhere"}
+    assert prose.context("strike") == "Rewritten, wrongly."
+
+
+def test_a_rewrite_pass_leaves_a_reverted_page_alone() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    entry = prose.entities["anchor-step"]
+    entry["revisions"] = [{"by": "revert", "definition": "Def.", "context": "x"}]
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One. Two."), model="m"
+    )
+    assert result["over_shape"] == 0
+
+
+def test_placeholder_citations_are_removed() -> None:
+    text = "One point [(source)]. Two [citation needed]. Three [citation]."
+    assert generate.tidy_citations(text) == "One point. Two. Three."
+
+
+def test_generate_revert_passes_through_and_rebuilds_what_it_reverted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with (
+        patch.object(main, "api_state", return_value="api"),
+        patch.object(
+            main, "generate_local", return_value={"slugs": ["tuck-turn"]}
+        ) as run,
+        patch.object(main, "materialise_local", return_value={}) as mat,
+    ):
+        assert main.main(["generate", "--revert", "--entity", "tuck-turn"]) == 0
+    assert run.call_args.kwargs["revert"] is True
+    mat.assert_called_once_with(
+        tmp_path / ".curator", entities=["tuck-turn"], state="api"
+    )
+
+
+def test_revert_needs_named_pages(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="needs --entity"):
+        with patch.object(flow, "_fetch_export", return_value=_export()):
+            flow.generate_local(tmp_path / "prose.json", revert=True)

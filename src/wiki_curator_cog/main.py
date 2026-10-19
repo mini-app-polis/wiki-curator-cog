@@ -117,6 +117,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="generate: only rewrite pages whose prose has outgrown the fixed shape.",
     )
     parser.add_argument(
+        "--revert",
+        action="store_true",
+        help=(
+            "generate: put each --entity page back to its text before its "
+            "last rewrite (no model call), and keep later rewrites off it."
+        ),
+    )
+    parser.add_argument(
         "--entity",
         action="append",
         default=None,
@@ -324,12 +332,15 @@ def _generate(args: argparse.Namespace) -> int:
         entities=args.entity,
         sample=args.sample,
         condense=args.condense,
+        revert=args.revert,
         facets_path=_state_file(args, args.facets, "facets.json", required=False),
         dry_run=args.dry_run,
         **({"workers": args.workers} if args.workers is not None else {}),
         **_store(args),
     )
-    changed = summary.get("slugs" if args.condense else "generated_slugs")
+    changed = summary.get(
+        "slugs" if args.condense or args.revert else "generated_slugs"
+    )
     _rebuild_pages(args, summary, list(changed or []))
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0

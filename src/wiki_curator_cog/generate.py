@@ -601,6 +601,11 @@ _CITATION = re.compile(r"\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\)")
 _AFTER_STOP = re.compile(r"([.!?])(\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\))")
 
 
+#: Citations a rewrite invented in place of a real one: "[(source)]",
+#: "[citation needed]", "[citation]". Removed, never stored (MINI-92).
+_PLACEHOLDER = re.compile(r"\s*\[\(?(?:source|citation(?: needed)?)\)?\]", re.I)
+
+
 def tidy_citations(context: str) -> str:
     """Each citation once, before its sentence's full stop.
 
@@ -608,6 +613,7 @@ def tidy_citations(context: str) -> str:
     citation after the full stop ("early. ([[sources/x]])"). The same group
     is kept only at its last place, and moved inside the sentence.
     """
+    context = _PLACEHOLDER.sub("", context)
     groups = [m.group(0).strip() for m in _CITATION.finditer(context)]
     for group in set(groups):
         while context.count(group) > 1:
@@ -976,6 +982,58 @@ def run_generation(
     }
 
 
+def reverted(prose: ProseFile, slug: str) -> bool:
+    """Whether this page's text was last put back by :func:`revert`.
+
+    A rewrite pass leaves it alone: its rewrite was refused once already.
+    New evidence still regenerates it as usual.
+    """
+    entry = prose.entities.get(slug) or {}
+    revisions = entry.get("revisions") or []
+    return bool(revisions) and revisions[-1].get("by") == "revert"
+
+
+def revert(
+    prose: ProseFile, slugs: Sequence[str], *, today: str | None = None
+) -> dict[str, Any]:
+    """Put each page's text back to what it was before its last rewrite.
+
+    No model call. Only a rewrite is undone, a revision that integrated no
+    statements (``generate --condense``): a page whose last revision took in
+    new evidence is refused, since going back would drop what it learned.
+    The text put back is recorded as a revision by ``revert``, and the
+    watermark is left as it is (MINI-92: rewrites that changed meaning).
+    """
+    day = today or dt.date.today().isoformat()
+    done: list[str] = []
+    refused: dict[str, str] = {}
+    for slug in slugs:
+        entry = prose.current(slug)
+        revisions = (entry or {}).get("revisions") or []
+        if entry is None or len(revisions) < 2:
+            refused[slug] = "no earlier text to go back to"
+            continue
+        last, before = revisions[-1], revisions[-2]
+        if last.get("by") == "revert":
+            refused[slug] = "already reverted"
+            continue
+        if last.get("by") != "llm" or last.get("statements") != 0:
+            refused[slug] = "its last change took in new evidence, not a rewrite"
+            continue
+        entry["definition"] = before.get("definition", "")
+        entry["context"] = before.get("context", "")
+        revisions.append(
+            {
+                "by": "revert",
+                "at": day,
+                "definition": entry["definition"],
+                "context": entry["context"],
+            }
+        )
+        done.append(slug)
+    return {"reverted": len(done), "slugs": sorted(done), "refused": refused}
+
+
 def run_condense(
     corpus: Corpus,
     prose: ProseFile,
@@ -1004,6 +1062,7 @@ def run_condense(
         if slug in corpus.entities
         and (not only or slug in only)
         and prose.current(slug) is not None
+        and not reverted(prose, slug)
         and over_shape(prose.definition(slug), prose.context(slug))
     ]
     done: list[str] = []
