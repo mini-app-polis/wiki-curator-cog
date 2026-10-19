@@ -456,36 +456,36 @@ its definition and its context. Further down, the page already lists every \
 teacher's detailed notes, mistakes and related pages, so neither piece \
 repeats them.
 
-definition — the first section of the page. A simple definition, like a \
-good glossary entry: one or two plain sentences, at most about 40 words, \
-saying what it is. No citations, no links, no history, no advice, no \
+The definition is the first section of the page. Write it like a good \
+glossary entry: one or two plain sentences, at most about 40 words, saying \
+what it is. No citations, no links, no history, no advice, no \
 qualifications.
 
-context — optional, shown lower on the page under "In practice". At most \
-three sentences, one paragraph. Each sentence makes one point, in about 20 \
-words: how it works or is done; the key thing people get wrong and what is \
-right instead; how it connects to the bigger ideas. Short sentences, one \
-idea each: never join two points with a dash, a semicolon or a list inside \
-one sentence, and never use "—" or ";" at all. If a point needs that, it is \
-two points: keep the stronger and drop the other. The page's teacher \
-sections carry the detail, so the context can leave points out. \
-Use fewer sentences when there is less to say, and an empty string when \
-there is nothing worth adding, which is common for thin entities.
+The context is optional. It is shown lower on the page under "In practice". \
+It has at most three sentences in one paragraph. Each sentence makes one \
+point in about 20 words. One says how it works or is done. One says the key \
+thing people get wrong and what is right instead. One says how it connects \
+to the bigger ideas. Never join two points in one sentence. Never use a \
+semicolon, a long dash or a list inside a sentence. If a point needs one, it \
+is two points, so keep the stronger and drop the other. The teacher sections \
+carry the detail, so the context can leave points out. Use fewer sentences \
+when there is less to say. Return an empty string when there is nothing \
+worth adding, which is common for thin entities.
 
-The shape is fixed. It never grows: the page gets better, not longer.
+The shape is fixed. It never grows. The page gets better, not longer.
 
 You are given the current definition and context (possibly empty) and new \
 statements from lessons and notes. Return the best version of both, in \
 that shape, using the current text and the new statements together. The \
-current text is a draft to improve, not to preserve word for word: sharpen \
-it, replace a weaker point with a stronger one, merge two points into one \
-sentence. A new point gets in only by being more useful than something \
-already there. If the new statements add nothing useful, return the current \
-text unchanged.
+current text is a draft to improve, not to preserve word for word. Sharpen \
+it, and replace a weaker point with a stronger one. A new point gets in \
+only by being more useful than something already there. If the new \
+statements add nothing useful, return the current text unchanged.
 
 Voice: an experienced dancer explaining to another dancer. Synthesise in \
-your own words; do not paraphrase lesson by lesson or recount who said what. \
-Short sentences, everyday language, no hedging, no filler. Shorter is better.
+your own words. Do not paraphrase lesson by lesson or recount who said \
+what. Short sentences, everyday language, no hedging, no filler. Shorter is \
+better.
 
 Rules:
 - Do not drop a point the current text makes unless a better one replaces \
@@ -497,25 +497,25 @@ says what the note says, leading with the meaning the note puts first, even \
 when the current definition reads well. A sense the note does not reject \
 stays, after the main one or in the context.
 - Newer statements win. If a newer one contradicts an older idea, state the \
-newer idea; mention the change only if it is itself worth knowing.
+newer idea. Mention the change only if it is itself worth knowing.
 - Name a teacher only when teachers genuinely disagree.
 - Statements with role "refers" are about another entity and mention this \
-one; use them to understand how this idea shows up in the dance. In the \
+one. Use them to understand how this idea shows up in the dance. In the \
 context only, link at most two of the most important, exactly as given in \
-"about" (e.g. [[techniques/anchor-step]]).
+"about" (for example [[techniques/anchor-step]]).
 - In the context only, cite sparingly: at most three citations, each the \
-exact source link given, e.g. ([[sources/2026-03-01-anchor-step]]). Never \
-invent a source, fact or quote.
-- Say what the thing is, never how the word is used: no "the term", "the \
-word", "is used in two senses", "can also mean".
+exact source link given, for example ([[sources/2026-03-01-anchor-step]]). \
+Never invent a source, fact or quote.
+- Say what the thing is, never how the word is used. No "the term", "the \
+word", "is used in two senses" or "can also mean".
 - No headings, no bullet lists, no preamble. Never end with "See also" or \
-any list of related pages — the page lists those itself. Do not mention \
-statements, sources, lessons or this process.
+any list of related pages, because the page lists those itself. Do not \
+mention statements, sources, lessons or this process.
 
-Output ONLY valid JSON — no markdown fences, no commentary before or after — \
-in exactly this shape:
+Output ONLY valid JSON, with no markdown fences and no commentary before or \
+after, in exactly this shape:
 {"definition": "<one or two sentences>", "context": "<short markdown or empty>"}
-Inside the text never use the straight double-quote character ("); use \
+Inside the text never use the straight double-quote character ("). Use \
 curly quotes (“ ”) or single quotes instead, so the JSON stays valid.
 """
 
@@ -535,23 +535,24 @@ You tighten one page of a West Coast Swing (WCS) wiki that has grown past \
 its shape. Rewrite the definition and context below to fit it, keeping the \
 most useful points and their citations and links, adding nothing new.
 
-definition — keep it exactly as given unless it is over about 40 words; \
-then shorten it, keeping what it leads with. Never change what it says the \
-thing is. Remove any sentence about the word itself rather than the thing \
-("another name", "the preferred term").
-context — at most three sentences, one paragraph, each making one point in \
-about 20 words: how it works or is done; the key mistake and what is right \
-instead; how it connects to the bigger ideas. Short sentences, one idea \
-each: never join two points with a dash, a semicolon or a list inside one \
-sentence, and never use "—" or ";" at all. Drop the weaker points to fit \
-rather than packing them in; the page's teacher sections carry the detail.
+The definition stays exactly as given unless it is over about 40 words. \
+Then shorten it, keeping what it leads with. Never change what it says the \
+thing is. Remove any sentence about the word itself rather than the thing, \
+such as "another name" or "the preferred term".
 
-Reword, never reinterpret: each point you keep says exactly what it said \
+The context has at most three sentences in one paragraph. Each sentence \
+makes one point in about 20 words. One says how it works or is done. One \
+says the key mistake and what is right instead. One says how it connects to \
+the bigger ideas. Never join two points in one sentence. Never use a \
+semicolon, a long dash or a list inside a sentence. Drop the weaker points \
+rather than packing them in. The teacher sections carry the detail.
+
+Reword, never reinterpret. Each point you keep says exactly what it said \
 before, in plainer words. Keep its citation and links.
 
 Keep the same voice: an experienced dancer explaining to another dancer. \
 Output ONLY valid JSON, exactly {"definition": "...", "context": "..."}. \
-Inside the text never use the straight double-quote character; use curly \
+Inside the text never use the straight double-quote character. Use curly \
 quotes or single quotes.
 """
 
@@ -596,10 +597,27 @@ def without_word_talk(definition: str) -> str:
     return " ".join(kept) if kept else definition
 
 
-def joins_ideas(context: str) -> bool:
-    """Whether the context still strings points together with "—" or ";"."""
+def shape_problems(definition: str, context: str) -> list[str]:
+    """What keeps prose out of the shape, in words the model can act on."""
+    problems: list[str] = []
+    if len(definition.split()) > DEFINITION_MAX_WORDS:
+        problems.append(f"the definition is over {DEFINITION_MAX_WORDS} words")
+    if len(context.split()) > CONTEXT_MAX_WORDS:
+        problems.append(f"the context is over {CONTEXT_MAX_WORDS} words")
+    if _sentences(context) > CONTEXT_MAX_SENTENCES:
+        problems.append(f"the context has more than {CONTEXT_MAX_SENTENCES} sentences")
+    longest = _longest_sentence(context)
+    if longest > CONTEXT_MAX_SENTENCE_WORDS:
+        problems.append(
+            f"a context sentence has {longest} words "
+            f"(at most {CONTEXT_MAX_SENTENCE_WORDS})"
+        )
     plain = _plain(context)
-    return "—" in plain or ";" in plain
+    if ";" in plain:
+        problems.append("the context uses a semicolon")
+    if "—" in plain:
+        problems.append("the context uses a long dash")
+    return problems
 
 
 def over_shape(definition: str, context: str) -> bool:
@@ -612,11 +630,35 @@ def over_shape(definition: str, context: str) -> bool:
     )
 
 
-def condense(llm: LLMClient, definition: str, context: str) -> tuple[str, str]:
-    """One call that rewrites over-shape prose to fit, adding nothing."""
-    user = "\n".join(
-        ["Definition:", definition or "(empty)", "", "Context:", context or "(empty)"]
-    )
+def condense(
+    llm: LLMClient,
+    definition: str,
+    context: str,
+    *,
+    rejected: tuple[str, list[str]] | None = None,
+) -> tuple[str, str]:
+    """One call that rewrites over-shape prose to fit, adding nothing.
+
+    ``rejected`` is a previous answer's context and what was wrong with it,
+    for a second try that is told exactly what to fix.
+    """
+    lines = [
+        "Definition:",
+        definition or "(empty)",
+        "",
+        "Context:",
+        context or "(empty)",
+    ]
+    if rejected is not None:
+        answer, problems = rejected
+        lines += [
+            "",
+            "Your previous context was not accepted because "
+            + ", and ".join(problems)
+            + ". Fix exactly that:",
+            answer,
+        ]
+    user = "\n".join(lines)
     result = llm.generate_json(
         messages=[
             LLMMessage(role="system", content=CONDENSE_PROMPT),
@@ -943,26 +985,48 @@ def run_condense(
     done: list[str] = []
     failed: list[str] = []
     kept: list[str] = []
+    not_kept: dict[str, dict[str, Any]] = {}
+
+    def attempt(
+        entity: WcsEntity, rejected: tuple[str, list[str]] | None
+    ) -> tuple[str, str]:
+        definition, context = condense(
+            llm,
+            prose.definition(entity.slug),
+            prose.context(entity.slug),
+            rejected=rejected,
+        )
+        if corpus.pages is not None:
+            definition = corpus.pages.repair(definition)
+            context = corpus.pages.repair(context)
+        return definition, context
 
     def work(entity: WcsEntity) -> None:
         try:
-            definition, context = condense(
-                llm, prose.definition(entity.slug), prose.context(entity.slug)
-            )
+            definition, context = attempt(entity, None)
+            problems = [] if dry_run else shape_problems(definition, context)
+            if problems:
+                # One more try, told exactly what to fix.
+                definition, context = attempt(entity, (context, problems))
+                problems = shape_problems(definition, context)
         except LLMError as exc:
             LOG.warning("condense.failed slug=%s err=%s", entity.slug, exc)
             with lock:
                 failed.append(entity.slug)
             return
-        if corpus.pages is not None:
-            definition = corpus.pages.repair(definition)
-            context = corpus.pages.repair(context)
-        if not dry_run and (over_shape(definition, context) or joins_ideas(context)):
+        if problems:
             # Half fixed is not stored: the page keeps its text and is named
-            # for a look, and the next run tries it again.
-            LOG.warning("condense.not_kept slug=%s still over the shape", entity.slug)
+            # for a look, and the next run tries it again. The rejected text
+            # is logged, so a paid miss still says what went wrong.
+            LOG.warning(
+                "condense.not_kept slug=%s problems=%s context=%r",
+                entity.slug,
+                "; ".join(problems),
+                context,
+            )
             with lock:
                 kept.append(entity.slug)
+                not_kept[entity.slug] = {"problems": problems, "context": context}
             return
         with lock:
             _record(prose, entity, [], definition, context, model=model, today=day)
@@ -986,6 +1050,7 @@ def run_condense(
         # rewritten, but still over the shape: not stored
         "not_kept": len(kept),
         "not_kept_slugs": sorted(kept),
+        "not_kept_why": {slug: not_kept[slug] for slug in sorted(not_kept)},
         "slugs": sorted(done),
     }
 

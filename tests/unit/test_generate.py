@@ -685,11 +685,13 @@ def test_condense_can_be_tried_on_named_pages_first() -> None:
 def test_the_prompts_ask_for_one_idea_per_sentence() -> None:
     for prompt in (generate.SYSTEM_PROMPT, generate.CONDENSE_PROMPT):
         flat = " ".join(prompt.replace("\\\n", " ").split())
-        assert "one idea each" in flat
-        assert "never join two points with a dash, a semicolon" in flat
+        assert "Never join two points in one sentence" in flat
+        assert "Never use a semicolon, a long dash" in flat
+        # The model copies the instructions' own style, so they use neither.
+        assert "—" not in prompt
+        assert ";" not in prompt
     flat = " ".join(generate.CONDENSE_PROMPT.replace("\\\n", " ").split())
     assert "Reword, never reinterpret" in flat
-    assert 'never use "—" or ";" at all' in flat
 
 
 def test_word_talk_is_removed_from_a_definition() -> None:
@@ -771,8 +773,45 @@ def test_a_rewrite_still_over_the_shape_is_not_stored(context: str) -> None:
         corpus, prose, RewritesEverythingLLM(context.strip()), model="m"
     )
     assert result["not_kept_slugs"] == ["anchor-step"]
+    assert result["not_kept_why"]["anchor-step"]["problems"]
     assert result["slugs"] == []
     assert prose.context("anchor-step") == before
+
+
+class FixesOnSecondTryLLM(FakeLLM):
+    """Packs a semicolon in first; told what is wrong, fixes it."""
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        user = messages[-1].content
+        self.calls.append({"user": user})
+        context = (
+            "Short point. Another short point."
+            if "not accepted because the context uses a semicolon" in user
+            else "One point; another point."
+        )
+        return LLMResult("fake", "fake", {"definition": "D.", "context": context}, "")
+
+
+def test_a_rejected_rewrite_gets_one_more_try_told_what_to_fix() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    llm = FixesOnSecondTryLLM()
+    result = generate.run_condense(corpus, prose, llm, model="m")
+    assert len(llm.calls) == 2
+    assert "One point; another point." in llm.calls[1]["user"]
+    assert result["slugs"] == ["anchor-step"]
+    assert prose.context("anchor-step") == "Short point. Another short point."
+
+
+def test_shape_problems_say_what_to_fix() -> None:
+    long = "Word " + " ".join(["word"] * 34) + "."
+    assert generate.shape_problems("D.", f"{long} Two; three — four.") == [
+        "a context sentence has 35 words (at most 30)",
+        "the context uses a semicolon",
+        "the context uses a long dash",
+    ]
+    assert generate.shape_problems("D.", "Fine. Short.") == []
 
 
 class LongThenShortLLM(FakeLLM):
@@ -831,7 +870,7 @@ def test_condense_rewrites_only_pages_over_shape_and_keeps_the_watermark() -> No
 
 def test_the_prompt_fixes_the_shape_and_rewrites_rather_than_appends() -> None:
     flat = " ".join(generate.SYSTEM_PROMPT.replace("\\\n", " ").split())
-    assert "At most three sentences" in flat
+    assert "at most three sentences" in flat
     assert "It never grows" in flat
     assert "a draft to improve" in flat
 
