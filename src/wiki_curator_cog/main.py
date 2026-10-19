@@ -249,6 +249,29 @@ def _store(args: argparse.Namespace) -> dict:
     return {"state": api_state()} if args.state == "api" else {}
 
 
+def _rebuild_pages(
+    args: argparse.Namespace, summary: dict, slugs: list[str] | None
+) -> None:
+    """Rebuild the pages a local run changed, as the worker's jobs do.
+
+    The worker's link, consolidate and generate jobs each end by
+    materialising their pages; a local run against the API does the same
+    here, so nothing waits on /admin/wiki's "Rebuild every page". ``slugs``
+    None is every page (a link or consolidate run can touch any of them); an
+    empty list rebuilds nothing. A dry run, or one against the files alone,
+    stores no pages. The result is added to ``summary`` as ``pages_rebuilt``.
+    """
+    if args.dry_run or args.state != "api" or slugs == []:
+        return
+    state_dir = _state_dir(args)
+    if state_dir is None:
+        LOG.warning("rebuild.skipped err=no state folder; rebuild the pages by hand")
+        return
+    summary["pages_rebuilt"] = materialise_local(
+        state_dir, entities=slugs, **_store(args)
+    )
+
+
 def _render(
     wiki_repo_path_raw: str,
     links: Path | None = None,
@@ -285,6 +308,7 @@ def _link(args: argparse.Namespace) -> int:
         **kwargs,
         **_store(args),
     )
+    _rebuild_pages(args, summary, None if summary.get("linked") else [])
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
 
@@ -304,6 +328,8 @@ def _generate(args: argparse.Namespace) -> int:
         **({"workers": args.workers} if args.workers is not None else {}),
         **_store(args),
     )
+    changed = summary.get("slugs" if args.condense else "generated_slugs")
+    _rebuild_pages(args, summary, list(changed or []))
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
 
@@ -323,6 +349,7 @@ def _consolidate(args: argparse.Namespace) -> int:
         **kwargs,
         **_store(args),
     )
+    _rebuild_pages(args, summary, None if summary.get("decided") else [])
     sys.stdout.write(json.dumps(summary, default=str, indent=2) + "\n")
     return 0
 

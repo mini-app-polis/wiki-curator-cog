@@ -76,4 +76,4 @@ The curator version is auto-derived at runtime from `pyproject.toml` via `import
 
 ## Operating manual
 
-The page schema lives in `wcs-wiki/CLAUDE.md`; this repo is the runtime. The page logic — folds, the reference overlay, By teacher — is `pages.py` and the modules it builds on; changing it means re-running `materialise` for every page.
+The page schema lives in `wcs-wiki/CLAUDE.md`; this repo is the runtime. The page logic — folds, the reference overlay, By teacher — is `pages.py` and the modules it builds on; changing it means re-running `materialise` for every page, which the `rebuild` job in CI does after each deploy (MINI-109).

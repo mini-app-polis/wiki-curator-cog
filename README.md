@@ -235,6 +235,12 @@ without storing:
 WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main materialise
 ```
 
+A local `link`, `consolidate` or `generate` against the API ends the way its
+worker job does: it rebuilds the pages it changed (`pages_rebuilt` in the
+summary) — the generated or condensed pages, or every page after a link or
+consolidate run that changed anything. A dry run, or `--state files`, stores
+no pages.
+
 ### The worker (ADR-006, MINI-95)
 
 On AWS the same units run as a Lambda behind `wiki-curator-jobs.fifo`

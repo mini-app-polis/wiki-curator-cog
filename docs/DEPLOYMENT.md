@@ -22,6 +22,15 @@ cogs` in mini-app-polis/infra: `AWS_DEPLOY_ROLE_ARN`, `AWS_REGION` and
 match the function's block in infra; the deploy refuses a function whose
 architecture differs.
 
+After the deploy, the `rebuild` job asks the API for one rebuild of every
+page (`POST /v1/wcs/wiki/admin/jobs`, `rebuild_every_page`), since a release
+can change how pages are built without changing any state (MINI-109). It
+calls no model. It needs the repository secret `WIKI_CURATOR_DEPLOY_API_KEY`:
+the key of the `wiki-curator-deploy` machine in api-kaianolevine-com's
+identity registry, whose `wiki-operator` role holds only `wcs.wiki.operate`.
+The same value is `WIKI_CURATOR_DEPLOY_API_KEY` in Doppler
+(`mini-app-polis-ecosystem`, `prd`), which the API reads.
+
 ## Starting and stopping the flow of jobs
 
 `flags.wcs.wiki_jobs_enabled` (migration 055 in api-kaianolevine-com) decides
