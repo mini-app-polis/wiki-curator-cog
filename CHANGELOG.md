@@ -1,3 +1,10 @@
+# [3.7.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.6.0...v3.7.0) (2026-10-19)
+
+
+### Features
+
+* refresh the thin list on link jobs and the every-page rebuild (MINI-101) ([932f6ae](https://github.com/mini-app-polis/wiki-curator-cog/commit/932f6aefd2a3dd5f9bbb788a1f3923d76245b2ce))
+
 # [3.6.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.5.0...v3.6.0) (2026-10-19)
 
 
