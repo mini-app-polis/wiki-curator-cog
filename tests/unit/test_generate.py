@@ -649,6 +649,47 @@ def test_over_shape_counts_words_and_sentences_not_links() -> None:
     assert not generate.over_shape("A stop.", "One point ([[sources/x]]). Two. Three.")
 
 
+def test_a_sentence_packing_several_ideas_is_over_shape() -> None:
+    """MINI-92: three sentences, but one strings ideas together."""
+    packed = (
+        "Connection lives in the back body — lats, rear delts, triceps — not the "
+        "biceps or pecs; the lats tie the arms to the core, and without them the "
+        "frame connects front to front. It matters. It connects."
+    )
+    assert generate.over_shape("A stop.", packed)
+    twenty = "Word " + " ".join(["word"] * 19) + "."
+    assert not generate.over_shape("A stop.", f"{twenty} {twenty} {twenty}")
+    # a link reads as its label and a citation not at all
+    linked = " ".join(["word"] * 28) + " [[concepts/frame|the frame]] ([[sources/x]])."
+    assert not generate.over_shape("A stop.", linked)
+
+
+def test_condense_can_be_tried_on_named_pages_first() -> None:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    for slug in ("anchor-step", "stretch"):
+        prose.entities[slug] = {
+            "generator_version": generate.GENERATOR_VERSION,
+            "definition": "Def.",
+            "context": " ".join(f"S{i}." for i in range(8)),
+            "integrated": [],
+            "revisions": [],
+        }
+    result = generate.run_condense(
+        corpus, prose, LongThenShortLLM(), model="m", only=["stretch"]
+    )
+    assert result["slugs"] == ["stretch"]
+    assert prose.context("anchor-step").startswith("S0.")
+
+
+def test_the_prompts_ask_for_one_idea_per_sentence() -> None:
+    for prompt in (generate.SYSTEM_PROMPT, generate.CONDENSE_PROMPT):
+        flat = " ".join(prompt.replace("\\\n", " ").split())
+        assert "one idea each" in flat
+        assert "never join two points with a dash, a semicolon" in flat
+    assert "never how the word is used" in generate.CONDENSE_PROMPT
+
+
 class LongThenShortLLM(FakeLLM):
     """The first answer is over shape; a condense call returns a short one."""
 
