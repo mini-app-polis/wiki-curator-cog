@@ -634,9 +634,10 @@ def shape_problems(definition: str, context: str) -> list[str]:
             f"a context sentence has {longest} words "
             f"(at most {CONTEXT_MAX_SENTENCE_WORDS})"
         )
+    # A semicolon is discouraged in the prompts but not refused: the model's
+    # habit is "the mistake is X; instead, Y", one point that reads fine, and
+    # refusing it left good rewrites unstored (MINI-92, 38 of 80 pages).
     plain = _plain(context)
-    if ";" in plain:
-        problems.append("the context uses a semicolon")
     if "—" in plain:
         problems.append("the context uses a long dash")
     return problems

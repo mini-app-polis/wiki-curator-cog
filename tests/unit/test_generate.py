@@ -762,7 +762,6 @@ def test_a_dry_run_condense_judges_nothing() -> None:
     "context",
     [
         "One point — joined to another. Two.",
-        "One point; another. Two.",
         "Still. " * 5,
     ],
 )
@@ -779,7 +778,7 @@ def test_a_rewrite_still_over_the_shape_is_not_stored(context: str) -> None:
 
 
 class FixesOnSecondTryLLM(FakeLLM):
-    """Packs a semicolon in first; told what is wrong, fixes it."""
+    """Joins two points with a long dash first; told what is wrong, fixes it."""
 
     def generate_json(
         self, *, messages, json_schema, schema_name="output"
@@ -788,8 +787,8 @@ class FixesOnSecondTryLLM(FakeLLM):
         self.calls.append({"user": user})
         context = (
             "Short point. Another short point."
-            if "not accepted because the context uses a semicolon" in user
-            else "One point; another point."
+            if "not accepted because the context uses a long dash" in user
+            else "One point — another point."
         )
         return LLMResult("fake", "fake", {"definition": "D.", "context": context}, "")
 
@@ -799,7 +798,7 @@ def test_a_rejected_rewrite_gets_one_more_try_told_what_to_fix() -> None:
     llm = FixesOnSecondTryLLM()
     result = generate.run_condense(corpus, prose, llm, model="m")
     assert len(llm.calls) == 2
-    assert "One point; another point." in llm.calls[1]["user"]
+    assert "One point — another point." in llm.calls[1]["user"]
     assert result["slugs"] == ["anchor-step"]
     assert prose.context("anchor-step") == "Short point. Another short point."
 
@@ -830,11 +829,15 @@ def test_the_review_shows_what_a_rewrite_replaced() -> None:
     assert "_Definition before:_" not in review
 
 
+def test_a_single_semicolon_is_not_refused() -> None:
+    context = "The common mistake is rushing; instead, wait for the lead. Two. Three."
+    assert generate.shape_problems("D.", context) == []
+
+
 def test_shape_problems_say_what_to_fix() -> None:
     long = "Word " + " ".join(["word"] * 34) + "."
     assert generate.shape_problems("D.", f"{long} Two; three — four.") == [
         "a context sentence has 35 words (at most 30)",
-        "the context uses a semicolon",
         "the context uses a long dash",
     ]
     assert generate.shape_problems("D.", "Fine. Short.") == []
