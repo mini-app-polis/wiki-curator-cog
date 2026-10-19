@@ -1,3 +1,10 @@
+# [3.8.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.7.1...v3.8.0) (2026-10-19)
+
+
+### Features
+
+* a note's word on what an idea is sets the page's definition (MINI-92) ([9b57a72](https://github.com/mini-app-polis/wiki-curator-cog/commit/9b57a723bc5457ede87cf1990d47256f3997eb44))
+
 ## [3.7.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.7.0...v3.7.1) (2026-10-19)
 
 
