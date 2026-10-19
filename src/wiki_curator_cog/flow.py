@@ -331,6 +331,7 @@ def generate_local(
     sample: int | None = None,
     workers: int = generate.DEFAULT_WORKERS,
     condense: bool = False,
+    revert: bool = False,
     facets_path: Path | None = None,
     dry_run: bool = False,
     state: state_backend.FileState | None = None,
@@ -366,6 +367,16 @@ def generate_local(
     corpus = generate.build_corpus(export, overlay, links, merges)
     prose = store.prose(prose_path)
     assert prose is not None
+    if revert:
+        # No model: each named page goes back to its text before its last
+        # rewrite. A dry run says what would happen and writes nothing.
+        if not entities:
+            raise RuntimeError("generate --revert needs --entity for each page")
+        counts = generate.revert(prose, entities)
+        if not dry_run and counts["reverted"]:
+            store.save(prose, prose_path, final=True)
+        LOG.info("revert.complete %s", counts)
+        return {"prose_file": str(prose_path), "dry_run": dry_run, **counts}
     if condense:
         llm, model = link.llm_from_env(dry_run=dry_run)
         counts = generate.run_condense(
@@ -375,6 +386,7 @@ def generate_local(
             model=model,
             workers=workers,
             only=entities or (),
+            dry_run=dry_run,
             on_entity=None if dry_run else (lambda: store.save(prose, prose_path)),
         )
         if dry_run:

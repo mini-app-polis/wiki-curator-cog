@@ -75,7 +75,7 @@ NOTE_SESSION_TYPE = "correction"
 #: carry it in their key, so raising it makes them pending again: the next
 #: run regenerates only the pages a note speaks to, on top of their current
 #: text, instead of every page as :data:`GENERATOR_VERSION` would.
-NOTE_RULE_VERSION = "1"
+NOTE_RULE_VERSION = "2"
 
 #: The shape the prose must keep (prompt revision 4.1, 2026-10-16). Over
 #: these limits a result gets one condense call before it is stored. Word
@@ -456,34 +456,36 @@ its definition and its context. Further down, the page already lists every \
 teacher's detailed notes, mistakes and related pages, so neither piece \
 repeats them.
 
-definition — the first section of the page. A simple definition, like a \
-good glossary entry: one or two plain sentences, at most about 40 words, \
-saying what it is. No citations, no links, no history, no advice, no \
+The definition is the first section of the page. Write it like a good \
+glossary entry: one or two plain sentences, at most about 40 words, saying \
+what it is. No citations, no links, no history, no advice, no \
 qualifications.
 
-context — optional, shown lower on the page under "In practice". At most \
-three sentences, one paragraph. Each sentence makes one point, in about 20 \
-words: how it works or is done; the key thing people get wrong and what is \
-right instead; how it connects to the bigger ideas. Short sentences, one \
-idea each: never join two points with a dash, a semicolon or a list inside \
-one sentence. If a point needs that, it is two points; keep the stronger. \
-Use fewer sentences when there is less to say, and an empty string when \
-there is nothing worth adding, which is common for thin entities.
+The context is optional. It is shown lower on the page under "In practice". \
+It has at most three sentences in one paragraph. Each sentence makes one \
+point in about 20 words. One says how it works or is done. One says the key \
+thing people get wrong and what is right instead. One says how it connects \
+to the bigger ideas. Never join two points in one sentence. Never use a \
+semicolon, a long dash or a list inside a sentence. If a point needs one, it \
+is two points, so keep the stronger and drop the other. The teacher sections \
+carry the detail, so the context can leave points out. Use fewer sentences \
+when there is less to say. Return an empty string when there is nothing \
+worth adding, which is common for thin entities.
 
-The shape is fixed. It never grows: the page gets better, not longer.
+The shape is fixed. It never grows. The page gets better, not longer.
 
 You are given the current definition and context (possibly empty) and new \
 statements from lessons and notes. Return the best version of both, in \
 that shape, using the current text and the new statements together. The \
-current text is a draft to improve, not to preserve word for word: sharpen \
-it, replace a weaker point with a stronger one, merge two points into one \
-sentence. A new point gets in only by being more useful than something \
-already there. If the new statements add nothing useful, return the current \
-text unchanged.
+current text is a draft to improve, not to preserve word for word. Sharpen \
+it, and replace a weaker point with a stronger one. A new point gets in \
+only by being more useful than something already there. If the new \
+statements add nothing useful, return the current text unchanged.
 
 Voice: an experienced dancer explaining to another dancer. Synthesise in \
-your own words; do not paraphrase lesson by lesson or recount who said what. \
-Short sentences, everyday language, no hedging, no filler. Shorter is better.
+your own words. Do not paraphrase lesson by lesson or recount who said \
+what. Short sentences, everyday language, no hedging, no filler. Shorter is \
+better.
 
 Rules:
 - Do not drop a point the current text makes unless a better one replaces \
@@ -495,25 +497,25 @@ says what the note says, leading with the meaning the note puts first, even \
 when the current definition reads well. A sense the note does not reject \
 stays, after the main one or in the context.
 - Newer statements win. If a newer one contradicts an older idea, state the \
-newer idea; mention the change only if it is itself worth knowing.
+newer idea. Mention the change only if it is itself worth knowing.
 - Name a teacher only when teachers genuinely disagree.
 - Statements with role "refers" are about another entity and mention this \
-one; use them to understand how this idea shows up in the dance. In the \
+one. Use them to understand how this idea shows up in the dance. In the \
 context only, link at most two of the most important, exactly as given in \
-"about" (e.g. [[techniques/anchor-step]]).
+"about" (for example [[techniques/anchor-step]]).
 - In the context only, cite sparingly: at most three citations, each the \
-exact source link given, e.g. ([[sources/2026-03-01-anchor-step]]). Never \
-invent a source, fact or quote.
-- Say what the thing is, never how the word is used: no "the term", "the \
-word", "is used in two senses", "can also mean".
+exact source link given, for example ([[sources/2026-03-01-anchor-step]]). \
+Never invent a source, fact or quote.
+- Say what the thing is, never how the word is used. No "the term", "the \
+word", "is used in two senses" or "can also mean".
 - No headings, no bullet lists, no preamble. Never end with "See also" or \
-any list of related pages — the page lists those itself. Do not mention \
-statements, sources, lessons or this process.
+any list of related pages, because the page lists those itself. Do not \
+mention statements, sources, lessons or this process.
 
-Output ONLY valid JSON — no markdown fences, no commentary before or after — \
-in exactly this shape:
+Output ONLY valid JSON, with no markdown fences and no commentary before or \
+after, in exactly this shape:
 {"definition": "<one or two sentences>", "context": "<short markdown or empty>"}
-Inside the text never use the straight double-quote character ("); use \
+Inside the text never use the straight double-quote character ("). Use \
 curly quotes (“ ”) or single quotes instead, so the JSON stays valid.
 """
 
@@ -533,22 +535,28 @@ You tighten one page of a West Coast Swing (WCS) wiki that has grown past \
 its shape. Rewrite the definition and context below to fit it, keeping the \
 most useful points and their citations and links, adding nothing new.
 
-definition — one or two plain sentences, at most about 40 words; no \
-citations or links. Say what the thing is, never how the word is used: no \
-"the term", "another name", "the preferred term".
-context — at most three sentences, one paragraph, each making one point in \
-about 20 words: how it works or is done; the key mistake and what is right \
-instead; how it connects to the bigger ideas. Short sentences, one idea \
-each: never join two points with a dash, a semicolon or a list inside one \
-sentence. Drop the weaker points to fit rather than packing them in.
+The definition stays exactly as given unless it is over about 40 words. \
+Then shorten it, keeping what it leads with. Never change what it says the \
+thing is. Remove any sentence about the word itself rather than the thing, \
+such as "another name" or "the preferred term".
+
+The context has at most three sentences in one paragraph. Each sentence \
+makes one point in about 20 words. One says how it works or is done. One \
+says the key mistake and what is right instead. One says how it connects to \
+the bigger ideas. Never join two points in one sentence. Never use a \
+semicolon, a long dash or a list inside a sentence. Drop the weaker points \
+rather than packing them in. The teacher sections carry the detail.
+
+Reword, never reinterpret. Each point you keep says exactly what it said \
+before, in plainer words. Keep its citation and links.
 
 Keep the same voice: an experienced dancer explaining to another dancer. \
 Output ONLY valid JSON, exactly {"definition": "...", "context": "..."}. \
-Inside the text never use the straight double-quote character; use curly \
+Inside the text never use the straight double-quote character. Use curly \
 quotes or single quotes.
 """
 
-_SENTENCE_END = re.compile(r"[.!?](?:[)\]”’'\"]*)(?=\s+[A-Z(\[“‘]|\s*$)")
+_SENTENCE_END = re.compile(r"[.!?](?:[)\]”’'\"]*)(?=\s+[A-Z(\[“‘'\"]|\s*$)")
 
 
 def _plain(text: str) -> str:
@@ -571,6 +579,76 @@ def _longest_sentence(text: str) -> int:
     return max(len(part.split()) for part in _SENTENCE_END.split(plain))
 
 
+#: A sentence about the word rather than the thing ("'Foot strike' is another
+#: name for it, but 'strike' is the preferred term."). The prompts forbid it;
+#: this removes one that gets through.
+_WORD_TALK = re.compile(r"\b(?:another name|preferred (?:term|name)|the term)\b", re.I)
+
+
+def without_word_talk(definition: str) -> str:
+    """``definition`` without its sentences about the word itself."""
+    parts = [p.strip() for p in _SENTENCE_END.split(definition)]
+    ends = _SENTENCE_END.findall(definition)
+    kept = [
+        part + (ends[i] if i < len(ends) else "")
+        for i, part in enumerate(parts)
+        if part and not _WORD_TALK.search(part)
+    ]
+    return " ".join(kept) if kept else definition
+
+
+_CITATION = re.compile(r"\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\)")
+_AFTER_STOP = re.compile(r"([.!?])(\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\))")
+
+
+#: Citations a rewrite invented in place of a real one: "[(source)]",
+#: "[citation needed]", "[citation]". Removed, never stored (MINI-92).
+_PLACEHOLDER = re.compile(r"\s*\[\(?(?:source|citation(?: needed)?)\)?\]", re.I)
+
+
+def tidy_citations(context: str) -> str:
+    """Each citation once, before its sentence's full stop.
+
+    A rewrite sometimes cites one source after every sentence, and puts the
+    citation after the full stop ("early. ([[sources/x]])"). The same group
+    is kept only at its last place, and moved inside the sentence.
+    """
+    context = _PLACEHOLDER.sub("", context)
+    groups = [m.group(0).strip() for m in _CITATION.finditer(context)]
+    for group in set(groups):
+        while context.count(group) > 1:
+            at = context.index(group)
+            start = at
+            while start > 0 and context[start - 1] == " ":
+                start -= 1
+            context = context[:start] + context[at + len(group) :]
+    return _AFTER_STOP.sub(lambda m: m.group(2) + m.group(1), context).strip()
+
+
+def shape_problems(definition: str, context: str) -> list[str]:
+    """What keeps prose out of the shape, in words the model can act on."""
+    problems: list[str] = []
+    if len(definition.split()) > DEFINITION_MAX_WORDS:
+        problems.append(f"the definition is over {DEFINITION_MAX_WORDS} words")
+    if len(context.split()) > CONTEXT_MAX_WORDS:
+        problems.append(f"the context is over {CONTEXT_MAX_WORDS} words")
+    if _sentences(context) > CONTEXT_MAX_SENTENCES:
+        problems.append(f"the context has more than {CONTEXT_MAX_SENTENCES} sentences")
+    longest = _longest_sentence(context)
+    if longest > CONTEXT_MAX_SENTENCE_WORDS:
+        problems.append(
+            f"a context sentence has {longest} words "
+            f"(at most {CONTEXT_MAX_SENTENCE_WORDS})"
+        )
+    # A semicolon is discouraged in the prompts but not refused: the model's
+    # habit is "the mistake is X; instead, Y", one point that reads fine, and
+    # refusing it left good rewrites unstored (MINI-92, 38 of 80 pages).
+    plain = _plain(context)
+    if "—" in plain:
+        problems.append("the context uses a long dash")
+    return problems
+
+
 def over_shape(definition: str, context: str) -> bool:
     """Whether the prose has outgrown the fixed shape."""
     return (
@@ -581,11 +659,35 @@ def over_shape(definition: str, context: str) -> bool:
     )
 
 
-def condense(llm: LLMClient, definition: str, context: str) -> tuple[str, str]:
-    """One call that rewrites over-shape prose to fit, adding nothing."""
-    user = "\n".join(
-        ["Definition:", definition or "(empty)", "", "Context:", context or "(empty)"]
-    )
+def condense(
+    llm: LLMClient,
+    definition: str,
+    context: str,
+    *,
+    rejected: tuple[str, list[str]] | None = None,
+) -> tuple[str, str]:
+    """One call that rewrites over-shape prose to fit, adding nothing.
+
+    ``rejected`` is a previous answer's context and what was wrong with it,
+    for a second try that is told exactly what to fix.
+    """
+    lines = [
+        "Definition:",
+        definition or "(empty)",
+        "",
+        "Context:",
+        context or "(empty)",
+    ]
+    if rejected is not None:
+        answer, problems = rejected
+        lines += [
+            "",
+            "Your previous context was not accepted because "
+            + ", and ".join(problems)
+            + ". Fix exactly that:",
+            answer,
+        ]
+    user = "\n".join(lines)
     result = llm.generate_json(
         messages=[
             LLMMessage(role="system", content=CONDENSE_PROMPT),
@@ -595,7 +697,11 @@ def condense(llm: LLMClient, definition: str, context: str) -> tuple[str, str]:
         schema_name="prose",
     )
     return (
-        str(result.output_json.get("definition", definition)).strip(),
+        # A definition within its shape is kept: the tightening never sees
+        # the notes that set it, so a rewrite can undo them (MINI-92, strike).
+        without_word_talk(definition)
+        if len(definition.split()) <= DEFINITION_MAX_WORDS
+        else str(result.output_json.get("definition", definition)).strip(),
         str(result.output_json.get("context", context)).strip(),
     )
 
@@ -723,13 +829,16 @@ def generate_one(
         json_schema=RESPONSE_SCHEMA,
         schema_name="prose",
     )
-    definition = str(result.output_json.get("definition", "")).strip()
+    definition = without_word_talk(
+        str(result.output_json.get("definition", "")).strip()
+    )
     context = str(result.output_json.get("context", "")).strip()
     if over_shape(definition, context):
         definition, context = condense(llm, definition, context)
     if corpus.pages is not None:
         definition = corpus.pages.repair(definition)
         context = corpus.pages.repair(context)
+    context = tidy_citations(context)
     with guard:
         _record(
             prose,
@@ -873,6 +982,60 @@ def run_generation(
     }
 
 
+def reverted(prose: ProseFile, slug: str) -> bool:
+    """Whether this page's text was last chosen by a person.
+
+    That is an edit on the page, or :func:`revert` putting back the text
+    from before a rewrite (the API records both as ``page``). A rewrite pass
+    leaves such text alone; new evidence still regenerates it as usual.
+    """
+    entry = prose.entities.get(slug) or {}
+    revisions = entry.get("revisions") or []
+    return bool(revisions) and revisions[-1].get("by") == "page"
+
+
+def revert(
+    prose: ProseFile, slugs: Sequence[str], *, today: str | None = None
+) -> dict[str, Any]:
+    """Put each page's text back to what it was before its last rewrite.
+
+    No model call. Only a rewrite is undone, a revision that integrated no
+    statements (``generate --condense``): a page whose last revision took in
+    new evidence is refused, since going back would drop what it learned.
+    The text put back is recorded as a revision by ``page``, text a person
+    chose (the API knows only ``llm`` and ``page``), and the watermark is
+    left as it is (MINI-92: rewrites that changed meaning).
+    """
+    day = today or dt.date.today().isoformat()
+    done: list[str] = []
+    refused: dict[str, str] = {}
+    for slug in slugs:
+        entry = prose.current(slug)
+        revisions = (entry or {}).get("revisions") or []
+        if entry is None or len(revisions) < 2:
+            refused[slug] = "no earlier text to go back to"
+            continue
+        last, before = revisions[-1], revisions[-2]
+        if last.get("by") == "page":
+            refused[slug] = "its text was last chosen by a person"
+            continue
+        if last.get("by") != "llm" or last.get("statements") != 0:
+            refused[slug] = "its last change took in new evidence, not a rewrite"
+            continue
+        entry["definition"] = before.get("definition", "")
+        entry["context"] = before.get("context", "")
+        revisions.append(
+            {
+                "by": "page",
+                "at": day,
+                "definition": entry["definition"],
+                "context": entry["context"],
+            }
+        )
+        done.append(slug)
+    return {"reverted": len(done), "slugs": sorted(done), "refused": refused}
+
+
 def run_condense(
     corpus: Corpus,
     prose: ProseFile,
@@ -883,13 +1046,15 @@ def run_condense(
     workers: int = 1,
     on_entity: Any = None,
     only: Sequence[str] = (),
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Rewrite every entity whose stored prose has outgrown the shape.
 
     No new evidence and no change to the watermark: only the text is
     tightened, and the result is recorded as a revision like any other.
     ``only`` limits it to these slugs (still only those over the shape), to
-    try a prompt change on a sample before the whole wiki.
+    try a prompt change on a sample before the whole wiki. In a ``dry_run``
+    nothing is rewritten, so nothing is judged as still over the shape.
     """
     day = today or dt.date.today().isoformat()
     lock = threading.Lock()
@@ -899,24 +1064,55 @@ def run_condense(
         if slug in corpus.entities
         and (not only or slug in only)
         and prose.current(slug) is not None
+        and not reverted(prose, slug)
         and over_shape(prose.definition(slug), prose.context(slug))
     ]
     done: list[str] = []
     failed: list[str] = []
+    kept: list[str] = []
+    not_kept: dict[str, dict[str, Any]] = {}
+
+    def attempt(
+        entity: WcsEntity, rejected: tuple[str, list[str]] | None
+    ) -> tuple[str, str]:
+        definition, context = condense(
+            llm,
+            prose.definition(entity.slug),
+            prose.context(entity.slug),
+            rejected=rejected,
+        )
+        if corpus.pages is not None:
+            definition = corpus.pages.repair(definition)
+            context = corpus.pages.repair(context)
+        return definition, tidy_citations(context)
 
     def work(entity: WcsEntity) -> None:
         try:
-            definition, context = condense(
-                llm, prose.definition(entity.slug), prose.context(entity.slug)
-            )
+            definition, context = attempt(entity, None)
+            problems = [] if dry_run else shape_problems(definition, context)
+            if problems:
+                # One more try, told exactly what to fix.
+                definition, context = attempt(entity, (context, problems))
+                problems = shape_problems(definition, context)
         except LLMError as exc:
             LOG.warning("condense.failed slug=%s err=%s", entity.slug, exc)
             with lock:
                 failed.append(entity.slug)
             return
-        if corpus.pages is not None:
-            definition = corpus.pages.repair(definition)
-            context = corpus.pages.repair(context)
+        if problems:
+            # Half fixed is not stored: the page keeps its text and is named
+            # for a look, and the next run tries it again. The rejected text
+            # is logged, so a paid miss still says what went wrong.
+            LOG.warning(
+                "condense.not_kept slug=%s problems=%s context=%r",
+                entity.slug,
+                "; ".join(problems),
+                context,
+            )
+            with lock:
+                kept.append(entity.slug)
+                not_kept[entity.slug] = {"problems": problems, "context": context}
+            return
         with lock:
             _record(prose, entity, [], definition, context, model=model, today=day)
             done.append(entity.slug)
@@ -936,6 +1132,10 @@ def run_condense(
         "condensed": len(done),
         "failed": len(failed),
         "failed_slugs": sorted(failed),
+        # rewritten, but still over the shape: not stored
+        "not_kept": len(kept),
+        "not_kept_slugs": sorted(kept),
+        "not_kept_why": {slug: not_kept[slug] for slug in sorted(not_kept)},
         "slugs": sorted(done),
     }
 
@@ -1028,7 +1228,7 @@ def _by_name(facets: Iterable[Any], *, reverse: bool = False) -> list[Any]:
 
 
 def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
-    """Each generated overview, for reading before rendering."""
+    """Each generated overview, and what it replaced, for reading."""
     lines = [f"# Generation review — version {GENERATOR_VERSION}", ""]
     for slug in slugs:
         entry = prose.current(slug)
@@ -1046,4 +1246,19 @@ def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
             f"**In practice.** {entry.get('context') or '_(none)_'}",
             "",
         ]
+        before = (
+            entry["revisions"][-2] if len(entry.get("revisions") or []) > 1 else None
+        )
+        if before is not None:
+            # What the run replaced, to read for drift in meaning (MINI-92).
+            if before.get("definition") != entry.get("definition"):
+                lines += [
+                    f"_Definition before:_ {before.get('definition') or '(empty)'}",
+                    "",
+                ]
+            if before.get("context") != entry.get("context"):
+                lines += [
+                    f"_In practice before:_ {before.get('context') or '(none)'}",
+                    "",
+                ]
     return "\n".join(lines)

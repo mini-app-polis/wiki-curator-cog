@@ -685,9 +685,162 @@ def test_condense_can_be_tried_on_named_pages_first() -> None:
 def test_the_prompts_ask_for_one_idea_per_sentence() -> None:
     for prompt in (generate.SYSTEM_PROMPT, generate.CONDENSE_PROMPT):
         flat = " ".join(prompt.replace("\\\n", " ").split())
-        assert "one idea each" in flat
-        assert "never join two points with a dash, a semicolon" in flat
-    assert "never how the word is used" in generate.CONDENSE_PROMPT
+        assert "Never join two points in one sentence" in flat
+        assert "Never use a semicolon, a long dash" in flat
+        # The model copies the instructions' own style, so they use neither.
+        assert "—" not in prompt
+        assert ";" not in prompt
+    flat = " ".join(generate.CONDENSE_PROMPT.replace("\\\n", " ").split())
+    assert "Reword, never reinterpret" in flat
+
+
+def test_word_talk_is_removed_from_a_definition() -> None:
+    strike = (
+        "The action of the foot pressing into the floor. "
+        "'Foot strike' is another name for it, but 'strike' is the preferred term."
+    )
+    assert generate.without_word_talk(strike) == (
+        "The action of the foot pressing into the floor."
+    )
+    assert generate.without_word_talk("Only the thing.") == "Only the thing."
+
+
+class RewritesEverythingLLM(FakeLLM):
+    """A condense answer that also rewrites the definition, as strike's did."""
+
+    def __init__(self, context: str) -> None:
+        super().__init__()
+        self.context = context
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        return LLMResult(
+            "fake",
+            "fake",
+            {"definition": "The moment the foot lands.", "context": self.context},
+            "",
+        )
+
+
+def _one_over_shape(definition: str) -> tuple[generate.Corpus, generate.ProseFile]:
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    prose.entities["anchor-step"] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": definition,
+        "context": " ".join(f"S{i}." for i in range(8)),
+        "integrated": [],
+        "revisions": [],
+    }
+    return corpus, prose
+
+
+def test_condense_keeps_a_definition_within_its_shape() -> None:
+    """MINI-92: the rewrite undid strike's note-led definition."""
+    corpus, prose = _one_over_shape(
+        "The foot pressing into the floor. 'Foot strike' is another name for it."
+    )
+    generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One point. Another."), model="m"
+    )
+    assert prose.definition("anchor-step") == "The foot pressing into the floor."
+    assert prose.context("anchor-step") == "One point. Another."
+
+
+def test_a_dry_run_condense_judges_nothing() -> None:
+    """The dry-run client answers nothing, so every page would look unchanged."""
+    corpus, prose = _one_over_shape("Def.")
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("Still. " * 5), model="m", dry_run=True
+    )
+    assert result["not_kept"] == 0
+    assert result["slugs"] == ["anchor-step"]
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        "One point — joined to another. Two.",
+        "Still. " * 5,
+    ],
+)
+def test_a_rewrite_still_over_the_shape_is_not_stored(context: str) -> None:
+    corpus, prose = _one_over_shape("Def.")
+    before = prose.context("anchor-step")
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM(context.strip()), model="m"
+    )
+    assert result["not_kept_slugs"] == ["anchor-step"]
+    assert result["not_kept_why"]["anchor-step"]["problems"]
+    assert result["slugs"] == []
+    assert prose.context("anchor-step") == before
+
+
+class FixesOnSecondTryLLM(FakeLLM):
+    """Joins two points with a long dash first; told what is wrong, fixes it."""
+
+    def generate_json(
+        self, *, messages, json_schema, schema_name="output"
+    ) -> LLMResult:
+        user = messages[-1].content
+        self.calls.append({"user": user})
+        context = (
+            "Short point. Another short point."
+            if "not accepted because the context uses a long dash" in user
+            else "One point — another point."
+        )
+        return LLMResult("fake", "fake", {"definition": "D.", "context": context}, "")
+
+
+def test_a_rejected_rewrite_gets_one_more_try_told_what_to_fix() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    llm = FixesOnSecondTryLLM()
+    result = generate.run_condense(corpus, prose, llm, model="m")
+    assert len(llm.calls) == 2
+    assert "One point — another point." in llm.calls[1]["user"]
+    assert result["slugs"] == ["anchor-step"]
+    assert prose.context("anchor-step") == "Short point. Another short point."
+
+
+def test_a_citation_is_kept_once_before_the_full_stop() -> None:
+    """The sugar push rewrite cited one source after every sentence."""
+    src = "([[sources/2026-09-23-level-3-week-4]])"
+    messy = f"First point. {src} Second point. {src} Third point. {src}"
+    assert (
+        generate.tidy_citations(messy)
+        == f"First point. Second point. Third point {src}."
+    )
+    two = "One ([[sources/a]], [[sources/b]]). Two ([[sources/c]])."
+    assert generate.tidy_citations(two) == two
+
+
+def test_the_review_shows_what_a_rewrite_replaced() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    before = prose.context("anchor-step")
+    entry = prose.entities["anchor-step"]
+    entry["revisions"] = [{"by": "llm", "definition": "Def.", "context": before}]
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One point. Another."), model="m"
+    )
+    review = generate.review_markdown(prose, result["slugs"])
+    assert "**In practice.** One point. Another." in review
+    assert f"_In practice before:_ {before}" in review
+    assert "_Definition before:_" not in review
+
+
+def test_a_single_semicolon_is_not_refused() -> None:
+    context = "The common mistake is rushing; instead, wait for the lead. Two. Three."
+    assert generate.shape_problems("D.", context) == []
+
+
+def test_shape_problems_say_what_to_fix() -> None:
+    long = "Word " + " ".join(["word"] * 34) + "."
+    assert generate.shape_problems("D.", f"{long} Two; three — four.") == [
+        "a context sentence has 35 words (at most 30)",
+        "the context uses a long dash",
+    ]
+    assert generate.shape_problems("D.", "Fine. Short.") == []
 
 
 class LongThenShortLLM(FakeLLM):
@@ -746,7 +899,7 @@ def test_condense_rewrites_only_pages_over_shape_and_keeps_the_watermark() -> No
 
 def test_the_prompt_fixes_the_shape_and_rewrites_rather_than_appends() -> None:
     flat = " ".join(generate.SYSTEM_PROMPT.replace("\\\n", " ").split())
-    assert "At most three sentences" in flat
+    assert "at most three sentences" in flat
     assert "It never grows" in flat
     assert "a draft to improve" in flat
 
@@ -828,3 +981,101 @@ def test_a_local_link_or_consolidate_rebuilds_every_page_when_it_changed_any(
         mat.assert_called_once_with(tmp_path / ".curator", entities=None, state="api")
     else:
         mat.assert_not_called()
+
+
+# ── putting back a rewrite that changed meaning (MINI-92) ──
+
+
+def _rewritten(prose: generate.ProseFile, slug: str, *, statements: int = 0) -> None:
+    prose.entities[slug] = {
+        "generator_version": generate.GENERATOR_VERSION,
+        "definition": "Def.",
+        "context": "Rewritten, wrongly.",
+        "integrated": ["k1"],
+        "revisions": [
+            {
+                "by": "llm",
+                "statements": 3,
+                "definition": "Def.",
+                "context": "Accurate.",
+            },
+            {
+                "by": "llm",
+                "statements": statements,
+                "definition": "Def.",
+                "context": "Rewritten, wrongly.",
+            },
+        ],
+    }
+
+
+def test_revert_puts_back_the_text_before_the_rewrite() -> None:
+    prose = generate.ProseFile()
+    _rewritten(prose, "tuck-turn")
+    result = generate.revert(prose, ["tuck-turn"], today="2026-10-19")
+    assert result["slugs"] == ["tuck-turn"]
+    assert prose.context("tuck-turn") == "Accurate."
+    assert prose.integrated("tuck-turn") == {"k1"}
+    assert prose.entities["tuck-turn"]["revisions"][-1]["by"] == "page"
+    # twice is a no-op, not a step further back
+    again = generate.revert(prose, ["tuck-turn"])
+    assert again["refused"] == {"tuck-turn": "its text was last chosen by a person"}
+    assert prose.context("tuck-turn") == "Accurate."
+
+
+def test_revert_refuses_a_page_whose_last_change_was_new_evidence() -> None:
+    prose = generate.ProseFile()
+    _rewritten(prose, "strike", statements=2)
+    result = generate.revert(prose, ["strike", "nowhere"])
+    assert result["slugs"] == []
+    assert set(result["refused"]) == {"strike", "nowhere"}
+    assert prose.context("strike") == "Rewritten, wrongly."
+
+
+def test_a_rewrite_pass_leaves_a_reverted_page_alone() -> None:
+    corpus, prose = _one_over_shape("Def.")
+    entry = prose.entities["anchor-step"]
+    entry["revisions"] = [{"by": "page", "definition": "Def.", "context": "x"}]
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("One. Two."), model="m"
+    )
+    assert result["over_shape"] == 0
+
+
+def test_placeholder_citations_are_removed() -> None:
+    text = "One point [(source)]. Two [citation needed]. Three [citation]."
+    assert generate.tidy_citations(text) == "One point. Two. Three."
+
+
+def test_generate_revert_passes_through_and_rebuilds_what_it_reverted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with (
+        patch.object(main, "api_state", return_value="api"),
+        patch.object(
+            main, "generate_local", return_value={"slugs": ["tuck-turn"]}
+        ) as run,
+        patch.object(main, "materialise_local", return_value={}) as mat,
+    ):
+        assert main.main(["generate", "--revert", "--entity", "tuck-turn"]) == 0
+    assert run.call_args.kwargs["revert"] is True
+    mat.assert_called_once_with(
+        tmp_path / ".curator", entities=["tuck-turn"], state="api"
+    )
+
+
+def test_revert_needs_named_pages(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="needs --entity"):
+        with patch.object(flow, "_fetch_export", return_value=_export()):
+            flow.generate_local(tmp_path / "prose.json", revert=True)
+
+
+def test_a_revert_is_a_revision_the_api_accepts() -> None:
+    """The API's contract knows only llm and page (the first revert run failed)."""
+    from mini_app_polis.api.contract import WcsWikiProseRevision
+
+    prose = generate.ProseFile()
+    _rewritten(prose, "tuck-turn")
+    generate.revert(prose, ["tuck-turn"], today="2026-10-19")
+    WcsWikiProseRevision.model_validate(prose.entities["tuck-turn"]["revisions"][-1])
