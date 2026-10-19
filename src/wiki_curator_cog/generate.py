@@ -920,13 +920,15 @@ def run_condense(
     workers: int = 1,
     on_entity: Any = None,
     only: Sequence[str] = (),
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     """Rewrite every entity whose stored prose has outgrown the shape.
 
     No new evidence and no change to the watermark: only the text is
     tightened, and the result is recorded as a revision like any other.
     ``only`` limits it to these slugs (still only those over the shape), to
-    try a prompt change on a sample before the whole wiki.
+    try a prompt change on a sample before the whole wiki. In a ``dry_run``
+    nothing is rewritten, so nothing is judged as still over the shape.
     """
     day = today or dt.date.today().isoformat()
     lock = threading.Lock()
@@ -955,7 +957,7 @@ def run_condense(
         if corpus.pages is not None:
             definition = corpus.pages.repair(definition)
             context = corpus.pages.repair(context)
-        if over_shape(definition, context) or joins_ideas(context):
+        if not dry_run and (over_shape(definition, context) or joins_ideas(context)):
             # Half fixed is not stored: the page keeps its text and is named
             # for a look, and the next run tries it again.
             LOG.warning("condense.not_kept slug=%s still over the shape", entity.slug)

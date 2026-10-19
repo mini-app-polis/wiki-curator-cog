@@ -746,6 +746,16 @@ def test_condense_keeps_a_definition_within_its_shape() -> None:
     assert prose.context("anchor-step") == "One point. Another."
 
 
+def test_a_dry_run_condense_judges_nothing() -> None:
+    """The dry-run client answers nothing, so every page would look unchanged."""
+    corpus, prose = _one_over_shape("Def.")
+    result = generate.run_condense(
+        corpus, prose, RewritesEverythingLLM("Still. " * 5), model="m", dry_run=True
+    )
+    assert result["not_kept"] == 0
+    assert result["slugs"] == ["anchor-step"]
+
+
 @pytest.mark.parametrize(
     "context",
     [

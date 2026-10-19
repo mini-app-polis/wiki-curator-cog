@@ -375,6 +375,7 @@ def generate_local(
             model=model,
             workers=workers,
             only=entities or (),
+            dry_run=dry_run,
             on_entity=None if dry_run else (lambda: store.save(prose, prose_path)),
         )
         if dry_run:
