@@ -53,6 +53,10 @@ REPO = "wiki-curator-cog"
 #: read the corpus.
 MACHINE_NAME = "wiki-curator-cog"
 
+#: The run a local command's page writes are stored with (MINI-101); the
+#: worker uses the queue message id.
+LOCAL_JOB_ID = "local"
+
 
 def _fetch_export() -> WcsWikiExportItem:
     """GET /v1/wcs/wiki/export — the full canonical corpus, in one call.
@@ -451,7 +455,8 @@ def consolidate_local(
     MINI-93, local half. Runs on the corpus after the notes' alias merges, so
     a merged-away name is not decided twice. With ``prose_path``, the model
     sees each entity's generated definition. Saves after every batch, and
-    writes a review grouped by broader page next to the facets file.
+    writes a review grouped by broader page next to the facets file. With the
+    API as the store, the thin list is stored there too (MINI-101).
     """
     export = _fetch_export()
     _require_corpus(export)
@@ -497,11 +502,15 @@ def consolidate_local(
     thin_path.write_text(
         consolidate.thin_review_markdown(export, facets, supports, definitions)
     )
+    thin = store.save_thin(
+        consolidate.thin_entities(export, facets, supports, definitions)
+    )
     LOG.info("consolidate.complete %s", counts)
     return {
         "facets_file": str(facets_path),
         "review_file": str(review_path),
         "thin_review_file": str(thin_path),
+        **({"thin_written": thin} if thin is not None else {}),
         "consolidator_versions": dict(consolidate.CONSOLIDATOR_VERSIONS),
         "model": model,
         "used_links": links is not None,
@@ -551,6 +560,7 @@ def run_job(
         llm=llm,
         model=model,
         wiki_repo_path=wiki_repo_path,
+        job_id=LOCAL_JOB_ID,
     )
     result = units.handle(job, ctx)
     return {**result, "dry_run": dry_run, "usage": usage.usage_of(llm)}
@@ -582,6 +592,7 @@ def materialise_local(
         units.StatePaths.under(state_dir),
         llm=None,
         model="",
+        job_id=LOCAL_JOB_ID,
     )
     result = units.materialise_pages(ctx, entities or None)
     summary = {
@@ -620,7 +631,7 @@ class _NoWrites(state_backend.FileState):
         """Discard the write: a dry run changes no state."""
         return None
 
-    def save_pages(self, pages, remove, folder: Path) -> dict[str, Any]:  # type: ignore[no-untyped-def]
+    def save_pages(self, pages, remove, folder: Path, **origin) -> dict[str, Any]:  # type: ignore[no-untyped-def]
         """Discard the pages: a dry run stores nothing."""
         return {
             "written": 0,

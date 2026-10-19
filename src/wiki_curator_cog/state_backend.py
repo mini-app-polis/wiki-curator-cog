@@ -29,11 +29,17 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 from mini_app_polis import logger as log
-from mini_app_polis.api.contract import WcsWikiPage, WcsWikiPagesWrite
+from mini_app_polis.api.contract import (
+    WcsWikiPage,
+    WcsWikiPagesWrite,
+    WcsWikiThinEntity,
+    WcsWikiThinWrite,
+)
 
 from . import consolidate, generate, link, state_store
 
@@ -47,6 +53,21 @@ FLUSH_SECONDS = 20.0
 PAGES_PER_POST = 50
 #: Slugs removed per POST, within the contract's limit.
 REMOVES_PER_POST = 500
+
+
+def _max_length(model: Any, name: str) -> int:
+    return int(
+        next(
+            m.max_length
+            for m in model.model_fields[name].metadata
+            if getattr(m, "max_length", None) is not None
+        )
+    )
+
+
+#: Thin entities, and slugs removed, per POST: the contract's limits.
+THIN_PER_POST = _max_length(WcsWikiThinWrite, "entities")
+THIN_REMOVES_PER_POST = _max_length(WcsWikiThinWrite, "remove")
 
 StateObject = link.LinksFile | consolidate.FacetsFile | generate.ProseFile
 
@@ -94,14 +115,23 @@ class FileState:
         obj.save(path)
 
     def save_pages(
-        self, pages: list[WcsWikiPage], remove: list[str], folder: Path
+        self,
+        pages: list[WcsWikiPage],
+        remove: list[str],
+        folder: Path,
+        *,
+        origin_source_id: uuid.UUID | str | None = None,
+        origin_job_id: str | None = None,
     ) -> dict[str, Any]:
         """Write each page document to ``folder/<slug>.json``; delete the removed.
 
         Page documents are not state the passes read back: the files are only
         a copy to read. Each is compared with the file it replaces, so a
         local run says which pages are new, changed or gone, as the API does.
+        The origin is the API's to keep (MINI-101); the files have no place
+        for it.
         """
+        _ = origin_source_id, origin_job_id
         folder.mkdir(parents=True, exist_ok=True)
         created: list[str] = []
         changed: list[str] = []
@@ -126,6 +156,11 @@ class FileState:
             "changed": sorted(changed),
             "removed_slugs": sorted(removed_slugs),
         }
+
+    def save_thin(self, entities: list[WcsWikiThinEntity]) -> dict[str, int] | None:
+        """Nothing: without the API, ``thin-review.md`` is the thin list."""
+        _ = entities
+        return None
 
 
 # ── Between the file objects and the API's documents ──
@@ -269,7 +304,13 @@ class ApiState(FileState):
         return obj
 
     def save_pages(
-        self, pages: list[WcsWikiPage], remove: list[str], folder: Path
+        self,
+        pages: list[WcsWikiPage],
+        remove: list[str],
+        folder: Path,
+        *,
+        origin_source_id: uuid.UUID | str | None = None,
+        origin_job_id: str | None = None,
     ) -> dict[str, Any]:
         """Send the page documents to the API, in chunks; keep a copy in ``folder``.
 
@@ -277,14 +318,25 @@ class ApiState(FileState):
         page removed and its replacement unwritten. A refused POST raises, and
         the job is retried; a re-sent page is a no-op. What is new, changed or
         gone is the API's answer, compared with what it stored; the copy here
-        is a fresh folder each run and has nothing to compare against.
+        is a fresh folder each run and has nothing to compare against. Every
+        chunk carries the origin — the source that started the work and the
+        run that wrote it — so each revision can say what changed it.
         """
         super().save_pages(pages, remove, folder)
+        source = uuid.UUID(str(origin_source_id)) if origin_source_id else None
         posts = [
-            WcsWikiPagesWrite(pages=pages[i : i + PAGES_PER_POST])
+            WcsWikiPagesWrite(
+                pages=pages[i : i + PAGES_PER_POST],
+                origin_source_id=source,
+                origin_job_id=origin_job_id,
+            )
             for i in range(0, len(pages), PAGES_PER_POST)
         ] + [
-            WcsWikiPagesWrite(remove=remove[i : i + REMOVES_PER_POST])
+            WcsWikiPagesWrite(
+                remove=remove[i : i + REMOVES_PER_POST],
+                origin_source_id=source,
+                origin_job_id=origin_job_id,
+            )
             for i in range(0, len(remove), REMOVES_PER_POST)
         ]
         written = removed = 0
@@ -312,6 +364,40 @@ class ApiState(FileState):
             "changed": sorted(changed),
             "removed_slugs": sorted(removed_slugs),
         }
+
+    def save_thin(self, entities: list[WcsWikiThinEntity]) -> dict[str, int]:
+        """Make the API's thin list this one: upsert what differs, remove the rest.
+
+        The stored list is read first, so an entity that has not changed is
+        not sent again and a slug no longer thin is removed. Upserts go
+        before removals, in chunks the contract allows. No model call.
+        """
+        stored = {
+            e.slug: e.model_dump(mode="json")
+            for e in self.client.get_wcs_wiki_thin().entities
+        }
+        current = {e.slug: e for e in entities}
+        send = [
+            current[s]
+            for s in sorted(current)
+            if stored.get(s) != current[s].model_dump(mode="json")
+        ]
+        remove = sorted(set(stored) - set(current))
+        posts = [
+            WcsWikiThinWrite(entities=send[i : i + THIN_PER_POST])
+            for i in range(0, len(send), THIN_PER_POST)
+        ] + [
+            WcsWikiThinWrite(remove=remove[i : i + THIN_REMOVES_PER_POST])
+            for i in range(0, len(remove), THIN_REMOVES_PER_POST)
+        ]
+        written = removed = 0
+        for post in posts:
+            result = self.client.put_wcs_wiki_thin(post)
+            written += result.written
+            removed += result.removed
+        summary = {"total": len(current), "written": written, "removed": removed}
+        LOG.info("thin.write %s", summary)
+        return summary
 
     def save(self, obj: StateObject, path: Path, *, final: bool = False) -> None:
         """Write the cache; send what changed once enough has, or at the end."""

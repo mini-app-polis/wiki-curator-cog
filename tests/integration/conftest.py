@@ -30,6 +30,7 @@ from mini_app_polis.api.contract import (
     WcsWikiLinksState,
     WcsWikiPagesWrite,
     WcsWikiProseState,
+    WcsWikiThinWrite,
 )
 
 from wiki_curator_cog import worker
@@ -78,6 +79,10 @@ class FakeApi:
         #: Status to answer pages POSTs with; 200 unless a test breaks it.
         self.pages_status = 200
         self.calls: list[str] = []
+        #: Thin entities as the API stores them, by slug (MINI-101).
+        self.thin: dict[str, dict[str, Any]] = {}
+        #: Each pages POST's origin: (origin_source_id, origin_job_id).
+        self.page_origins: list[tuple[str | None, str | None]] = []
 
     def _authorised(self, request: httpx.Request) -> None:
         assert request.headers.get("Authorization") == f"Bearer {API_KEY}"
@@ -96,6 +101,24 @@ class FakeApi:
         if request.method == "GET" and path == "/v1/wcs/wiki/export":
             return httpx.Response(
                 200, json=_envelope(self.export.model_dump(mode="json"))
+            )
+        if path == "/v1/wcs/wiki/state/thin":
+            if request.method == "GET":
+                entities = [self.thin[s] for s in sorted(self.thin)]
+                return httpx.Response(200, json=_envelope({"entities": entities}))
+            thin = self._strict(WcsWikiThinWrite, json.loads(request.content))
+            for e in thin.entities:
+                self.thin[e.slug] = e.model_dump(mode="json")
+            gone = [s for s in thin.remove if self.thin.pop(s, None) is not None]
+            return httpx.Response(
+                200,
+                json=_envelope(
+                    {
+                        "written": len(thin.entities),
+                        "removed": len(gone),
+                        "total": len(self.thin),
+                    }
+                ),
             )
         if path.startswith("/v1/wcs/wiki/state/"):
             name = path.rsplit("/", 1)[-1]
@@ -119,6 +142,12 @@ class FakeApi:
                 )
             body = json.loads(request.content)
             write = self._strict(WcsWikiPagesWrite, body)
+            self.page_origins.append(
+                (
+                    str(write.origin_source_id) if write.origin_source_id else None,
+                    write.origin_job_id,
+                )
+            )
             for page in write.pages:
                 self.pages[page.slug] = page.model_dump(mode="json")
             gone = [s for s in write.remove if self.pages.pop(s, None) is not None]

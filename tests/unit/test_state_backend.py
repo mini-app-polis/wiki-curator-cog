@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from mini_app_polis.api.contract import WcsWikiThinEntity
 
 import wiki_curator_cog.flow as flow
 import wiki_curator_cog.main as main
@@ -238,3 +240,62 @@ def test_a_file_flag_still_overrides_one_file(
         gen.call_args.kwargs["links_path"]
         == (tmp_path / ".curator" / "links.json").resolve()
     )
+
+
+# ── The thin list (MINI-101) ──
+
+
+def _thin(slug: str, **over: Any) -> WcsWikiThinEntity:
+    return WcsWikiThinEntity(
+        slug=slug, name=slug, kind="concept", sources=1, references=0, page=slug, **over
+    )
+
+
+def test_the_thin_list_is_made_the_api_s_in_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(state_backend, "THIN_PER_POST", 2)
+    monkeypatch.setattr(state_backend, "THIN_REMOVES_PER_POST", 1)
+    api = FakeApi()
+    store = state_backend.ApiState(api)
+    first = store.save_thin([_thin("a"), _thin("b"), _thin("c"), _thin("d")])
+    assert first == {"total": 4, "written": 4, "removed": 0}
+    assert [len(p.entities) for p in api.thin_posts] == [2, 2]
+
+    api.thin_posts.clear()
+    # c changed; a and d are no longer thin; b is as it was
+    second = store.save_thin([_thin("b"), _thin("c", definition="Now defined.")])
+    assert second == {"total": 2, "written": 1, "removed": 2}
+    assert [(len(p.entities), p.remove) for p in api.thin_posts] == [
+        (1, []),
+        (0, ["a"]),
+        (0, ["d"]),
+    ]
+    assert set(api.thin) == {"b", "c"}
+    assert api.thin["c"]["definition"] == "Now defined."
+
+
+def test_without_the_api_there_is_no_thin_list_to_store() -> None:
+    assert state_backend.FileState().save_thin([_thin("a")]) is None
+
+
+def test_a_local_consolidate_stores_the_thin_list_and_still_writes_the_file(
+    tmp_path: Path,
+) -> None:
+    from .test_units import RouterLLM
+    from .test_units import _export as _units_export
+
+    api = FakeApi()
+    path = tmp_path / "facets.json"
+    with (
+        patch.object(flow, "_fetch_export", return_value=_units_export()),
+        patch.object(link, "llm_from_env", return_value=(RouterLLM(), "fake/m")),
+    ):
+        summary = flow.consolidate_local(
+            path,
+            prose_path=tmp_path / "prose.json",
+            links_path=tmp_path / "links.json",
+            state=state_backend.ApiState(api),
+        )
+    assert (tmp_path / "thin-review.md").exists()
+    assert api.thin and summary["thin_written"]["total"] == len(api.thin)

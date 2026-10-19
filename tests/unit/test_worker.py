@@ -352,3 +352,34 @@ def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
         )
     assert opened == [("wiki-materialise", "m-9")]
     assert sent == [True]
+
+
+def test_a_consolidation_counts_its_thin_list() -> None:
+    report = _Report()
+    worker.record(
+        report,
+        {"job": "consolidate", "entities": ["a"]},
+        {"decided": 1, "thin": {"total": 12, "written": 2, "removed": 1}},
+    )
+    assert (
+        report.counts["thin_entities"],
+        report.counts["thin_written"],
+        report.counts["thin_removed"],
+    ) == (12, 2, 1)
+
+
+def test_the_worker_stores_its_message_id_on_the_pages(tmp_path: Path) -> None:
+    api = Api()
+    with (
+        patch.object(worker, "_fetch_export", return_value=_export()),
+        patch.object(worker.link, "llm_from_env", return_value=(RouterLLM(), "f/m")),
+    ):
+        worker.run(
+            {"job": "materialise", "entities": ["stretch"], "origin_source_id": SOURCE},
+            client=api,
+            state_dir=tmp_path,
+            run_id="m-7",
+        )
+    assert [(str(p.origin_source_id), p.origin_job_id) for p in api.page_posts] == [
+        (SOURCE, "m-7")
+    ]

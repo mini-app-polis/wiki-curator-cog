@@ -45,9 +45,11 @@ Locally: `render` writes the same pages as markdown into a wcs-wiki clone.
 | Job | Unit | Writes | Follows with |
 |---|---|---|---|
 | `link` | one source's statements | references | `consolidate` for its undecided entities; `generate` for every page its newly linked statements touched |
-| `consolidate` | named entities | facet decisions | `generate` for each page that gained a fold |
+| `consolidate` | named entities | facet decisions; the thin list, over the whole corpus | `generate` for each page that gained a fold |
 | `generate` | named entities | prose revisions | `materialise` for every page it was asked about |
 | `materialise` | named pages, or none for every page (the /admin/wiki rebuild, one job) | page documents; removes pages folded away | — |
+
+Every follow-on carries `origin_source_id`: a `link` job names its own source, every other job passes on the one it was given, and admin or operator work has none. `materialise` stores it on each page write, with the queue message id as `origin_job_id` (MINI-101).
 
 Every model pass is watermarked in the API, so a repeated job makes no model call. `materialise` calls no model. The same functions run locally through the `job`, `link`, `consolidate`, `generate` and `materialise` commands (README).
 
