@@ -1,3 +1,10 @@
+## [3.7.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.7.0...v3.7.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* 'also called' leaves out the names of folded facets (MINI-107) ([e5905a7](https://github.com/mini-app-polis/wiki-curator-cog/commit/e5905a79b64215f02ea68d6b3e3a6b1f5b2d9603))
+
 # [3.7.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.6.0...v3.7.0) (2026-10-19)
 
 
