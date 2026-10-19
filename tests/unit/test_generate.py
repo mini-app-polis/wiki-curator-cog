@@ -251,6 +251,70 @@ def test_a_new_version_regenerates_from_scratch() -> None:
     assert len(llm.calls[1]["statements"]) == 2
 
 
+# ── notes (MINI-92) ──
+
+
+def _with_note() -> tuple[WcsWikiExport, generate.Corpus]:
+    export = _export()
+    note = _source("Note", dt.date(2026, 10, 19)).model_copy(
+        update={"session_type": "correction"}
+    )
+    export = export.model_copy(
+        update={
+            "sources": [*export.sources, note],
+            "attributions": [
+                *export.attributions,
+                WcsAttribution(
+                    id=_id("a-note"),
+                    source_id=note.id,
+                    entity_id=_id("anchor-step"),
+                    attribution_kind="taught",
+                    prose="The anchor is the end of the pattern, not a travel step.",
+                ),
+            ],
+        }
+    )
+    return export, generate.build_corpus(export)
+
+
+def test_a_note_is_shown_to_the_model_as_one() -> None:
+    _, corpus = _with_note()
+    by_text = {e.text: e for e in corpus.own["anchor-step"]}
+    note = by_text["The anchor is the end of the pattern, not a travel step."]
+    lesson = by_text["The anchor travels backward."]
+    assert note.as_prompt()["from"] == "note"
+    assert "from" not in lesson.as_prompt()
+
+
+def test_a_new_note_rule_regenerates_only_pages_a_note_speaks_to() -> None:
+    _, corpus = _with_note()
+    prose = generate.ProseFile()
+    llm = FakeLLM()
+    anchor, stretch = corpus.entities["anchor-step"], corpus.entities["stretch"]
+    generate.run_generation([anchor, stretch], corpus, prose, llm, model="m")
+    assert not generate.pending(anchor, corpus, prose)
+
+    with patch.object(generate, "NOTE_RULE_VERSION", "next"):
+        _, corpus = _with_note()
+        assert [e.text for e in generate.pending(anchor, corpus, prose)] == [
+            "The anchor is the end of the pattern, not a travel step."
+        ]
+        assert not generate.pending(corpus.entities["stretch"], corpus, prose)
+        generate.run_generation(
+            [corpus.entities["anchor-step"]], corpus, prose, llm, model="m"
+        )
+
+    # integrated on top of the current text, not from scratch
+    assert llm.calls[-1]["base"] == "Definition from 3 statements."
+    assert len(llm.calls[-1]["statements"]) == 1
+
+
+def test_the_prompt_puts_a_note_ahead_of_the_current_definition() -> None:
+    assert '"from": "note"' in generate.SYSTEM_PROMPT
+    assert "even when the current definition reads well" in generate.SYSTEM_PROMPT
+    assert "never how the word is used" in generate.SYSTEM_PROMPT
+
+
 # ── the page is the base ──
 
 
