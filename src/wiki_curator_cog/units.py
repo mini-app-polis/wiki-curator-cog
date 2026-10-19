@@ -227,6 +227,8 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
     follow = ([_job("consolidate", sid, entities=undecided)] if undecided else []) + (
         _generate_jobs(touched, sid)
     )
+    # References are what make an entity thin or not, and they change here.
+    thin = _refresh_thin(ctx) if newly else None
     return {
         "job": "link",
         "source_id": str(sid),
@@ -234,6 +236,7 @@ def link_source(ctx: RunContext, source_id: uuid.UUID | str) -> dict[str, Any]:
         **{k: counts[k] for k in ("skipped", "linked", "failed_batches")},
         #: What this run found that was not there before: one per reference.
         "references": sorted(references),
+        **({"thin": thin} if thin is not None else {}),
         "next": follow,
     }
 
@@ -249,7 +252,8 @@ def consolidate_entities(
     Run on the export with only the notes' merges applied, as the full pass
     is, so an entity is decided by its own name and evidence. Then, with the
     API as the store, the thin list is refreshed for the whole corpus (see
-    :func:`_save_thin`).
+    :func:`_save_thin`); a link job and the every-page rebuild refresh it
+    too (:func:`_refresh_thin`).
     """
     raw = ctx.raw_export if ctx.raw_export is not None else ctx.export
     export, merges = identity.resolve(raw)
@@ -284,6 +288,23 @@ def consolidate_entities(
         **({"thin": thin} if thin is not None else {}),
         "next": _generate_jobs(gained, origin),
     }
+
+
+def _refresh_thin(ctx: RunContext) -> dict[str, int] | None:
+    """The thin list from the state as it stands, stored when the API is the store.
+
+    For a job that did not just compute the supports itself: a link job,
+    whose new references change them, and the every-page rebuild, the free
+    way to refresh the list by hand (MINI-101). Built as ``consolidate``
+    builds it — the notes' merges only, and the current fold decisions.
+    """
+    if not isinstance(ctx.store, state_backend.ApiState):
+        return None
+    raw = ctx.raw_export if ctx.raw_export is not None else ctx.export
+    export, merges = identity.resolve(raw)
+    links = ctx.store.links(ctx.paths.links)
+    supports = consolidate.support(export, links, merges)
+    return _save_thin(ctx, export, ctx.facets, supports)
 
 
 def _save_thin(
@@ -373,7 +394,8 @@ def materialise_pages(
     linker's proposed concepts included: the local backfill, and the
     /admin/wiki rebuild — one job, since the export read every job pays
     costs more than building the pages. The pages are stored with
-    ``origin`` and the context's ``job_id``.
+    ``origin`` and the context's ``job_id``. Every page also refreshes the
+    thin list.
     """
     links = ctx.store.links(ctx.paths.links)
     prose = ctx.store.prose(ctx.paths.prose)
@@ -422,6 +444,9 @@ def materialise_pages(
         origin_source_id=origin,
         origin_job_id=ctx.job_id,
     )
+    # Every page rebuilt: refresh the thin list too, so a rebuild from
+    # /admin/wiki brings the Review panel's Thin tab up to date for free.
+    thin = _refresh_thin(ctx) if slugs is None else None
     return {
         "job": "materialise",
         "entities": sorted(targets),
@@ -434,6 +459,7 @@ def materialise_pages(
         "created": counts.get("created", []),
         "changed": counts.get("changed", []),
         "removed_slugs": counts.get("removed_slugs", []),
+        **({"thin": thin} if thin is not None else {}),
         "next": [],
     }
 
