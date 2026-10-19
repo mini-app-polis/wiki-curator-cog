@@ -83,6 +83,9 @@ NOTE_RULE_VERSION = "1"
 DEFINITION_MAX_WORDS = 55
 CONTEXT_MAX_WORDS = 100
 CONTEXT_MAX_SENTENCES = 3
+#: One idea per sentence (MINI-92): the prompt asks for about 20 words, and a
+#: sentence past this is several ideas joined with dashes and semicolons.
+CONTEXT_MAX_SENTENCE_WORDS = 30
 
 #: Attempts per entity before it is skipped for this run. A malformed
 #: response is usually a one-off; a second failure is reported, and the
@@ -459,11 +462,13 @@ saying what it is. No citations, no links, no history, no advice, no \
 qualifications.
 
 context — optional, shown lower on the page under "In practice". At most \
-three sentences, about 80 words in all, one paragraph. Each sentence has a \
-job: how it works or is done; the key thing people get wrong and what is \
-right instead; how it connects to the bigger ideas. Use fewer when there is \
-less to say, and an empty string when there is nothing worth adding — \
-common for thin entities.
+three sentences, one paragraph. Each sentence makes one point, in about 20 \
+words: how it works or is done; the key thing people get wrong and what is \
+right instead; how it connects to the bigger ideas. Short sentences, one \
+idea each: never join two points with a dash, a semicolon or a list inside \
+one sentence. If a point needs that, it is two points; keep the stronger. \
+Use fewer sentences when there is less to say, and an empty string when \
+there is nothing worth adding, which is common for thin entities.
 
 The shape is fixed. It never grows: the page gets better, not longer.
 
@@ -529,10 +534,13 @@ its shape. Rewrite the definition and context below to fit it, keeping the \
 most useful points and their citations and links, adding nothing new.
 
 definition — one or two plain sentences, at most about 40 words; no \
-citations or links.
-context — at most three sentences, about 80 words, one paragraph: how it \
-works or is done; the key mistake and what is right instead; how it \
-connects to the bigger ideas. Merge or drop the weaker points to fit.
+citations or links. Say what the thing is, never how the word is used: no \
+"the term", "another name", "the preferred term".
+context — at most three sentences, one paragraph, each making one point in \
+about 20 words: how it works or is done; the key mistake and what is right \
+instead; how it connects to the bigger ideas. Short sentences, one idea \
+each: never join two points with a dash, a semicolon or a list inside one \
+sentence. Drop the weaker points to fit rather than packing them in.
 
 Keep the same voice: an experienced dancer explaining to another dancer. \
 Output ONLY valid JSON, exactly {"definition": "...", "context": "..."}. \
@@ -543,11 +551,24 @@ quotes or single quotes.
 _SENTENCE_END = re.compile(r"[.!?](?:[)\]”’'\"]*)(?=\s+[A-Z(\[“‘]|\s*$)")
 
 
+def _plain(text: str) -> str:
+    """``text`` as read: citations dropped, links as their labels."""
+    plain = re.sub(r"\(\[\[[^)]*\]\]\)", "", text)
+    return re.sub(r"\[\[[^\]|]*\|?([^\]]*)\]\]", r"\1", plain).strip()
+
+
 def _sentences(text: str) -> int:
     """Roughly how many sentences ``text`` has; links and citations ignored."""
-    plain = re.sub(r"\(\[\[[^)]*\]\]\)", "", text)
-    plain = re.sub(r"\[\[[^\]|]*\|?([^\]]*)\]\]", r"\1", plain).strip()
+    plain = _plain(text)
     return len(_SENTENCE_END.findall(plain)) if plain else 0
+
+
+def _longest_sentence(text: str) -> int:
+    """Words in the longest sentence of ``text``; links and citations ignored."""
+    plain = _plain(text)
+    if not plain:
+        return 0
+    return max(len(part.split()) for part in _SENTENCE_END.split(plain))
 
 
 def over_shape(definition: str, context: str) -> bool:
@@ -556,6 +577,7 @@ def over_shape(definition: str, context: str) -> bool:
         len(definition.split()) > DEFINITION_MAX_WORDS
         or len(context.split()) > CONTEXT_MAX_WORDS
         or _sentences(context) > CONTEXT_MAX_SENTENCES
+        or _longest_sentence(context) > CONTEXT_MAX_SENTENCE_WORDS
     )
 
 
@@ -860,11 +882,14 @@ def run_condense(
     today: str | None = None,
     workers: int = 1,
     on_entity: Any = None,
+    only: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Rewrite every entity whose stored prose has outgrown the shape.
 
     No new evidence and no change to the watermark: only the text is
     tightened, and the result is recorded as a revision like any other.
+    ``only`` limits it to these slugs (still only those over the shape), to
+    try a prompt change on a sample before the whole wiki.
     """
     day = today or dt.date.today().isoformat()
     lock = threading.Lock()
@@ -872,6 +897,7 @@ def run_condense(
         corpus.entities[slug]
         for slug in sorted(prose.entities)
         if slug in corpus.entities
+        and (not only or slug in only)
         and prose.current(slug) is not None
         and over_shape(prose.definition(slug), prose.context(slug))
     ]

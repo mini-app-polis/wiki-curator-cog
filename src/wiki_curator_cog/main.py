@@ -122,7 +122,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help=(
             "generate / materialise: an entity slug to generate or "
-            "materialise; repeat for several."
+            "materialise; repeat for several. With generate --condense, only "
+            "these are rewritten (if over the shape), to try it on a sample."
         ),
     )
     parser.add_argument(
