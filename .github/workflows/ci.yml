@@ -121,6 +121,53 @@ jobs:
       region: ${{ vars.AWS_REGION }}
       function-name: ${{ vars.AWS_FUNCTION_NAME }}
 
+  # A release can change how pages are built (pages.py and what it builds on)
+  # without changing any of the curator's state, so no job would rebuild
+  # them and the site would keep the old pages until someone clicked
+  # "Rebuild every page" in /admin/wiki. This asks for that rebuild once the
+  # new code is live (MINI-109): the same free operation, through the API,
+  # which stays the only producer onto the queue (CD-006). No model calls.
+  #
+  # The key is the repository secret WIKI_CURATOR_DEPLOY_API_KEY, the
+  # wiki-curator-deploy machine in api-kaianolevine-com's identity registry,
+  # whose role holds wcs.wiki.operate and nothing else. A failure here fails
+  # the run, so a stale site is seen, not found later.
+  rebuild:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Rebuild every page
+        env:
+          API_KEY: ${{ secrets.WIKI_CURATOR_DEPLOY_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_KEY}" ]; then
+            echo "FATAL: the repository secret WIKI_CURATOR_DEPLOY_API_KEY is not set." >&2
+            exit 1
+          fi
+          # A named User-Agent: the API sits behind Cloudflare, which rejects
+          # unidentified automation (see the shared evaluate.yml).
+          http_status=$(curl -sS \
+            --retry 5 --retry-connrefused --retry-delay 5 \
+            --max-time 30 \
+            -A "mini-app-polis-wiki-curator-deploy/1 (+https://github.com/mini-app-polis/wiki-curator-cog)" \
+            -H "Authorization: Bearer ${API_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            -o response.json \
+            -w "%{http_code}" \
+            -X POST "https://api.kaianolevine.com/v1/wcs/wiki/admin/jobs" \
+            -d '{"action": "rebuild_every_page"}') || {
+              echo "FATAL: could not reach the API." >&2
+              exit 1
+            }
+          jq . response.json || cat response.json
+          if [ "${http_status}" -lt 200 ] || [ "${http_status}" -ge 300 ]; then
+            echo "FATAL: the rebuild was not queued (${http_status})." >&2
+            exit 1
+          fi
+
   # Conformance is graded when the repository changes, and this is where
   # that is said. The evaluation runs after this job ends, so what the job
   # reports is whether the request landed — never what was found.

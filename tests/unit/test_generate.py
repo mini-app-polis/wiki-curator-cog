@@ -718,3 +718,72 @@ def test_generate_mode_passes_condense(
         assert main.main(["generate", "--condense", "--workers", "8"]) == 0
     assert run.call_args.kwargs["condense"] is True
     assert run.call_args.kwargs["workers"] == 8
+
+
+# ── a local run rebuilds the pages it changed ──
+
+
+@pytest.mark.parametrize(
+    ("argv", "result", "rebuilt"),
+    [
+        (["generate"], {"generated_slugs": ["strike", "timing"]}, ["strike", "timing"]),
+        (["generate"], {"generated_slugs": []}, None),
+        (["generate", "--dry-run"], {"generated_slugs": ["strike"]}, None),
+        (["generate", "--state", "files"], {"generated_slugs": ["strike"]}, None),
+        (
+            ["generate", "--condense"],
+            {"slugs": ["connection"], "generated_slugs": ["x"]},
+            ["connection"],
+        ),
+    ],
+)
+def test_a_local_generate_rebuilds_the_pages_it_changed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    argv: list[str],
+    result: dict,
+    rebuilt: list[str] | None,
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with (
+        patch.object(main, "api_state", return_value="api"),
+        patch.object(main, "generate_local", return_value=dict(result)),
+        patch.object(main, "materialise_local", return_value={"pages": 2}) as mat,
+    ):
+        assert main.main(argv) == 0
+    if rebuilt is None:
+        mat.assert_not_called()
+    else:
+        mat.assert_called_once_with(
+            tmp_path / ".curator", entities=rebuilt, state="api"
+        )
+
+
+@pytest.mark.parametrize(
+    ("command", "runner", "result", "every_page"),
+    [
+        ("link", "link_local", {"linked": 3}, True),
+        ("link", "link_local", {"linked": 0}, False),
+        ("consolidate", "consolidate_local", {"decided": 5}, True),
+        ("consolidate", "consolidate_local", {"decided": 0}, False),
+    ],
+)
+def test_a_local_link_or_consolidate_rebuilds_every_page_when_it_changed_any(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    command: str,
+    runner: str,
+    result: dict,
+    every_page: bool,
+) -> None:
+    monkeypatch.setenv("WIKI_REPO_PATH", str(tmp_path))
+    with (
+        patch.object(main, "api_state", return_value="api"),
+        patch.object(main, runner, return_value=dict(result)),
+        patch.object(main, "materialise_local", return_value={}) as mat,
+    ):
+        assert main.main([command]) == 0
+    if every_page:
+        mat.assert_called_once_with(tmp_path / ".curator", entities=None, state="api")
+    else:
+        mat.assert_not_called()
