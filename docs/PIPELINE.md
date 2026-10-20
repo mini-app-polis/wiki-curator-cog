@@ -1,6 +1,6 @@
 # Pipeline architecture
 
-`wiki-curator-cog` builds the WCS wiki from the canonical entity graph in `api-kaianolevine-com`. The structured data comes from `transcription-cog`'s LLM extraction over lesson and note transcripts; this cog adds the wiki's own LLM work — references between entities, facet folding, page prose (ADR-005) — keeps its state in the API (ADR-006), and stores each finished page there as a document (MINI-96). The API serves the documents to `wcs.kaianolevine.com`, filtered by what each reader may see. The `wcs-wiki` markdown repo is a local export of the same pages (MINI-99).
+`wiki-curator-cog` builds the WCS wiki from the canonical entity graph in `api-kaianolevine-com`. The structured data comes from `transcription-cog`'s LLM extraction over lesson and note transcripts; this cog adds the wiki's own LLM work — references between entities, facet folding, page prose (ADR-005) — keeps its state in the API (ADR-006), and stores each finished page there as a document. The API serves the documents to `wcs.kaianolevine.com`, filtered by what each reader may see. The `wcs-wiki` markdown repo is a local export of the same pages.
 
 ## Flow diagram
 
@@ -35,7 +35,7 @@ Drive transcript drop
 │   GET /v1/wcs/wiki/admin/pages[/{slug}]      │
 └──────────┬───────────────────────────────────┘
            ▼
-   wcs.kaianolevine.com /wiki (MINI-97)
+   wcs.kaianolevine.com /wiki
 
 Locally: `render` writes the same pages as markdown into a wcs-wiki clone.
 ```
@@ -49,7 +49,7 @@ Locally: `render` writes the same pages as markdown into a wcs-wiki clone.
 | `generate` | named entities | prose revisions | `materialise` for every page it was asked about |
 | `materialise` | named pages, or none for every page (the /admin/wiki rebuild, one job) | page documents; removes pages folded away; every page also refreshes the thin list | — |
 
-Every follow-on carries `origin_source_id`: a `link` job names its own source, every other job passes on the one it was given, and admin or operator work has none. `materialise` stores it on each page write, with the queue message id as `origin_job_id` (MINI-101).
+Every follow-on carries `origin_source_id`: a `link` job names its own source, every other job passes on the one it was given, and admin or operator work has none. `materialise` stores it on each page write, with the queue message id as `origin_job_id`.
 
 Every model pass is watermarked in the API, so a repeated job makes no model call. `materialise` calls no model. The same functions run locally through the `job`, `link`, `consolidate`, `generate` and `materialise` commands (README).
 
@@ -76,4 +76,4 @@ The curator version is auto-derived at runtime from `pyproject.toml` via `import
 
 ## Operating manual
 
-The page schema lives in `wcs-wiki/CLAUDE.md`; this repo is the runtime. The page logic — folds, the reference overlay, By teacher — is `pages.py` and the modules it builds on; changing it means re-running `materialise` for every page, which the `rebuild` job in CI does after each deploy (MINI-109).
+The page schema lives in `wcs-wiki/CLAUDE.md`; this repo is the runtime. The page logic — folds, the reference overlay, By teacher — is `pages.py` and the modules it builds on; changing it means re-running `materialise` for every page, which the `rebuild` job in CI does after each deploy.

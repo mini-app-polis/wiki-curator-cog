@@ -100,7 +100,7 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-  # The wiki-jobs worker (ADR-006, MINI-95), deployed here as a job: a release
+  # The wiki-jobs worker (ADR-006), deployed here as a job: a release
   # published with GITHUB_TOKEN starts no workflows, so `on: release` would
   # never fire and the Lambda would drift behind main.
   deploy:
@@ -125,7 +125,7 @@ jobs:
   # without changing any of the curator's state, so no job would rebuild
   # them and the site would keep the old pages until someone clicked
   # "Rebuild every page" in /admin/wiki. This asks for that rebuild once the
-  # new code is live (MINI-109): the same free operation, through the API,
+  # new code is live: the same free operation, through the API,
   # which stays the only producer onto the queue (CD-006). No model calls.
   #
   # The key is the repository secret WIKI_CURATOR_DEPLOY_API_KEY, the

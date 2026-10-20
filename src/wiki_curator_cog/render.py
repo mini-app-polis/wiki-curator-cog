@@ -531,7 +531,7 @@ def render_entity_page(
 ) -> str:
     """Render one entity's Markdown page, through its page document.
 
-    ``details`` are the facets folded into this entity (MINI-93): each a name,
+    ``details`` are the facets folded into this entity: each a name,
     a one-line gist and optionally a nesting depth, listed under
     ``## Details``.
 
@@ -539,7 +539,7 @@ def render_entity_page(
     statements refer to) and ``## Referenced by`` (every entity that refers to
     it, through the linking pass or a relation pointing here).
 
-    The page is built as a document (:mod:`wiki_curator_cog.pages`, MINI-96)
+    The page is built as a document (:mod:`wiki_curator_cog.pages`)
     and written from it, so the markdown and the API's page are one model.
     """
     from . import pages  # pages builds on this module
@@ -1045,7 +1045,7 @@ def render_bundle(
     ``overlay`` adds the linking pass's references to entity pages; the
     export should already carry any entities the overlay introduced.
 
-    Entity pages are written from their page documents (MINI-96):
+    Entity pages are written from their page documents:
     ``documents``, by slug, when the caller built them — the same ones
     ``materialise`` stores — or built here from the other arguments, with
     ``merges`` (from :mod:`wiki_curator_cog.identity`) for what each page

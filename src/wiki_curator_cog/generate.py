@@ -1,4 +1,4 @@
-"""Generation: an LLM maintains each entity's overview (ADR-005, MINI-86).
+"""Generation: an LLM maintains each entity's overview (ADR-005).
 
 Local half. For each entity, the model is given the page's current overview
 — whatever the page says now — and the statements not yet integrated into
@@ -14,8 +14,8 @@ wrote), kept in the revision history, and integrated on top of.
 
 **Notes outrank the page.** A statement from an authored note (session
 type ``correction``) is shown to the model as from a note, and the prompt
-puts a note's word on what an idea is ahead of the current definition
-(MINI-92). Raising :data:`NOTE_RULE_VERSION` re-sends every note's
+puts a note's word on what an idea is ahead of the current definition.
+Raising :data:`NOTE_RULE_VERSION` re-sends every note's
 statements, so only the pages notes speak to are regenerated.
 
 **Two kinds of evidence.** An entity's own statements (what sources said
@@ -69,7 +69,7 @@ GENERATOR_VERSION = "4"
 
 #: The session type of an authored note (transcription-cog): a teacher's
 #: deliberate word on what the wiki should say, which the model is told
-#: outranks the current text (MINI-92).
+#: outranks the current text.
 NOTE_SESSION_TYPE = "correction"
 #: Raised when the prompt changes how notes are read. A note's statements
 #: carry it in their key, so raising it makes them pending again: the next
@@ -83,7 +83,7 @@ NOTE_RULE_VERSION = "2"
 DEFINITION_MAX_WORDS = 55
 CONTEXT_MAX_WORDS = 100
 CONTEXT_MAX_SENTENCES = 3
-#: One idea per sentence (MINI-92): the prompt asks for about 20 words, and a
+#: One idea per sentence: the prompt asks for about 20 words, and a
 #: sentence past this is several ideas joined with dashes and semicolons.
 CONTEXT_MAX_SENTENCE_WORDS = 30
 
@@ -115,7 +115,7 @@ class Evidence:
     role: str
     subject: str
     text: str
-    #: The statement's source, for the page's evidence (MINI-96). Not shown
+    #: The statement's source, for the page's evidence. Not shown
     #: to the model.
     source_id: uuid.UUID | None = None
     #: From an authored note, not a lesson: shown to the model as
@@ -602,12 +602,12 @@ _AFTER_STOP = re.compile(r"([.!?])(\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\))"
 
 
 #: Citations a rewrite invented in place of a real one: "[(source)]",
-#: "[citation needed]", "[citation]". Removed, never stored (MINI-92).
+#: "[citation needed]", "[citation]". Removed, never stored.
 _PLACEHOLDER = re.compile(r"\s*\[\(?(?:source|citation(?: needed)?)\)?\]", re.I)
 
 
 #: Citation forms a rewrite wrote in place of ``([[sources/slug]])``:
-#: "[sources/x]", "[[ sources/x]]" and "[source](…sources/x…)" (MINI-111).
+#: "[sources/x]", "[[ sources/x]]" and "[source](…sources/x…)".
 _SINGLE = re.compile(r"(?<!\[)\[\s*(sources/[^\[\]\s]+)\s*\](?![\](])")
 _SPACED = re.compile(r"\[\[\s*(sources/[^\[\]]+?)\s*\]\]")
 _MD_LINK = re.compile(r"\[source\]\(([^)]*)\)", re.I)
@@ -683,7 +683,7 @@ def shape_problems(definition: str, context: str) -> list[str]:
         )
     # A semicolon is discouraged in the prompts but not refused: the model's
     # habit is "the mistake is X; instead, Y", one point that reads fine, and
-    # refusing it left good rewrites unstored (MINI-92, 38 of 80 pages).
+    # refusing it left good rewrites unstored (38 of 80 pages).
     plain = _plain(context)
     if "—" in plain:
         problems.append("the context uses a long dash")
@@ -739,7 +739,7 @@ def condense(
     )
     return (
         # A definition within its shape is kept: the tightening never sees
-        # the notes that set it, so a rewrite can undo them (MINI-92, strike).
+        # the notes that set it, so a rewrite can undo them (strike).
         without_word_talk(definition)
         if len(definition.split()) <= DEFINITION_MAX_WORDS
         else str(result.output_json.get("definition", definition)).strip(),
@@ -1045,7 +1045,7 @@ def revert(
     new evidence is refused, since going back would drop what it learned.
     The text put back is recorded as a revision by ``page``, text a person
     chose (the API knows only ``llm`` and ``page``), and the watermark is
-    left as it is (MINI-92: rewrites that changed meaning).
+    left as it is (rewrites that changed meaning).
     """
     day = today or dt.date.today().isoformat()
     done: list[str] = []
@@ -1291,7 +1291,7 @@ def review_markdown(prose: ProseFile, slugs: Iterable[str]) -> str:
             entry["revisions"][-2] if len(entry.get("revisions") or []) > 1 else None
         )
         if before is not None:
-            # What the run replaced, to read for drift in meaning (MINI-92).
+            # What the run replaced, to read for drift in meaning.
             if before.get("definition") != entry.get("definition"):
                 lines += [
                     f"_Definition before:_ {before.get('definition') or '(empty)'}",

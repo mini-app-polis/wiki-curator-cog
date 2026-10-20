@@ -1,4 +1,4 @@
-"""Identity fixes from notes: two names, one thing (ADR-005, MINI-90).
+"""Identity fixes from notes: two names, one thing (ADR-005).
 
 A note can say that two entities are the same thing and which name to use;
 the extraction records that as a relation of kind ``alias_of``, from the name
@@ -17,7 +17,7 @@ Statement ids are untouched, so the linker's and the generator's watermarks
 stay valid: the preferred entity just finds statements it has not integrated
 yet.
 
-Facets (MINI-93) fold the same way, but keep their name on the broader page:
+Facets fold the same way, but keep their name on the broader page:
 a ``facet_of`` relation from a note, or a decision from the consolidation pass
 (:mod:`wiki_curator_cog.consolidate`), moves a narrow entity's content into
 the broader one and lists it under ``## Details``. The pass folds only within

@@ -1,4 +1,4 @@
-"""Facet consolidation: narrow entities folded into the concept they detail (MINI-93).
+"""Facet consolidation: narrow entities folded into the concept they detail.
 
 Extraction mints a new entity for every phrasing a lesson uses — "anchor",
 "anchor with directional intent", "anchoring to reset hand connection" — so
@@ -662,7 +662,7 @@ def thin_entities(
     gives the page it ended on — its own, or the broader one it folds into —
     its definition (the generated one, else the export's overview), and
     what each source said about it. The API stores this list for
-    /admin/wiki (MINI-101); :func:`thin_review_markdown` renders the same.
+    /admin/wiki; :func:`thin_review_markdown` renders the same.
     """
     definitions = definitions or {}
     by_slug = {e.slug: e for e in export.entities}

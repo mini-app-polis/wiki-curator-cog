@@ -1,7 +1,7 @@
-"""Where the curator's state is read from and written to (MINI-94, part 1).
+"""Where the curator's state is read from and written to.
 
 The three passes' state — links, facets, prose — is held by the API
-(ADR-006, MINI-89). :class:`ApiState` makes it the store: every command reads
+(ADR-006). :class:`ApiState` makes it the store: every command reads
 each document from the API, and a run writes back the entries it changed as
 it goes, so nothing paid for lives only on this machine. The local file is
 kept as a cache, written in exactly the layout it always had, so the reviews,
@@ -82,7 +82,7 @@ def _missing(path: Path, required: bool) -> None:
 
 
 class FileState:
-    """The state in local JSON files: the curator as it was before MINI-94."""
+    """The state in local JSON files: the curator before the API was its store."""
 
     name = "files"
 
@@ -128,7 +128,7 @@ class FileState:
         Page documents are not state the passes read back: the files are only
         a copy to read. Each is compared with the file it replaces, so a
         local run says which pages are new, changed or gone, as the API does.
-        The origin is the API's to keep (MINI-101); the files have no place
+        The origin is the API's to keep; the files have no place
         for it.
         """
         _ = origin_source_id, origin_job_id

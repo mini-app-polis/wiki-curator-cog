@@ -1,4 +1,4 @@
-"""The API as the curator's state store (MINI-94, part 1).
+"""The API as the curator's state store.
 
 Read from the API, write back what changed, keep the files as a checked
 cache — and never let either side silently overwrite the other.
@@ -242,7 +242,7 @@ def test_a_file_flag_still_overrides_one_file(
     )
 
 
-# ── The thin list (MINI-101) ──
+# ── The thin list ──
 
 
 def _thin(slug: str, **over: Any) -> WcsWikiThinEntity:

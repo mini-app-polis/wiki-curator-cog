@@ -1,4 +1,4 @@
-"""One unit of work per job (MINI-94, part 2): what the worker runs.
+"""One unit of work per job: what the worker runs.
 
 Each job runs one unit against an explicit context, writes through the state
 store, costs nothing when its watermark says there is nothing to do, and
@@ -238,7 +238,7 @@ def test_follow_on_generate_jobs_come_in_chunks(
     ]
 
 
-# ── Where a chain of jobs came from (MINI-101) ──
+# ── Where a chain of jobs came from ──
 
 ORIGIN = str(SOURCE)
 
@@ -302,7 +302,7 @@ def test_an_origin_that_is_no_uuid_is_refused(tmp_path: Path) -> None:
         units.validate({"job": "materialise", "origin_source_id": "nope"})
 
 
-# ── The thin list (MINI-101) ──
+# ── The thin list ──
 
 
 def test_a_consolidate_job_stores_the_thin_list_for_the_whole_corpus(

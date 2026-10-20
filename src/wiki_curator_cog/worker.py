@@ -1,4 +1,4 @@
-"""The Lambda entrypoint: one wiki job in, its result and follow-ons out (MINI-95).
+"""The Lambda entrypoint: one wiki job in, its result and follow-ons out.
 
 The curator runs on Lambda behind its own FIFO queue,
 ``wiki-curator-jobs.fifo`` (ADR-006). The API is the only producer: it
@@ -122,7 +122,7 @@ def run(
     """Run one job against the API and send the follow-ons it names.
 
     ``run_id`` — the queue message id — is stored on the pages the job
-    writes, with the source that started its chain (MINI-101).
+    writes, with the source that started its chain.
     """
     export = _fetch_export()
     _require_corpus(export)

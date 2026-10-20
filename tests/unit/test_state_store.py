@@ -44,10 +44,10 @@ class FakeApi:
         }
         self.posts: dict[str, int] = {name: 0 for name in MODELS}
         self.gets: dict[str, int] = {name: 0 for name in MODELS}
-        #: Page documents as the API stores them, by slug (MINI-96).
+        #: Page documents as the API stores them, by slug.
         self.pages: dict[str, dict[str, Any]] = {}
         self.page_posts: list[Any] = []
-        #: Thin entities as the API stores them, by slug (MINI-101).
+        #: Thin entities as the API stores them, by slug.
         self.thin: dict[str, dict[str, Any]] = {}
         self.thin_posts: list[Any] = []
 

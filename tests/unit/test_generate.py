@@ -1,4 +1,4 @@
-"""Generation, local half (ADR-005, MINI-86).
+"""Generation, local half (ADR-005).
 
 The model is faked. These pin what generation does around it: which
 evidence an entity gets, the watermark, the page as the base, and the
@@ -251,7 +251,7 @@ def test_a_new_version_regenerates_from_scratch() -> None:
     assert len(llm.calls[1]["statements"]) == 2
 
 
-# ── notes (MINI-92) ──
+# ── notes ──
 
 
 def _with_note() -> tuple[WcsWikiExport, generate.Corpus]:
@@ -650,7 +650,7 @@ def test_over_shape_counts_words_and_sentences_not_links() -> None:
 
 
 def test_a_sentence_packing_several_ideas_is_over_shape() -> None:
-    """MINI-92: three sentences, but one strings ideas together."""
+    """Three sentences, but one strings ideas together."""
     packed = (
         "Connection lives in the back body — lats, rear delts, triceps — not the "
         "biceps or pecs; the lats tie the arms to the core, and without them the "
@@ -737,7 +737,7 @@ def _one_over_shape(definition: str) -> tuple[generate.Corpus, generate.ProseFil
 
 
 def test_condense_keeps_a_definition_within_its_shape() -> None:
-    """MINI-92: the rewrite undid strike's note-led definition."""
+    """The rewrite undid strike's note-led definition."""
     corpus, prose = _one_over_shape(
         "The foot pressing into the floor. 'Foot strike' is another name for it."
     )
@@ -983,7 +983,7 @@ def test_a_local_link_or_consolidate_rebuilds_every_page_when_it_changed_any(
         mat.assert_not_called()
 
 
-# ── putting back a rewrite that changed meaning (MINI-92) ──
+# ── putting back a rewrite that changed meaning ──
 
 
 def _rewritten(prose: generate.ProseFile, slug: str, *, statements: int = 0) -> None:
@@ -1082,7 +1082,7 @@ def test_a_revert_is_a_revision_the_api_accepts() -> None:
 
 
 def test_stray_citation_forms_become_one_form() -> None:
-    """MINI-111: forms the MINI-92 rewrites left on eight pages."""
+    """Forms the overview rewrites left on eight pages."""
     src = "([[sources/2025-07-27-drill-based-learning]])"
     for messy in (
         "Keep the arm quiet [sources/2025-07-27-drill-based-learning].",

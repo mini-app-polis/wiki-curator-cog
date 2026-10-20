@@ -1,6 +1,6 @@
 """The local proof-of-concept loop: link check, corpus quality, render mode.
 
-ADR-005 / MINI-83. A local render writes into an existing clone and stops:
+ADR-005. A local render writes into an existing clone and stops:
 no clone, commit, push or run report.
 """
 

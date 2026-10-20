@@ -1,4 +1,4 @@
-"""Facet consolidation: narrow entities folded into broader ones (MINI-93).
+"""Facet consolidation: narrow entities folded into broader ones.
 
 These pin the model's answers being checked against the corpus, the facets
 file's watermark, the fold at build time (notes outrank the model), and the
@@ -661,7 +661,7 @@ def test_thin_review_shows_what_was_said_where_and_where_it_went() -> None:
 
 
 def test_the_thin_list_is_what_the_review_shows() -> None:
-    """The API's thin list (MINI-101) and thin-review.md are one selection."""
+    """The API's thin list and thin-review.md are one selection."""
     facets = consolidate.FacetsFile()
     facets.record(STATIONARY, ANCHOR, "", "fake")
     facets.record(DIRECTIONAL, None, "", "fake")

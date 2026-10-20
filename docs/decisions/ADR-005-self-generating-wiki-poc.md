@@ -1,9 +1,9 @@
 # ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half built 2026-10-17 under ADR-006 (state in the API, MINI-89/94; worker, MINI-95); end-to-end note test (MINI-87) and go/no-go (MINI-88) open
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half built 2026-10-17 under ADR-006 (state in the API; worker); end-to-end note test and go/no-go open
 **Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
-**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006; Asana MINI-29, MINI-83 – MINI-93
+**Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006
 
 ## Context
 
@@ -101,7 +101,7 @@ specific concepts (contrabody position, tempo) stay alongside general ones,
 and two ideas get two names. *Leading* is the leader asking or signalling;
 *following* is the follower reacting to what the leader asks — not
 everything a follower does is following. The prompt was settled over three
-versions on a 20-statement sample (MINI-84 comments).
+versions on a 20-statement sample.
 
 **References can be denied, and the newest word wins.** A statement can deny
 a reference as well as assert one ("frame has nothing to do with anchor").
@@ -140,7 +140,7 @@ evidence. Newest wins, so a later note saying they differ splits them again —
 nothing is destroyed, which a repoint-and-delete could not promise. The API's
 admin endpoints remain an escape hatch, not the path.
 
-**Facets fold automatically** (2026-10-16, MINI-93). Extraction minted an
+**Facets fold automatically** (2026-10-16). Extraction minted an
 entity for every phrasing — *anchor*, *anchor with directional intent*,
 *anchoring to reset hand connection*, *stationary anchor* — so one idea was
 spread over dozens of thin pages. These are not aliases but facets: narrower
@@ -216,7 +216,7 @@ definition and context, revision history, per-entity watermark) and
 `render --prose` puts it on the pages. Evidence per call is the entity's own
 statements and the statements that refer to it, newest first and capped;
 what does not fit is integrated on the next run. The prompt was settled over
-four versions on an 8-entity sample (MINI-86 comments): the first produced
+four versions on an 8-entity sample: the first produced
 accurate 500–760-word essays nobody would read; the split into a short
 definition and a one-paragraph "In practice" came from Kaiano. Definitions
 reflect the material as taught — *right side pass* is the low pattern, as
@@ -250,22 +250,20 @@ proven as part of this work, not assumed.
 
 ## Plan
 
-Tracked in Asana under MINI-29.
-
-1. **MINI-83** — baseline export and link check.
-2. **MINI-84** — the linking pass, local: mentions become references in
+1. Baseline export and link check.
+2. The linking pass, local: mentions become references in
    `links.json`, general concepts get pages, denials and newest-wins,
    `## Mentions` / `## Referenced by` via `render --links`. Durable half
-   (references in the API, importing `links.json`): **MINI-89**.
-3. **MINI-85** — notes and corrections ingest as sources. transcription-cog's
+   (references in the API, importing `links.json`): ADR-006, step 1.
+3. Notes and corrections ingest as sources. transcription-cog's
    minimum-length gate (`MIN_TRANSCRIPT_CHARS`) currently drops short notes;
    the extraction must emit a correction as a statement that can supersede an
    older one.
-4. **MINI-86** — integration-based generation: a short definition and an
+4. Integration-based generation: a short definition and an
    "In practice" paragraph per entity, the page as the base, the rebuild
    path; local in `prose.json` first, then revisions and watermark in the
    API.
-5. **MINI-87** — prove the update loop by hand and in tests:
+5. Prove the update loop by hand and in tests:
    - a new lesson regenerates only the entities it touches;
    - a correction note contradicting an older claim changes the page;
    - a correction note denying a link removes it from the pages, and a later
@@ -282,10 +280,10 @@ Tracked in Asana under MINI-29.
    - a newer note overrides an older edit;
    - nothing new means no LLM calls and nothing to commit;
    - rebuild from scratch works, including a public-only variant.
-6. **MINI-88** — full-corpus run; time, cost and quality recorded; go/no-go.
-7. **MINI-90** — identity fixes through notes: `alias_of` / `distinct_from`
+6. Full-corpus run; time, cost and quality recorded; go/no-go.
+7. Identity fixes through notes: `alias_of` / `distinct_from`
    relations from the note extraction, merged at build time.
-8. **MINI-93** — facet consolidation: `consolidate` into `facets.json`,
+8. Facet consolidation: `consolidate` into `facets.json`,
    folded at build time under `## Details`; notes override; extraction
    stops minting variants. Extended 2026-10-17 to drills (into drills) and
    patterns (exact duplicates only).
@@ -314,9 +312,9 @@ Tracked in Asana under MINI-29.
 - Cost becomes a real input: linking calls an LLM per new statement and
   generation per changed entity. The watermarks keep steady-state cost
   proportional to new material; the first pass over the existing corpus is the
-  expensive one, and MINI-88 measures it.
+  expensive one, and the full-corpus run (step 6) measures it.
 
-## Follow-ons, if MINI-88 is a go
+## Follow-ons, if the full-corpus run is a go
 
 The pipeline and reading design for these is ADR-006 (proposed 2026-10-16).
 
