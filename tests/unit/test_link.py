@@ -21,6 +21,7 @@ import wiki_curator_cog.flow as flow
 import wiki_curator_cog.main as main
 from wiki_curator_cog import link
 
+from .deadline_fakes import Held, run_past_the_deadline
 from .export_builders import (
     WcsAttribution,
     WcsDefinition,
@@ -681,3 +682,30 @@ def test_referenced_by_lists_up_to_the_limit_then_shows_a_count(
     page = counted["concepts/connection.md"]
     assert "Referenced by 2 pages." in page
     assert "[[techniques/anchor-step]]" not in page
+
+
+def test_the_deadline_stops_linking_without_waiting_for_its_batches(
+    catalog: link.Catalog,
+) -> None:
+    """Out of time, the pass stops at once and spends nothing more."""
+    statements = link.collect_statements(_export())
+    llm = Held(FakeLLM({s.key: [_ref("Stretch")] for s in statements}))
+    links = link.LinksFile()
+    saves: list[int] = []
+    took = run_past_the_deadline(
+        llm,
+        lambda: link.run_linking(
+            statements,
+            catalog,
+            links,
+            llm,
+            model="m",
+            batch_size=1,
+            workers=1,
+            on_batch=lambda: saves.append(1),
+        ),
+    )
+    assert took < 3  # the call in flight was held for 5 s
+    assert llm.asked == 1  # the rest never started
+    assert links.statements == {}
+    assert saves == []

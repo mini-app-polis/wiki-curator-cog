@@ -35,7 +35,6 @@ import threading
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -45,6 +44,7 @@ from mini_app_polis.llm import LLMMessage, build_llm
 from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
 
+from ._deadline import run_parallel
 from .render import LinkOverlay, WcsEntity, WcsWikiExport
 
 LOG = log.get_logger()
@@ -547,12 +547,15 @@ def run_linking(
     skipped = len(statements) - len(todo)
     batches = [todo[i : i + batch_size] for i in range(0, len(todo), batch_size)]
     lock = threading.Lock()
+    stopped = threading.Event()
     linked = 0
     failed_batches = 0
     processed = 0
 
     def work(batch: list[Statement]) -> None:
         nonlocal linked, failed_batches, processed
+        if stopped.is_set():
+            return
         with lock:
             names = links.proposed_names()
         try:
@@ -564,6 +567,8 @@ def run_linking(
             LOG.warning("link.batch_failed size=%s err=%s", len(batch), exc)
             return
         with lock:
+            if stopped.is_set():  # stopped while in flight: see run_parallel
+                return
             for statement in batch:
                 if statement.key in results:
                     links.record(statement, results[statement.key], model)
@@ -575,8 +580,7 @@ def run_linking(
                 "link.batch done=%s/%s linked_total=%s", processed, len(todo), linked
             )
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(work, batches))
+    run_parallel(work, batches, workers=workers, stopped=stopped)
 
     links.linker_version = LINKER_VERSION
     links.model = model

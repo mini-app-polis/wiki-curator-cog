@@ -41,7 +41,6 @@ import re
 import threading
 import uuid
 from collections.abc import Iterable, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -53,6 +52,7 @@ from mini_app_polis.llm.errors import LLMError
 
 from . import link
 from . import markdown_utils as md
+from ._deadline import run_parallel
 from .render import (
     ExportIndexes,
     LinkOverlay,
@@ -851,12 +851,15 @@ def generate_one(
     wiki_repo_path: Path | None,
     today: str,
     lock: Any = None,
+    stopped: threading.Event | None = None,
 ) -> bool:
     """Integrate this entity's pending evidence. False if there was none.
 
     With a ``lock`` (parallel runs), reading and writing ``prose`` happen
     under it and only the model call runs outside, so many calls can be in
-    flight while the file is updated one entity at a time.
+    flight while the file is updated one entity at a time. Once ``stopped``
+    is set, an answer that arrives is not recorded (see
+    :func:`._deadline.run_parallel`).
     """
     guard = lock if lock is not None else contextlib.nullcontext()
     with guard:
@@ -881,6 +884,8 @@ def generate_one(
         context = corpus.pages.repair(context)
     context = tidy_citations(context)
     with guard:
+        if stopped is not None and stopped.is_set():
+            return False
         _record(
             prose,
             entity,
@@ -964,6 +969,7 @@ def run_generation(
     """
     day = today or dt.date.today().isoformat()
     lock = threading.Lock()
+    stopped = threading.Event()
     generated = 0
     done = 0
     failed: list[str] = []
@@ -974,6 +980,8 @@ def run_generation(
         ok = False
         made = False
         for attempt in range(1, ATTEMPTS + 1):
+            if stopped.is_set():
+                return
             try:
                 made = generate_one(
                     llm,
@@ -984,6 +992,7 @@ def run_generation(
                     wiki_repo_path=wiki_repo_path,
                     today=day,
                     lock=lock,
+                    stopped=stopped,
                 )
                 ok = True
                 break
@@ -996,6 +1005,8 @@ def run_generation(
                     exc,
                 )
         with lock:
+            if stopped.is_set():  # stopped while in flight: see run_parallel
+                return
             done += 1
             if made:
                 generated += 1
@@ -1008,8 +1019,7 @@ def run_generation(
                 "generate.entity done=%s/%s slug=%s", done, len(entities), entity.slug
             )
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(work, entities))
+    run_parallel(work, entities, workers=workers, stopped=stopped)
 
     prose.generator_version = GENERATOR_VERSION
     prose.model = model
@@ -1112,6 +1122,7 @@ def run_condense(
     failed: list[str] = []
     kept: list[str] = []
     not_kept: dict[str, dict[str, Any]] = {}
+    stopped = threading.Event()
 
     def attempt(
         entity: WcsEntity, rejected: tuple[str, list[str]] | None
@@ -1128,6 +1139,8 @@ def run_condense(
         return definition, tidy_citations(context)
 
     def work(entity: WcsEntity) -> None:
+        if stopped.is_set():
+            return
         try:
             definition, context = attempt(entity, None)
             problems = [] if dry_run else shape_problems(definition, context)
@@ -1155,6 +1168,8 @@ def run_condense(
                 not_kept[entity.slug] = {"problems": problems, "context": context}
             return
         with lock:
+            if stopped.is_set():  # stopped while in flight: see run_parallel
+                return
             _record(prose, entity, [], definition, context, model=model, today=day)
             done.append(entity.slug)
             if on_entity is not None:
@@ -1166,8 +1181,7 @@ def run_condense(
                 entity.slug,
             )
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(work, targets))
+    run_parallel(work, targets, workers=workers, stopped=stopped)
     return {
         "over_shape": len(targets),
         "condensed": len(done),

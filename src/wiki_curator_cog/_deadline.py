@@ -11,8 +11,13 @@ mid-write. A non-positive budget — a local command — disables the guard.
 from __future__ import annotations
 
 import signal
-from collections.abc import Iterator
+import threading
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from typing import TypeVar
+
+T = TypeVar("T")
 
 #: How long before the budget a job is stopped, so that it can still fail
 #: cleanly before Lambda ends the invocation.
@@ -60,3 +65,31 @@ def deadline(budget_seconds: int) -> Iterator[None]:
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
+
+
+def run_parallel(
+    work: Callable[[T], object],
+    items: Iterable[T],
+    *,
+    workers: int,
+    stopped: threading.Event,
+) -> None:
+    """Run ``work`` on each item, ``workers`` at once; stop at once on a raise.
+
+    Not a ``with ThreadPoolExecutor`` block: leaving one waits for every
+    call already running. A pass stopped by its deadline (:class:`RunOutOfTime`,
+    raised on the calling thread) must stop at once, so its report goes out
+    before Lambda ends the invocation and no further model calls are paid
+    for. On any exception, ``stopped`` is set, queued items are cancelled,
+    and calls already in flight, which cannot be interrupted, are left to
+    finish; ``work`` checks ``stopped`` and drops what they return rather
+    than recording or saving it. The job is retried and asks again.
+    """
+    pool = ThreadPoolExecutor(max_workers=max(1, workers))
+    try:
+        list(pool.map(work, items))
+    except BaseException:
+        stopped.set()
+        pool.shutdown(wait=False, cancel_futures=True)
+        raise
+    pool.shutdown()
