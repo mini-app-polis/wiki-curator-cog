@@ -1,4 +1,4 @@
-"""Identity fixes from notes: alias_of merges, distinct_from splits (MINI-90).
+"""Identity fixes from notes: alias_of merges, distinct_from splits.
 
 Merges happen when the wiki is built. These pin who absorbs whom, that the
 newest claim per pair wins, that the merged-away page and its links go, and

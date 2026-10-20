@@ -5,7 +5,7 @@
 
 Builds the WCS wiki from the canonical corpus in `api-kaianolevine-com`, and stores each page in the API as a document that the API serves filtered by what each reader may see.
 
-It runs as the wiki-jobs Lambda worker (ADR-006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all (MINI-99). The Railway `export` run that cloned, rendered and pushed it was retired with its service (MINI-95). The page schema is defined in `wcs-wiki/CLAUDE.md`.
+It runs as the wiki-jobs Lambda worker (ADR-006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all. The Railway `export` run that cloned, rendered and pushed it was retired with its service. The page schema is defined in `wcs-wiki/CLAUDE.md`.
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
@@ -114,7 +114,7 @@ preferred entity absorbs the other's content and lists its name as an alias,
 and the other page goes. A newer `distinct_from` splits them again. Nothing
 upstream changes; `render-summary.json` lists the merges under `merged`.
 
-**Facets (MINI-93).** `consolidate` decides, for every concept and technique,
+**Facets.** `consolidate` decides, for every concept and technique,
 whether it is a facet of a broader one (*stationary anchor* → *anchor*), and
 writes the decisions to `facets.json` (watermarked; already-decided entities
 are skipped). Drills are asked the same about other drills; patterns only
@@ -122,7 +122,7 @@ whether they are another name for an existing pattern, since a variation is
 its own figure. Nothing folds across kinds, and each kind has its own prompt. `render`, `generate` and `link` then fold each facet into its
 broader page, listed under `## Details`. A facet's name and aliases stay on
 the broader entity for matching, but the page's "also called" lists only
-same-idea names, never a facet's (MINI-107). They pick up `facets.json` from next
+same-idea names, never a facet's. They pick up `facets.json` from next
 in the state folder by default, or take `--facets PATH`. A note's
 `facet_of` / `distinct_from` overrides the model; read `facets-review.md` to
 see what was folded where. Each entity's support (sources taught in,
@@ -132,7 +132,7 @@ less-supported page, and thin entities with no home are listed at the end of
 the review. `thin-review.md`, written beside the facets file, lists every thin
 entity — what was said, which source, and where it ended up — for a private
 scan; give one weight with a note. With the API as the store, the same list is
-stored there for /admin/wiki (MINI-101). Every worker `consolidate` job, every
+stored there for /admin/wiki. Every worker `consolidate` job, every
 `link` job that links something, and "Rebuild every page" refresh it over the
 whole corpus, with no model calls. A rerun with nothing new to decide makes no
 model calls, so it is a free way to refresh both reviews.
@@ -163,7 +163,7 @@ authored notes' statements, so only the pages notes speak to are
 regenerated. `consolidate` keeps one version per kind group
 (`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
-### Where the state lives: the API (ADR-006, MINI-89, MINI-94)
+### Where the state lives: the API (ADR-006)
 
 The three passes' state — `links.json`, `facets.json`, `prose.json` — is held
 by the API. `render`, `link`, `generate` and `consolidate` read it from there
@@ -192,16 +192,16 @@ The import refuses a field the API does not store, goes up in chunks
 (`--batch-size`, default 250), and is safe to repeat. A run's writes refuse
 unknown fields the same way, and a refused write stops the run.
 
-### One job per message (ADR-006, MINI-94)
+### One job per message (ADR-006)
 
-`units.handle` is the body of the wiki-jobs worker (MINI-95): one job in, its
+`units.handle` is the body of the wiki-jobs worker: one job in, its
 result and the jobs that should follow out. `link` takes one source;
 `consolidate`, `generate` and `materialise` take named entities. Each is a
 no-op when its watermark says there is nothing new, so a retried or
 duplicated message costs nothing. Every follow-on carries `origin_source_id`,
 the source whose `link` started the chain (none for admin or operator work),
 and `materialise` stores it on each page write with the run that wrote it: the
-queue message id, or `local` (MINI-101). The `job` command runs one locally, against
+queue message id, or `local`. The `job` command runs one locally, against
 production and the state store — the way to see what one new note costs:
 
 ```bash
@@ -215,7 +215,7 @@ newly linked statements touched, a repeated job touching none; `materialise`
 for every page a `generate` was asked about). The command does not run them;
 run each the same way, or let the worker's dispatch do it.
 
-### Page documents (ADR-006, MINI-96)
+### Page documents (ADR-006)
 
 `materialise` builds each entity page as a structured document — definition,
 In practice, Details, statements by teacher with their citations, Mentions,
@@ -241,7 +241,7 @@ summary) — the generated or condensed pages, or every page after a link or
 consolidate run that changed anything. A dry run, or `--state files`, stores
 no pages.
 
-### The worker (ADR-006, MINI-95)
+### The worker (ADR-006)
 
 On AWS the same units run as a Lambda behind `wiki-curator-jobs.fifo`
 (`wiki_curator_cog.worker.lambda_handler`, deployed by CI on each release;
@@ -259,7 +259,7 @@ that it still costs one build per revision (the 2026-10-18 incident). A failed j
 finished parts are no-ops), and an unreadable message is reported once and
 dead-lettered.
 
-### Link locally (ADR-005, MINI-84)
+### Link locally (ADR-005)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
 each statement mentions, and writes the references to the links state (the
@@ -276,7 +276,7 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
 `LLM_MODEL` overrides the model.
 
-### Generate overviews locally (ADR-005, MINI-86)
+### Generate overviews locally (ADR-005)
 
 Generation, local half: for each entity, an LLM is given the page's current
 definition and context and the statements not yet integrated — the entity's
@@ -303,9 +303,9 @@ The page is the base: if an overview was edited on the page, the next run
 builds on the edit rather than replacing it. Editing is optional —
 corrections normally arrive as notes. A note outranks the page: the model
 sees which statements come from notes, and where a note says what an idea
-is, the definition follows it (MINI-92).
+is, the definition follows it.
 
-**The shape, and rewriting to it (MINI-92).** A definition is one or two
+**The shape, and rewriting to it.** A definition is one or two
 sentences; "In practice" is at most three sentences of one idea each, none
 over 30 words, with no long dashes. `generate --condense` rewrites only the
 pages over that shape, with no new evidence (`--entity` to try a few first).

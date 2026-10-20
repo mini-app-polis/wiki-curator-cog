@@ -8,7 +8,7 @@ Each command runs once against the API the environment points at
 (production under ``doppler run --config prd``) and prints a JSON summary.
 The deployed curator is the wiki-jobs worker (:mod:`wiki_curator_cog.worker`,
 ADR-006); nothing here is deployed. The Railway ``export`` mode was retired
-with its service (MINI-95).
+with its service.
 """
 
 from __future__ import annotations

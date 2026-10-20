@@ -4,7 +4,7 @@
 (`wiki_curator_cog.worker.lambda_handler`), like the other pipeline cogs: one
 SQS message is one job, and each job names the jobs that follow it (ADR-006).
 The Railway one-shot `export` process that cloned, rendered and pushed the
-markdown wiki was retired with its service (MINI-95); see ADR-004 for what it
+markdown wiki was retired with its service; see ADR-004 for what it
 was and why it is gone.
 
 ## What runs where
@@ -24,7 +24,7 @@ architecture differs.
 
 After the deploy, the `rebuild` job asks the API for one rebuild of every
 page (`POST /v1/wcs/wiki/admin/jobs`, `rebuild_every_page`), since a release
-can change how pages are built without changing any state (MINI-109). It
+can change how pages are built without changing any state. It
 calls no model. It needs the repository secret `WIKI_CURATOR_DEPLOY_API_KEY`:
 the key of the `wiki-curator-deploy` machine in api-kaianolevine-com's
 identity registry, whose `wiki-operator` role holds only `wcs.wiki.operate`.

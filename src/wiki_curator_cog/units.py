@@ -1,4 +1,4 @@
-"""One unit of work per job: what the wiki-jobs worker runs (MINI-94, part 2).
+"""One unit of work per job: what the wiki-jobs worker runs.
 
 ADR-006 has the API enqueue wiki work after a source is composed, one message
 per unit, and a Lambda worker handle each message. This module is that
@@ -24,7 +24,7 @@ job                       unit                        follows with
 ========================  ==========================  ===========================
 
 Every follow-on carries ``origin_source_id``, the source whose ``link`` job
-started the chain (MINI-101): a link job's follow-ons name its own source,
+started the chain: a link job's follow-ons name its own source,
 every other job passes on the origin it was given, and work an admin or an
 operator started has none. ``materialise`` stores it, with the run that wrote
 them, on the pages it writes, so each revision can say what changed it.
@@ -78,7 +78,7 @@ class StatePaths:
     links: Path
     facets: Path
     prose: Path
-    #: Where a copy of each page document is written (MINI-96).
+    #: Where a copy of each page document is written.
     pages: Path
 
     @classmethod
@@ -112,7 +112,7 @@ class RunContext:
     #: The raw export, for passes that apply the folds themselves.
     raw_export: WcsWikiExport | None = field(default=None, repr=False)
     #: The run writing: the queue message id on the worker, "local" for a
-    #: local command. Stored on the pages it writes (MINI-101).
+    #: local command. Stored on the pages it writes.
     job_id: str | None = None
 
 
@@ -295,7 +295,7 @@ def _refresh_thin(ctx: RunContext) -> dict[str, int] | None:
 
     For a job that did not just compute the supports itself: a link job,
     whose new references change them, and the every-page rebuild, the free
-    way to refresh the list by hand (MINI-101). Built as ``consolidate``
+    way to refresh the list by hand. Built as ``consolidate``
     builds it — the notes' merges only, and the current fold decisions.
     """
     if not isinstance(ctx.store, state_backend.ApiState):
@@ -489,7 +489,7 @@ def validate(job: dict[str, Any]) -> str:
             raise JobError("generate needs entity or a non-empty entities list")
     elif kind == "materialise":
         # No entities at all is "every page", built in this one job (the
-        # /admin/wiki rebuild, MINI-103): one export read rather than one per
+        # /admin/wiki rebuild): one export read rather than one per
         # batch, which is what the job's time goes on. An empty list is a
         # producer that meant to name some and named none.
         entities = job.get("entities")

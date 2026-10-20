@@ -8,7 +8,7 @@ type: pipeline-cog
 # source mapping, reserved concurrency and the alarms are `module
 # "wiki_curator"` in mini-app-polis/infra. The Railway one-shot process that
 # needed the runtime exemptions this file used to hold was retired with its
-# service (MINI-95); they went with it.
+# service; they went with it.
 
 exemptions:
   - rule: PY-013
@@ -28,7 +28,7 @@ exemptions:
   - rule: CD-026
     reason: >
       ci.yml has one job outside the canonical set: `rebuild`, after
-      `deploy` (MINI-109). A release can change how pages are built without
+      `deploy`. A release can change how pages are built without
       changing any of the curator's state, so it asks the API for one
       rebuild of every page once the new code is live. That request can't
       go in `deploy`, which calls the shared lambda-deploy.yml and takes no

@@ -1,9 +1,9 @@
 # ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
-**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported (MINI-89), the API as the curator's store and one unit per job (MINI-94), the wiki-jobs queue and Lambda worker with API dispatch, flag on (MINI-95), page documents and visibility (MINI-96). The Railway service and its `export` code are retired (MINI-95); the site's /wiki, /wiki/page and admin views shipped in website-astro-wcs 2.6.0 (MINI-97; admin review split to MINI-101); the wcs-wiki repo stays as a local export from the page documents (MINI-99, decided 2026-10-17)
+**Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported, the API as the curator's store and one unit per job, the wiki-jobs queue and Lambda worker with API dispatch, flag on, page documents and visibility. The Railway service and its `export` code are retired; the site's /wiki, /wiki/page and admin views shipped in website-astro-wcs 2.6.0 (step 5; admin review split out as separate work); the wcs-wiki repo stays as a local export from the page documents (decided 2026-10-17)
 **Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
-**Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time); Asana MINI-89, MINI-94 – MINI-99
+**Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time)
 
 ## Context
 
@@ -57,7 +57,7 @@ function of its input and the API's current state:
   copied from transcription-cog. The Railway service and its git-push render
   retire when this lands.
 
-### Storage: the API holds the state and the pages (MINI-89)
+### Storage: the API holds the state and the pages
 
 New tables in `api-kaianolevine-com`, the durable half of ADR-005:
 
@@ -83,9 +83,9 @@ entries, under `wcs.corpus.read` and a new `wcs.wiki.write` (role
 `wiki-writer`, held by the curator). The curator's `state-import` sends the
 files in chunks and `state-verify` compares them, entry by entry, with what
 the API returns; on the real files the round trip was exact. Page documents
-wait for their schema (MINI-96).
+wait for their schema.
 
-**MINI-94, part 1 (2026-10-17): the API is the store.** The local commands
+**Step 2, part 1 (2026-10-17): the API is the store.** The local commands
 read each state document from the API and write back changed entries in
 batches during a run, with a final flush; the files remain as a cache in
 their old layout (byte-identical on the real state), checked against the API
@@ -94,7 +94,7 @@ the case of a run whose last write never arrived — so neither side
 overwrites the other. `--state files` keeps the file-only behaviour. The
 per-unit functions for the worker are part 2.
 
-**MINI-94, part 2 (2026-10-17): one unit per job.** `units.handle(job, ctx)`
+**Step 2, part 2 (2026-10-17): one unit per job.** `units.handle(job, ctx)`
 runs `link` (one source's statements), `consolidate` or `generate` (named
 entities) against a `RunContext` built once per invocation —
 the export with its folds applied, the state store, the model — and returns
@@ -106,11 +106,11 @@ each page that gained a fold. Follow-on generation goes in chunks of
 entities, one job each, rather than a message per entity: every invocation
 reads the export and the state, and a no-op still pays for that read. The table above is what the
 dispatch implements. Each unit is a no-op under its watermark. `materialise`
-joins with the page documents (MINI-96). The units read and write whole
+joins with the page documents. The units read and write whole
 state documents for now; per-entry reads are an API change to make if the
 worker's reads prove slow.
 
-**MINI-95 (2026-10-17): the queue and the worker.** `wiki-curator-jobs.fifo`,
+**Step 3 (2026-10-17): the queue and the worker.** `wiki-curator-jobs.fifo`,
 one message group, reserved concurrency 1: jobs never run side by side, so
 two cannot pay for one entity or race on a document. *Revised 2026-10-18:*
 the worker writes back only the entries a job changed, so only jobs that
@@ -126,12 +126,12 @@ the worker posts back, keeping the API the only producer. The worker
 (`worker.lambda_handler`) reads state into a fresh temporary folder per
 invocation, sends a job's follow-ons before it counts as done, and returns
 failed records to the queue. The Railway service and its git-push render
-were retired on 2026-10-17, once page documents existed (MINI-96) and the
-markdown repo became a local export only (MINI-99): the service by hand, and
+were retired on 2026-10-17, once page documents existed and the
+markdown repo became a local export only: the service by hand, and
 `.railway/`, `railpack.json`, the `export` mode, `boot.py`, `git_ops.py`,
 `config.py` and GitPython from this repo.
 
-**MINI-96 (2026-10-17): page documents.** `materialise` (`units.materialise_pages`)
+**Step 4 (2026-10-17): page documents.** `materialise` (`units.materialise_pages`)
 builds each named page with `pages.page_document` and posts it to
 `POST /v1/wcs/wiki/pages` (scope `wcs.wiki.write`), in chunks, removing in the
 same pass every name folded into a page it writes and any slug that is no
@@ -206,9 +206,9 @@ as an edit (the page-as-base rule of ADR-005 carries over).
 
 - **Add a note from a page.** A form on a wiki page that creates a note source
   through the API, skipping the Drive round-trip, and flows through the same
-  jobs. Wanted, not urgent (MINI-98).
+  jobs. Wanted, not urgent.
 - **The `wcs-wiki` repo.** Decided 2026-10-17, ahead of `/wiki` because it
-  shaped MINI-96 (MINI-99): it stays as a local markdown export, written by
+  shaped the page documents: it stays as a local markdown export, written by
   `render` from the same page documents the API stores. The Railway `export`
   mode and its git push retire; the repo is a local reading and diffing copy,
   committed by hand if at all. Whether to delete it is revisited once `/wiki`
@@ -220,19 +220,19 @@ as an edit (the page-as-base rule of ADR-005 carries over).
 
 ## Plan
 
-1. **MINI-89** — storage in the API: tables, import of the `.curator/` files,
+1. Storage in the API: tables, import of the `.curator/` files,
    read endpoints with the visibility filter.
-2. **MINI-94** — the curator as per-unit functions (`link_source`,
+2. The curator as per-unit functions (`link_source`,
    `consolidate_batch`, `generate_entity`, `materialise_page`) reading and
    writing through the API; the local CLI on top of them.
-3. **MINI-95** — `wiki-jobs` queue, Lambda worker and infra; API dispatch
+3. `wiki-jobs` queue, Lambda worker and infra; API dispatch
    after a source is composed; the Railway service retired.
-4. **MINI-96** — page documents: `materialise`, the document schema, the
+4. Page documents: `materialise`, the document schema, the
    admin `?as=public` view.
-5. **MINI-97** — `/wiki`, `/wiki/page` and `/admin/wiki` on
+5. `/wiki`, `/wiki/page` and `/admin/wiki` on
    `wcs.kaianolevine.com`.
-6. **MINI-98** — add a note from a page (later).
-7. **MINI-99** — decide the `wcs-wiki` repo's future (after step 5).
+6. Add a note from a page (later).
+7. Decide the `wcs-wiki` repo's future (after step 5).
 
 Steps 1–3 do not wait on the remaining prompt refinement: a prompt change is a
 version bump and a replay.

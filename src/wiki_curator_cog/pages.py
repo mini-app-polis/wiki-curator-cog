@@ -1,4 +1,4 @@
-"""Page documents: each entity page as structured data (ADR-006, MINI-96).
+"""Page documents: each entity page as structured data (ADR-006).
 
 The curator owns the page logic — folds, the reference overlay, By teacher.
 :func:`page_document` runs it for one entity and returns the page as a
@@ -9,7 +9,7 @@ they can see and serves them; it never recomputes a page.
 
 The markdown export is a reader of the same documents. :func:`page_markdown`
 writes the page the wcs-wiki repo has always had, from the document alone, so
-there is one page model with two readers (MINI-99).
+there is one page model with two readers.
 
 Text fields are markdown, with neutral links: ``[[slug]]`` or
 ``[[slug|label]]`` for a page and ``[[source:<uuid>|label]]`` for a source.
@@ -253,7 +253,7 @@ def display_aliases(
 
     Entities carry slug-form aliases for matching (link.py resolves targets
     through them, and identity.apply_merges adds a folded entity's names), so
-    they stay on the entity. A reader needs each name once (MINI-104): this
+    they stay on the entity. A reader needs each name once: this
     leaves out an alias equal to the page's name ignoring case, a repeat
     ignoring case, and one that is only the slug form of the page's name or
     of another alias listed ("lateral-push" beside "lateral push").
@@ -300,7 +300,7 @@ def page_document(
     ``details`` are the facets folded into it, as ``(name, gist, depth)``;
     ``detail_slugs`` names each one's own slug. ``folded`` is every slug
     folded into it, facets and same-idea names alike, so a lookup of one can
-    be served this page (MINI-100). ``hidden_aliases`` are the facets'
+    be served this page. ``hidden_aliases`` are the facets'
     names, left out of "also called" (:func:`display_aliases`). ``evidence`` is every source
     the page's prose was built from — its own statements' and those of the
     statements elsewhere that refer to it. With an ``overlay`` the page gets

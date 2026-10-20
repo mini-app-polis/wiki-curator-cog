@@ -57,7 +57,7 @@ def test_a_lesson_ends_as_stored_pages(harness: Harness, api: FakeApi) -> None:
     assert connection["evidence_sources"] == [SOURCE]
 
     # Every follow-on names the lesson as its origin, and every page write
-    # says so, with the message that wrote it (MINI-101).
+    # says so, with the message that wrote it.
     assert {j.get("origin_source_id") for j in api.enqueued} == {SOURCE}
     assert api.page_origins
     assert all(o == SOURCE and str(j).startswith("m-") for o, j in api.page_origins)

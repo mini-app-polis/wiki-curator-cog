@@ -1,4 +1,4 @@
-"""Page documents (ADR-006, MINI-96): built once, stored by the API, exported as markdown.
+"""Page documents (ADR-006): built once, stored by the API, exported as markdown.
 
 The document is the page model; the markdown export and the API both read
 it. These pin the parts a reader depends on: neutral links that come back to
@@ -73,7 +73,7 @@ def test_a_document_cites_its_sources() -> None:
 @pytest.mark.parametrize(
     ("name", "aliases", "expected"),
     [
-        # MINI-104: the lateral-pushing page as seen on 2026-10-18.
+        # The lateral-pushing page as seen on 2026-10-18.
         (
             "lateral pushing",
             [
@@ -173,14 +173,14 @@ def test_a_folded_page_goes_when_its_parent_is_materialised(tmp_path: Path) -> N
     assert not (tmp_path / "pages" / "anchor-step.json").exists()
     doc = json.loads((tmp_path / "pages" / "stretch.json").read_text())
     assert [d["slug"] for d in doc["details"]] == ["anchor-step"]
-    # a lookup of the folded slug can be served this page (MINI-100)
+    # a lookup of the folded slug can be served this page
     assert doc["folded"] == ["anchor-step"]
     assert doc["requested_slug"] is None
 
 
 def test_a_same_idea_fold_is_listed_though_not_a_detail(tmp_path: Path) -> None:
     # Same-idea names fold as aliases with no Details line, so ``folded`` is
-    # the only place a page names them (MINI-100).
+    # the only place a page names them.
     facets = consolidate.FacetsFile()
     facets.record("anchor-step", "stretch", "the same idea", "m", same=True)
     facets.save(tmp_path / "facets.json")
@@ -209,7 +209,7 @@ def test_a_bad_materialise_job_is_refused(tmp_path: Path) -> None:
 
 
 def test_materialise_with_no_entities_builds_every_page(tmp_path: Path) -> None:
-    # The /admin/wiki rebuild (MINI-103): every page in this one job, with
+    # The /admin/wiki rebuild: every page in this one job, with
     # one export read, and nothing to follow.
     llm = RouterLLM()
     result = units.handle({"job": "materialise"}, _ctx(tmp_path, llm))

@@ -8,9 +8,9 @@ passes, with their state held by the API (ADR-006). The worker
 state client.
 
 There is no deployed run here. The Railway ``export`` mode, which cloned
-wcs-wiki, rendered and pushed, was retired with its service (MINI-95,
-MINI-99): the worker stores each page as a document in the API, and the
-markdown repo is only a local export.
+wcs-wiki, rendered and pushed, was retired with its service: the worker
+stores each page as a document in the API, and the markdown repo is only a
+local export.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ REPO = "wiki-curator-cog"
 #: read the corpus.
 MACHINE_NAME = "wiki-curator-cog"
 
-#: The run a local command's page writes are stored with (MINI-101); the
+#: The run a local command's page writes are stored with; the
 #: worker uses the queue message id.
 LOCAL_JOB_ID = "local"
 
@@ -136,7 +136,7 @@ def render_local(
     the paths given, or (``ApiState``) the API, with those paths as its
     cache. A path left out means that layer is not used either way.
 
-    The wcs-wiki repo is a local export (MINI-99): run this, read the result
+    The wcs-wiki repo is a local export: run this, read the result
     in Obsidian or ``git diff``, commit by hand if you want to. Entity pages
     are written from the page documents ``materialise`` stores. Nothing
     leaves the machine except the API reads.
@@ -253,7 +253,7 @@ def link_local(
     With ``dry_run``, nothing is called and nothing is written: the summary
     says how many calls a real run would make and what they would cost.
 
-    ADR-005 / MINI-84, local half. Reads the export (read-only), links every
+    ADR-005, local half. Reads the export (read-only), links every
     statement not already in ``links_path`` under the current linker version
     — or a reproducible sample of ``sample`` of them — and saves after every
     batch, so a run cut short keeps what it paid for. Writes a readable
@@ -344,7 +344,7 @@ def generate_local(
     With ``condense``, no new evidence is integrated: only pages whose prose
     has outgrown the fixed shape are rewritten to fit it.
 
-    ADR-005 / MINI-86, local half. Reads the export (read-only) and, when
+    ADR-005, local half. Reads the export (read-only) and, when
     given, the links file — for the concepts it proposed and the statements
     that refer to each entity. ``wiki_repo_path`` is where the current pages
     are read from, so an overview edited on the page becomes the base. Saves
@@ -466,11 +466,11 @@ def consolidate_local(
     With ``dry_run``, nothing is called and nothing is written: the summary
     says how many calls a real run would make and what they would cost.
 
-    MINI-93, local half. Runs on the corpus after the notes' alias merges, so
+    Local half. Runs on the corpus after the notes' alias merges, so
     a merged-away name is not decided twice. With ``prose_path``, the model
     sees each entity's generated definition. Saves after every batch, and
     writes a review grouped by broader page next to the facets file. With the
-    API as the store, the thin list is stored there too (MINI-101).
+    API as the store, the thin list is stored there too.
     """
     export = _fetch_export()
     _require_corpus(export)
@@ -553,7 +553,7 @@ def run_job(
     wiki_repo_path: Path | None = None,
     dry_run: bool = False,
 ) -> dict:
-    """Run one worker job locally, as the wiki-jobs worker would (MINI-94).
+    """Run one worker job locally, as the wiki-jobs worker would.
 
     The same :func:`wiki_curator_cog.units.handle` the worker calls, against
     the production export and the given state store. With ``dry_run`` the
@@ -587,7 +587,7 @@ def materialise_local(
     state: state_backend.FileState | None = None,
     dry_run: bool = False,
 ) -> dict:
-    """Materialise pages: the named ones, or every page (MINI-96).
+    """Materialise pages: the named ones, or every page.
 
     No model call. With the API as the store this writes the page documents
     to the API the environment points at — production under
@@ -657,14 +657,14 @@ class _NoWrites(state_backend.FileState):
 
 
 def api_state() -> state_backend.ApiState:
-    """The API as the state store, through this cog's own key (MINI-94)."""
+    """The API as the state store, through this cog's own key."""
     return state_backend.ApiState(_state_client())
 
 
 def state_import_local(
     state_dir: Path, *, chunk: int = state_store.DEFAULT_CHUNK
 ) -> dict:
-    """Send links.json, facets.json and prose.json to the API (MINI-89).
+    """Send links.json, facets.json and prose.json to the API.
 
     This writes to the API the environment points at — production under
     ``doppler run --config prd``. Upserts only: re-running it is safe, and

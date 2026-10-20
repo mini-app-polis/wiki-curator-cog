@@ -79,7 +79,7 @@ class FakeApi:
         #: Status to answer pages POSTs with; 200 unless a test breaks it.
         self.pages_status = 200
         self.calls: list[str] = []
-        #: Thin entities as the API stores them, by slug (MINI-101).
+        #: Thin entities as the API stores them, by slug.
         self.thin: dict[str, dict[str, Any]] = {}
         #: Each pages POST's origin: (origin_source_id, origin_job_id).
         self.page_origins: list[tuple[str | None, str | None]] = []

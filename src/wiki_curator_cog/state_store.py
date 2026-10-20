@@ -2,8 +2,8 @@
 
 The three passes keep their state — and their watermarks — in
 ``links.json``, ``facets.json`` and ``prose.json``. Those were paid for in
-model calls (MINI-88: about $33 to build), so moving them to the API
-(ADR-006, MINI-89) is an import, never a relink or a regeneration, and it is
+model calls (about $33 to build), so moving them to the API
+(ADR-006) is an import, never a relink or a regeneration, and it is
 checked before anything relies on it:
 
 - **Nothing unknown is sent.** Every entry is checked against the contract
@@ -18,7 +18,7 @@ checked before anything relies on it:
   statement — so the watermarks hold and no work is redone.
 
 The files stay where they are, in git, until the curator reads the API
-instead (MINI-94).
+instead.
 """
 
 from __future__ import annotations

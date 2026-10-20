@@ -1,4 +1,4 @@
-"""The Lambda worker: one wiki job per message (MINI-95)."""
+"""The Lambda worker: one wiki job per message."""
 
 from __future__ import annotations
 
