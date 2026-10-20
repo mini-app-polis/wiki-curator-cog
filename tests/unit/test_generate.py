@@ -21,7 +21,7 @@ import wiki_curator_cog.flow as flow
 import wiki_curator_cog.main as main
 from wiki_curator_cog import generate, link
 from wiki_curator_cog import markdown_utils as md
-from wiki_curator_cog.render import render_bundle
+from wiki_curator_cog.render import build_indexes, render_bundle
 
 from .export_builders import (
     WcsAttribution,
@@ -1079,3 +1079,34 @@ def test_a_revert_is_a_revision_the_api_accepts() -> None:
     _rewritten(prose, "tuck-turn")
     generate.revert(prose, ["tuck-turn"], today="2026-10-19")
     WcsWikiProseRevision.model_validate(prose.entities["tuck-turn"]["revisions"][-1])
+
+
+def test_stray_citation_forms_become_one_form() -> None:
+    """MINI-111: forms the MINI-92 rewrites left on eight pages."""
+    src = "([[sources/2025-07-27-drill-based-learning]])"
+    for messy in (
+        "Keep the arm quiet [sources/2025-07-27-drill-based-learning].",
+        "Keep the arm quiet ([sources/2025-07-27-drill-based-learning]).",
+        "Keep the arm quiet ([[ sources/2025-07-27-drill-based-learning]]).",
+        "Keep the arm quiet ([source](../sources/2025-07-27-drill-based-learning.md)).",
+        "Keep the arm quiet. [[sources/2025-07-27-drill-based-learning]]",
+    ):
+        assert generate.tidy_citations(messy) == f"Keep the arm quiet {src}.", messy
+
+
+def test_a_markdown_link_with_no_source_is_dropped() -> None:
+    assert generate.tidy_citations("One point ([source](#)).") == "One point."
+
+
+def test_well_formed_citations_are_left_alone() -> None:
+    text = "One ([[sources/a]], [[sources/b]]). See [[concepts/frame]] too."
+    assert generate.normalise_citations(text) == text
+
+
+def test_a_page_build_normalises_stored_citations() -> None:
+    export, _ = _corpus_and_overlay()
+    _, prose = _one_over_shape("Def.")
+    slug = next(iter(build_indexes(export).source_slug_by_id.values()))
+    prose.entities["anchor-step"]["context"] = f"Stay grounded [sources/{slug}]."
+    out = generate.context_by_entity(export, prose)
+    assert list(out.values()) == [f"Stay grounded ([[sources/{slug}]])."]

@@ -606,13 +606,54 @@ _AFTER_STOP = re.compile(r"([.!?])(\s*\((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+\))"
 _PLACEHOLDER = re.compile(r"\s*\[\(?(?:source|citation(?: needed)?)\)?\]", re.I)
 
 
+#: Citation forms a rewrite wrote in place of ``([[sources/slug]])``:
+#: "[sources/x]", "[[ sources/x]]" and "[source](…sources/x…)" (MINI-111).
+_SINGLE = re.compile(r"(?<!\[)\[\s*(sources/[^\[\]\s]+)\s*\](?![\](])")
+_SPACED = re.compile(r"\[\[\s*(sources/[^\[\]]+?)\s*\]\]")
+_MD_LINK = re.compile(r"\[source\]\(([^)]*)\)", re.I)
+_SLUG_IN_URL = re.compile(r"sources/([A-Za-z0-9-]+)")
+_BARE = re.compile(r"\s*((?:\[\[sources/[^\]]+\]\](?:,\s*)?)+)")
+
+
+def normalise_citations(text: str) -> str:
+    """Every citation in the one form: ``([[sources/slug]])``.
+
+    No model call, so it also runs when a page is built, which fixes prose
+    stored before it existed. A markdown link with no source slug in it is
+    dropped, like a placeholder.
+    """
+
+    def from_link(m: re.Match[str]) -> str:
+        slug = _SLUG_IN_URL.search(m.group(1))
+        return f"[[sources/{slug.group(1)}]]" if slug else ""
+
+    text = _MD_LINK.sub(from_link, text)
+    text = _SPACED.sub(lambda m: f"[[{m.group(1)}]]", text)
+    text = _SINGLE.sub(lambda m: f"[[{m.group(1)}]]", text)
+    text = re.sub(r"\s*\(\s*\)", "", text)
+    out: list[str] = []
+    at = 0
+    for m in _CITATION.finditer(text):
+        out.append(_wrap_bare(text[at : m.start()]))
+        out.append(m.group(0))
+        at = m.end()
+    out.append(_wrap_bare(text[at:]))
+    return "".join(out)
+
+
+def _wrap_bare(segment: str) -> str:
+    """Citations outside parentheses, put inside them."""
+    return _BARE.sub(lambda m: " (" + m.group(1).rstrip(", ") + ")", segment)
+
+
 def tidy_citations(context: str) -> str:
-    """Each citation once, before its sentence's full stop.
+    """Each citation once, in one form, before its sentence's full stop.
 
     A rewrite sometimes cites one source after every sentence, and puts the
     citation after the full stop ("early. ([[sources/x]])"). The same group
     is kept only at its last place, and moved inside the sentence.
     """
+    context = normalise_citations(context)
     context = _PLACEHOLDER.sub("", context)
     groups = [m.group(0).strip() for m in _CITATION.finditer(context)]
     for group in set(groups):
@@ -1164,7 +1205,7 @@ def context_by_entity(
     pages = PageIndex.from_export(export, merges)
     out: dict[uuid.UUID, str] = {}
     for e in export.entities:
-        text = pages.repair(prose.context(e.slug))
+        text = pages.repair(normalise_citations(prose.context(e.slug)))
         if text:
             out[e.id] = text
     return out
