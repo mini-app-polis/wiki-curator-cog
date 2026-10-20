@@ -23,6 +23,7 @@ from wiki_curator_cog import generate, link
 from wiki_curator_cog import markdown_utils as md
 from wiki_curator_cog.render import build_indexes, render_bundle
 
+from .deadline_fakes import Held, run_past_the_deadline
 from .export_builders import (
     WcsAttribution,
     WcsDefinition,
@@ -1110,3 +1111,57 @@ def test_a_page_build_normalises_stored_citations() -> None:
     prose.entities["anchor-step"]["context"] = f"Stay grounded [sources/{slug}]."
     out = generate.context_by_entity(export, prose)
     assert list(out.values()) == [f"Stay grounded ([[sources/{slug}]])."]
+
+
+def test_the_deadline_stops_generation_without_waiting_for_its_calls() -> None:
+    """Out of time, the pass stops at once and spends nothing more."""
+    _, corpus = _corpus_and_overlay()
+    entities = sorted(corpus.entities.values(), key=lambda e: e.slug)
+    assert len(entities) > 1
+    llm = Held(FakeLLM())
+    prose = generate.ProseFile()
+    saves: list[int] = []
+    took = run_past_the_deadline(
+        llm,
+        lambda: generate.run_generation(
+            entities,
+            corpus,
+            prose,
+            llm,
+            model="m",
+            today="d",
+            workers=1,
+            on_entity=lambda: saves.append(1),
+        ),
+    )
+    assert took < 3  # the call in flight was held for 5 s
+    assert llm.asked == 1  # the rest never started
+    assert prose.entities == {}
+    assert saves == []
+
+
+def test_the_deadline_stops_condensing_without_waiting_for_its_calls() -> None:
+    """Out of time, the pass stops at once and spends nothing more."""
+    _, corpus = _corpus_and_overlay()
+    prose = generate.ProseFile()
+    over = " ".join(f"S{i}." for i in range(8))
+    for slug in ("anchor-step", "stretch"):
+        prose.entities[slug] = {
+            "generator_version": generate.GENERATOR_VERSION,
+            "definition": "Def.",
+            "context": over,
+            "integrated": [],
+            "revisions": [],
+        }
+    llm = Held(RewritesEverythingLLM("One point. Another."))
+    saves: list[int] = []
+    took = run_past_the_deadline(
+        llm,
+        lambda: generate.run_condense(
+            corpus, prose, llm, model="m", workers=1, on_entity=lambda: saves.append(1)
+        ),
+    )
+    assert took < 3  # the call in flight was held for 5 s
+    assert llm.asked == 1  # the other page never started
+    assert all(prose.context(s) == over for s in ("anchor-step", "stretch"))
+    assert saves == []

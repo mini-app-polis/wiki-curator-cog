@@ -30,7 +30,6 @@ import re
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -42,6 +41,7 @@ from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
 
 from . import link
+from ._deadline import run_parallel
 from .identity import FOLD_GROUPS, FOLDABLE_KINDS, SAME_ONLY_KINDS
 from .render import WcsWikiExport
 
@@ -600,6 +600,7 @@ def run_consolidation(
             for i in range(0, len(group_todo), batch_size)
         ]
     lock = threading.Lock()
+    stopped = threading.Event()
     decided = 0
     failed_batches = 0
 
@@ -607,6 +608,8 @@ def run_consolidation(
         job: tuple[Group, list[str], link.Catalog, list[Candidate]],
     ) -> None:
         nonlocal decided, failed_batches
+        if stopped.is_set():
+            return
         group, all_names, parents, batch = job
         try:
             results = decide_batch(llm, batch, all_names, parents, supports, group)
@@ -616,6 +619,8 @@ def run_consolidation(
             LOG.warning("consolidate.batch_failed size=%s err=%s", len(batch), exc)
             return
         with lock:
+            if stopped.is_set():  # stopped while in flight: see run_parallel
+                return
             for slug, (parent, same, reason) in results.items():
                 facets.record(slug, parent, reason, model, same, group.version)
                 decided += 1
@@ -623,8 +628,7 @@ def run_consolidation(
                 on_batch()
             LOG.info("consolidate.batch decided_total=%s/%s", decided, len(todo))
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        list(pool.map(work, batches))
+    run_parallel(work, batches, workers=workers, stopped=stopped)
 
     facets.consolidator_versions = dict(CONSOLIDATOR_VERSIONS)
     facets.model = model

@@ -20,6 +20,7 @@ from mini_app_polis.llm.errors import LLMError
 from wiki_curator_cog import consolidate, generate, identity, link
 from wiki_curator_cog.render import find_broken_links, render_bundle
 
+from .deadline_fakes import Held, run_past_the_deadline
 from .export_builders import (
     WcsAttribution,
     WcsEntity,
@@ -686,3 +687,26 @@ def test_the_thin_list_is_what_the_review_shows() -> None:
     assert quote.text == "Stay over your feet."
     assert (quote.session_date, quote.source_title) == (dt.date(2026, 1, 1), "lesson")
     assert quote.source_id is not None
+
+
+def test_the_deadline_stops_the_pass_without_waiting_for_its_batches() -> None:
+    """Out of time, the pass stops at once and spends nothing more."""
+    llm = Held(FakeLLM({}))
+    facets = consolidate.FacetsFile()
+    saves: list[int] = []
+    took = run_past_the_deadline(
+        llm,
+        lambda: consolidate.run_consolidation(
+            _export(),
+            facets,
+            llm,
+            model="fake",
+            batch_size=1,
+            workers=1,
+            on_batch=lambda: saves.append(1),
+        ),
+    )
+    assert took < 3  # the call in flight was held for 5 s
+    assert llm.asked == 1  # five batches, one worker: four never started
+    assert facets.entities == {}
+    assert saves == []
