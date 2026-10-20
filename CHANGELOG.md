@@ -1,3 +1,10 @@
+## [3.11.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.1...v3.11.2) (2026-10-20)
+
+
+### Bug Fixes
+
+* **deps:** bump certifi to 2026.10.19 for GHSA-6q48-6c7w-9gw2 ([ae1cbe8](https://github.com/mini-app-polis/wiki-curator-cog/commit/ae1cbe8cffbbdafd922f7b99266cfeeeac87da7c))
+
 ## [3.11.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.0...v3.11.1) (2026-10-20)
 
 
