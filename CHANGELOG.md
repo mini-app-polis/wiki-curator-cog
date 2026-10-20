@@ -1,3 +1,10 @@
+## [3.11.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.3...v3.11.4) (2026-10-20)
+
+
+### Bug Fixes
+
+* **wiki-curator:** stop model passes at the deadline without waiting for in-flight calls ([c54a804](https://github.com/mini-app-polis/wiki-curator-cog/commit/c54a804e8e204c7442328de63ba38eebdcd8ace5))
+
 ## [3.11.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.2...v3.11.3) (2026-10-20)
 
 
