@@ -1,3 +1,10 @@
+## [3.11.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.0...v3.11.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* normalise stray citation forms, at write and at page build (MINI-111) ([5a16493](https://github.com/mini-app-polis/wiki-curator-cog/commit/5a16493e0bdc248a65019efafd6deb87d0d6688f))
+
 # [3.11.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.10.0...v3.11.0) (2026-10-19)
 
 
