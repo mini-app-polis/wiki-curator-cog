@@ -78,6 +78,13 @@ uv run pre-commit run --all-files
 uv run check-doppler-keys                  # every required .env.example name is in dev
 ```
 
+### Environment
+
+Every variable this cog reads is listed, with its default and whether it is
+required, in [`.env.example`](.env.example). On Lambda the worker gets them
+from SSM Parameter Store, synced from Doppler `prd`; see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ### Run tests
 
 ```bash
