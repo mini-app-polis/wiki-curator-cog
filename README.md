@@ -27,8 +27,8 @@ Drive transcript drop
         ▼
 transcription-cog (LLM extraction) ──► api-kaianolevine-com (transcripts + sources)
                                             │  composed → link job
-                                            ▼  wiki-curator-jobs.fifo
-                                    wiki-curator-worker (Lambda)
+                                            ▼  this cog's FIFO queue
+                                    the worker (Lambda)
                                       link → consolidate → generate → materialise
                                             │  state and page documents
                                             ▼
@@ -254,10 +254,9 @@ no pages.
 
 ### The worker (ADR-006)
 
-On AWS the same units run as a Lambda behind `wiki-curator-jobs.fifo`
+On AWS the same units run as a Lambda behind this cog's FIFO queue
 (`wiki_curator_cog.worker.lambda_handler`, deployed by CI on each release;
-the function, queue and alarms are `module "wiki_curator"` in
-mini-app-polis/infra). The API is the only producer: it enqueues a `link`
+the function, queue and alarms are declared in mini-app-polis/infra). The API is the only producer: it enqueues a `link`
 when a source is composed — only while `flags.wcs.wiki_jobs_enabled` is on,
 seeded off — and the follow-on jobs each job names, which the worker posts to
 `POST /v1/wcs/wiki/jobs`. Jobs run side by side only where they write different state entries (below); each reads the export and the
@@ -345,7 +344,7 @@ Three layers:
 1. **Structured logs** — `mini_app_polis` logger throughout, JSON output via `common-python-utils`; one timing line per job.
 2. **Sentry** — the exception that fails a job (the shared cogs project, tagged `service:wiki-curator-cog`).
 3. **Run report** — one per job (`wiki-link`, `wiki-generate`, …), as every cog sends one per run. It names what changed: references a link found, folds a consolidation moved, pages whose prose was generated, and pages a materialise created, changed or removed. A page rewritten identically only counts toward `pages_unchanged`. A job that refreshes the thin list (`consolidate`, `link`, the every-page rebuild) also counts it (`thin_entities`, `thin_written`, `thin_removed`). It also gives model calls and cost as counts, posted whenever the job did something (pages written or removed, statements linked, decisions or prose made, a model call, a follow-on queued) and a log line only when it found nothing to do, a WARN when it finished with paid-for work left undone (a failed link or consolidation batch, an entity whose prose failed), and sent on the way out when a job raises. An unreadable message, which never reaches a job, is reported once by the worker.
-4. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (from `module "wiki_curator"` in mini-app-polis/infra) says so.
+4. **The dead-letter queue** — a job that keeps failing lands there, and its alarm (declared in mini-app-polis/infra) says so.
 
 ---
 
@@ -359,6 +358,6 @@ Three layers:
 
 **Curator version.** Auto-derived at runtime from the package's `pyproject.toml`. semantic-release bumps the version on push to main based on conventional commits: `feat:` → minor, `fix:` → patch, `BREAKING CHANGE:` → major. `chore:` / `docs:` / `style:` commits do not produce a release.
 
-**Side by side only where it is safe.** The queue is FIFO and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (api-kaianolevine-com `wiki_dispatch.group_for`; infra `module "wiki_curator"`).
+**Side by side only where it is safe.** The queue is FIFO and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (the groups are set by api-kaianolevine-com when it enqueues; the ceiling is declared in mini-app-polis/infra).
 
 **Read-only against the corpus.** The curator reads note content with `GET` only. It writes its own state (`/v1/wcs/wiki/state/*`) and page documents (`/v1/wcs/wiki/pages`), and asks for follow-on jobs (`/v1/wcs/wiki/jobs`).

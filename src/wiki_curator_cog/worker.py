@@ -1,7 +1,7 @@
 """The Lambda entrypoint: one wiki job in, its result and follow-ons out.
 
-The curator runs on Lambda behind its own FIFO queue,
-``wiki-curator-jobs.fifo`` (ADR-006). The API is the only producer: it
+The curator runs on Lambda behind its own FIFO queue, declared in
+mini-app-polis/infra (ADR-006). The API is the only producer: it
 enqueues a ``link`` job when a source is composed, and the jobs a job names
 as its follow-ons, which this worker posts back to it. Every message is
 
@@ -11,7 +11,7 @@ as its follow-ons, which this worker posts back to it. Every message is
 with a payload :func:`wiki_curator_cog.units.validate` accepts.
 
 **Side by side only where it is safe.** The queue is FIFO and the API picks
-each job's message group by what it writes (its ``wiki_dispatch.group_for``).
+each job's message group by what it writes, when it enqueues.
 ``consolidate`` and ``generate`` share one group, so two of them never pay for
 one entity. ``link`` writes one source's statements and runs a group per
 source; ``materialise`` only writes page documents and spreads over a few
@@ -70,7 +70,7 @@ from .flow import MACHINE_NAME, REPO, _fetch_export, _require_corpus, _state_cli
 
 log = logger_mod.get_logger()
 
-#: Must match api-kaianolevine-com's wiki_dispatch.
+#: Must match the version api-kaianolevine-com enqueues.
 MESSAGE_VERSION = 1
 
 #: The most jobs one enqueue request may carry, read from the contract.

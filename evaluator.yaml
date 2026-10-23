@@ -4,9 +4,9 @@
 type: pipeline-cog
 
 # A queue-driven Lambda worker, like the other pipeline cogs (ADR-006 here):
-# wiki-curator-jobs.fifo and its dead-letter queue, the function, the event
-# source mapping, reserved concurrency and the alarms are `module
-# "wiki_curator"` in mini-app-polis/infra. The Railway one-shot process that
+# its FIFO queue and dead-letter queue, the function, the event source
+# mapping, reserved concurrency and the alarms are declared in
+# mini-app-polis/infra. The Railway one-shot process that
 # needed the runtime exemptions this file used to hold was retired with its
 # service; they went with it.
 
@@ -23,8 +23,8 @@ exemptions:
       twice finds nothing left to do and makes no model call; materialise
       rewrites the same page document. Duplicate suppression of the inputs
       themselves — one source row per extraction — is upstream in
-      api-kaianolevine-com, enforced by a unique index (PIPE-002,
-      migration 030), not here.
+      api-kaianolevine-com, enforced by a unique index there (PIPE-002), not
+      here.
   - rule: CD-026
     reason: >
       ci.yml has one job outside the canonical set: `rebuild`, after
