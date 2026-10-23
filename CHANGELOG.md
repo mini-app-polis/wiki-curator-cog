@@ -1,3 +1,12 @@
+## [3.11.14](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.13...v3.11.14) (2026-10-23)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.22.0 ([a171704](https://github.com/mini-app-polis/wiki-curator-cog/commit/a171704d2a8519b62679d3def00c9a79d96d0b8e))
+* **deps:** patch vulnerable dependencies (filelock) ([583c9c6](https://github.com/mini-app-polis/wiki-curator-cog/commit/583c9c61a7cf84a2ae055a647f7dbbd1c667e613))
+* **deps:** patch vulnerable dependencies (virtualenv) ([626ab75](https://github.com/mini-app-polis/wiki-curator-cog/commit/626ab750e6f76c35bff85478d58c8e59820c4f96))
+
 ## [3.11.13](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.12...v3.11.13) (2026-10-23)
 
 
