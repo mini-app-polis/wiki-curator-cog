@@ -1,7 +1,8 @@
 # Pins this repo to the shared Doppler config for local development.
 # `doppler setup` reads it; `doppler run -- …` then injects the dev secrets.
-# Local commands read production with `doppler run --config prd`; the
-# deployed worker reads its secrets from SSM, not Doppler.
+# Local commands use dev. A production command says `--config prd`
+# explicitly, and the README marks it as one; the deployed worker reads its
+# secrets from SSM, not Doppler.
 setup:
   - project: mini-app-polis-ecosystem
     config: dev

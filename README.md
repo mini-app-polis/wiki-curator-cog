@@ -59,7 +59,11 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 
 Secrets come from Doppler's shared `dev` config through the
 [Doppler CLI](https://docs.doppler.com/docs/install-cli) — nothing reads a
-`.env` file, and local runs never use `prd`.
+`.env` file. Local commands use `dev`. A command in this README that says
+`doppler run --config prd` is a **production command**: it reads the
+production corpus and state through the production API, and the ones that
+send or import write to production, so run it on purpose, never by habit
+(ecosystem-standards CFG-003).
 
 ```bash
 brew install gnupg dopplerhq/cli/doppler   # once per machine
