@@ -57,7 +57,7 @@ class Api(FakeApi):
         (_body({"job": "link", "source_id": SOURCE}, type="x"), "type"),
         (json.dumps({"type": "wiki.job", "version": 1}), "payload"),
         (_body({"job": "link"}), "source_id"),
-        (_body({"job": "dance"}), "unknown job"),
+        (_body({"job": "dance"}), "not a valid wiki.job"),
     ],
 )
 def test_an_unreadable_message_is_refused(body: str, why: str) -> None:
@@ -134,7 +134,7 @@ def test_a_good_record_is_deleted_and_a_failed_one_returned() -> None:
     good = _record(_body({"job": "generate", "entity": "a"}))
     bad = _record(_body({"job": "generate", "entity": "b"}))
 
-    def fake(body: str, *, budget_s: int, run_id: str) -> dict:
+    def fake(body: str, *, run_id: str, context: Any = None) -> dict:
         if run_id == bad["messageId"]:
             raise RuntimeError("API down")
         return {"next": []}
@@ -166,13 +166,16 @@ def test_without_its_settings_every_record_comes_back() -> None:
     assert out == {"batchItemFailures": [{"itemIdentifier": records[0]["messageId"]}]}
 
 
-def test_the_budget_is_lambdas_remaining_time() -> None:
-    class Ctx:
-        def get_remaining_time_in_millis(self) -> int:
-            return 900_000
-
-    assert worker._budget(Ctx()) == 900
-    assert worker._budget(None) == 0  # local: no guard
+def test_the_job_is_given_lambdas_context() -> None:
+    """The deadline is read from it, so a job stops before Lambda kills it."""
+    record = _record(_body({"job": "generate", "entity": "a"}))
+    ctx = object()
+    with (
+        patch.object(worker, "load_secrets"),
+        patch.object(worker, "process_message", return_value={}) as run,
+    ):
+        worker.lambda_handler({"Records": [record]}, ctx)
+    assert run.call_args.kwargs["context"] is ctx
 
 
 # ── Run reports ──
@@ -332,7 +335,7 @@ def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
     sent: list[bool] = []
 
     @contextmanager
-    def fake_report(flow_name: str, *, repo: str, run_id: str):
+    def fake_report(flow_name: str, *, repo: str, run_id: str, version: str):
         opened.append((flow_name, run_id))
         report = _Report()
         yield report
@@ -347,7 +350,6 @@ def test_each_job_opens_its_own_run_report(tmp_path: Path) -> None:
     ):
         worker.process_message(
             _body({"job": "materialise", "entities": ["stretch"]}),
-            budget_s=0,
             run_id="m-9",
         )
     assert opened == [("wiki-materialise", "m-9")]

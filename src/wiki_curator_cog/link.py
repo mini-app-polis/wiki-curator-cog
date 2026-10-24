@@ -44,7 +44,7 @@ from mini_app_polis.llm import LLMMessage, build_llm
 from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
 
-from ._deadline import run_parallel
+from ._parallel import run_parallel
 from .render import LinkOverlay, WcsEntity, WcsWikiExport
 
 LOG = log.get_logger()

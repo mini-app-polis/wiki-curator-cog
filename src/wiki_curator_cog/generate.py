@@ -52,7 +52,7 @@ from mini_app_polis.llm.errors import LLMError
 
 from . import link
 from . import markdown_utils as md
-from ._deadline import run_parallel
+from ._parallel import run_parallel
 from .render import (
     ExportIndexes,
     LinkOverlay,
@@ -859,7 +859,7 @@ def generate_one(
     under it and only the model call runs outside, so many calls can be in
     flight while the file is updated one entity at a time. Once ``stopped``
     is set, an answer that arrives is not recorded (see
-    :func:`._deadline.run_parallel`).
+    :func:`._parallel.run_parallel`).
     """
     guard = lock if lock is not None else contextlib.nullcontext()
     with guard:

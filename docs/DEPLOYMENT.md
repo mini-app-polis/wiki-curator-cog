@@ -11,7 +11,7 @@ was and why it is gone.
 
 | Piece | Where it is declared |
 |---|---|
-| `wiki-curator-jobs.fifo`, its dead-letter queue, the function (`wiki-curator-worker`), the event source mapping and its concurrency ceiling, the alarms | `module "wiki_curator"` in mini-app-polis/infra |
+| The FIFO queue, its dead-letter queue, the function, the event source mapping and its concurrency ceiling, the alarms | mini-app-polis/infra |
 | The function's code | this repo, deployed by CI on each release (`deploy` in `.github/workflows/ci.yml`, the shared `lambda-deploy.yml`) |
 | Its secrets | SSM, read by `load_secrets` at each invocation |
 | Who enqueues | api-kaianolevine-com only: a `link` job when a source is composed (behind `flags.wcs.wiki_jobs_enabled`), and the follow-ons a job posts to `POST /v1/wcs/wiki/jobs` |
@@ -33,7 +33,7 @@ The same value is `WIKI_CURATOR_DEPLOY_API_KEY` in Doppler
 
 ## Starting and stopping the flow of jobs
 
-`flags.wcs.wiki_jobs_enabled` (migration 055 in api-kaianolevine-com) decides
+`flags.wcs.wiki_jobs_enabled`, a flag in api-kaianolevine-com, decides
 whether a composed source enqueues a `link` job. Turning it off stops new
 work at the source; jobs already queued, and the follow-ons they name, still
 run. Changing it takes `config.flags.write`, a human admin scope.

@@ -1,7 +1,7 @@
 """The Lambda entrypoint: one wiki job in, its result and follow-ons out.
 
-The curator runs on Lambda behind its own FIFO queue,
-``wiki-curator-jobs.fifo`` (ADR-006). The API is the only producer: it
+The curator runs on Lambda behind its own FIFO queue, declared in
+mini-app-polis/infra (ADR-006). The API is the only producer: it
 enqueues a ``link`` job when a source is composed, and the jobs a job names
 as its follow-ons, which this worker posts back to it. Every message is
 
@@ -11,7 +11,7 @@ as its follow-ons, which this worker posts back to it. Every message is
 with a payload :func:`wiki_curator_cog.units.validate` accepts.
 
 **Side by side only where it is safe.** The queue is FIFO and the API picks
-each job's message group by what it writes (its ``wiki_dispatch.group_for``).
+each job's message group by what it writes, when it enqueues.
 ``consolidate`` and ``generate`` share one group, so two of them never pay for
 one entity. ``link`` writes one source's statements and runs a group per
 source; ``materialise`` only writes page documents and spreads over a few
@@ -53,25 +53,38 @@ the follow-ons are asked for again.
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
 from mini_app_polis import load_secrets, timing
 from mini_app_polis import logger as logger_mod
-from mini_app_polis.api.contract import WcsWikiJob, WcsWikiJobsRequest
+from mini_app_polis.api.contract import (
+    WcsWikiJob,
+    WcsWikiJobsRequest,
+    WikiJobMessage,
+)
+from mini_app_polis.lambda_worker import (
+    UnprocessableMessage,
+    all_failed,
+    deadline,
+    parse_message,
+    process_records,
+)
 from mini_app_polis.pipeline_status import RunReport, post_run_finding, run_report
 from mini_app_polis.sentry import init_sentry
 
 from . import link, state_backend, units, usage
-from ._deadline import deadline
+from ._version import __version__
 from .flow import MACHINE_NAME, REPO, _fetch_export, _require_corpus, _state_client
+
+__all__ = ["UnprocessableMessage", "job_of", "lambda_handler", "process_message"]
 
 log = logger_mod.get_logger()
 
-#: Must match api-kaianolevine-com's wiki_dispatch.
-MESSAGE_VERSION = 1
+#: How long before the function's timeout a job is stopped, so that its
+#: run report can still be sent and the handler can still return.
+DEADLINE_MARGIN_SECONDS = 30
 
 #: The most jobs one enqueue request may carry, read from the contract.
 _ENQUEUE_PER_REQUEST: int = next(
@@ -79,7 +92,6 @@ _ENQUEUE_PER_REQUEST: int = next(
     for m in WcsWikiJobsRequest.model_fields["jobs"].metadata
     if getattr(m, "max_length", None) is not None
 )
-TYPE_JOB = "wiki.job"
 
 # At import, once per cold start (see transcription-cog's worker).
 # An empty DSN in production logs an ERROR rather than passing silently
@@ -87,33 +99,22 @@ TYPE_JOB = "wiki.job"
 init_sentry(MACHINE_NAME)
 
 
-class UnprocessableMessage(RuntimeError):
-    """The message cannot be handled by this consumer, ever."""
-
-
 def job_of(body: str) -> dict[str, Any]:
-    """The job a message asks for. Raises UnprocessableMessage otherwise."""
+    """The job a message asks for. Raises UnprocessableMessage otherwise.
+
+    The envelope and the payload's shape are read against the shared
+    message model; what each kind of job needs is checked by
+    :func:`wiki_curator_cog.units.validate`. The job comes back as the
+    fields the message set, so a job carries what its producer sent and
+    nothing the model filled in.
+    """
+    message = parse_message(body, WikiJobMessage)
+    job = message.payload.model_dump(mode="json", exclude_unset=True)
     try:
-        message = json.loads(body)
-    except ValueError as exc:
-        raise UnprocessableMessage(f"body is not JSON: {exc}") from exc
-    if not isinstance(message, dict):
-        raise UnprocessableMessage("body is not an object")
-    if message.get("version") != MESSAGE_VERSION:
-        raise UnprocessableMessage(
-            f"message version {message.get('version')!r}, this consumer speaks "
-            f"{MESSAGE_VERSION}"
-        )
-    if message.get("type") != TYPE_JOB:
-        raise UnprocessableMessage(f"unknown message type {message.get('type')!r}")
-    payload = message.get("payload")
-    if not isinstance(payload, dict):
-        raise UnprocessableMessage("message carries no payload object")
-    try:
-        units.validate(payload)
+        units.validate(job)
     except units.JobError as exc:
         raise UnprocessableMessage(str(exc)) from exc
-    return payload
+    return job
 
 
 def run(
@@ -234,7 +235,7 @@ def record(report: RunReport, job: dict[str, Any], result: dict[str, Any]) -> bo
     return bool(done or calls or enqueued)
 
 
-def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
+def process_message(body: str, *, run_id: str, context: Any = None) -> dict[str, Any]:
     """Run the job one message asks for. Raises if it must be redelivered.
 
     One run report per job, as every cog sends one per run: posted when the
@@ -242,13 +243,21 @@ def process_message(body: str, *, budget_s: int, run_id: str) -> dict[str, Any]:
     left undone, a log line when it found nothing to do, and on an exception
     the report goes out on the way (``run_report``) before the message
     returns to the queue.
+
+    ``context`` is Lambda's: the job is stopped
+    :data:`DEADLINE_MARGIN_SECONDS` before the function's timeout, inside
+    the report, so a job that runs long fails the ordinary way and says so
+    rather than being killed mid-write. Without one (a local call), no
+    guard.
     """
     job = job_of(body)
     log.info("worker: run %s job=%s", run_id, job.get("job"))
     with (
-        run_report(f"wiki-{job.get('job')}", repo=REPO, run_id=run_id) as report,
+        run_report(
+            f"wiki-{job.get('job')}", repo=REPO, run_id=run_id, version=__version__
+        ) as report,
         tempfile.TemporaryDirectory(prefix="wiki-state-") as tmp,
-        deadline(budget_s),
+        deadline(context, margin_seconds=DEADLINE_MARGIN_SECONDS),
     ):
         result = run(job, client=_state_client(), state_dir=Path(tmp), run_id=run_id)
         report.send(notable=record(report, job, result))
@@ -272,6 +281,7 @@ def _report_unprocessable(exc: BaseException, run_id: str) -> None:
             repo=REPO,
             source="queue_consumer",
             run_id=run_id,
+            version=__version__,
         )
     except Exception:  # noqa: BLE001 — the notification is not the job
         log.exception("worker: could not report the unprocessable message")
@@ -285,61 +295,57 @@ def _job_label(body: str) -> str:
         return "unreadable"
 
 
-def _budget(context: Any) -> int:
-    """Lambda's remaining seconds. :func:`._deadline.deadline` keeps the margin,
-    so a job that runs long stops itself and its record is returned, rather
-    than being killed mid-write. Without a context (a local call), no guard.
-    """
-    remaining = getattr(context, "get_remaining_time_in_millis", None)
-    return int(remaining() / 1000) if remaining is not None else 0
+def _attempt(record: dict[str, Any]) -> str:
+    """Which receive of this message this is, or "?" when unknown."""
+    return str((record.get("attributes") or {}).get("ApproximateReceiveCount", "?"))
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Run each record's job, and name the records that must come back.
 
-    Never raises: reporting per record is correct at every batch size.
+    Never raises an ordinary failure: reporting per record is correct at
+    every batch size, and
+    :func:`~mini_app_polis.lambda_worker.process_records` names every record
+    whose job raised.
     """
-    records = event.get("Records", []) if isinstance(event, dict) else []
     try:
         load_secrets(refresh=True)
     except Exception:  # noqa: BLE001 — nothing can run without its settings
         log.exception("worker: could not refresh settings from SSM")
-        return {
-            "batchItemFailures": [
-                {"itemIdentifier": str(r.get("messageId") or "")} for r in records
-            ]
-        }
+        return all_failed(event)
 
-    failures: list[dict[str, str]] = []
-    for record in records:
+    def handle(record: dict[str, Any]) -> None:
         message_id = str(record.get("messageId") or "")
         body = record.get("body") or ""
-        attempt = (record.get("attributes") or {}).get("ApproximateReceiveCount", "?")
+        attempt = _attempt(record)
         with timing.invocation(
             cog="wiki-curator", mode=_job_label(body), attempt=attempt
         ) as timed:
             try:
-                process_message(body, budget_s=_budget(context), run_id=message_id)
-            except UnprocessableMessage as exc:
+                process_message(body, run_id=message_id, context=context)
+            except UnprocessableMessage:
                 timed.label(outcome="unprocessable")
-                log.error(
-                    "worker: unprocessable message (attempt %s): %s", attempt, exc
-                )
-                if attempt in ("1", "?"):
-                    _report_unprocessable(exc, message_id)
-                failures.append({"itemIdentifier": message_id})
-            except Exception:  # noqa: BLE001 — every failure is a retry
+                raise
+            except BaseException:
                 timed.label(outcome="failed")
                 # Already reported by the job's run report on its way out.
                 log.exception("worker: job failed (attempt %s)", attempt)
-                failures.append({"itemIdentifier": message_id})
-            else:
-                timed.label(outcome="ok")
+                raise
+            timed.label(outcome="ok")
 
+    def on_unprocessable(exc: UnprocessableMessage, record: dict[str, Any]) -> None:
+        # Once, on the first receive: every later receive fails the same way,
+        # and the dead-letter queue it ends up in has an alarm of its own.
+        if _attempt(record) in ("1", "?"):
+            _report_unprocessable(exc, str(record.get("messageId") or ""))
+
+    result = process_records(event, handle, on_unprocessable=on_unprocessable)
+    failures = result["batchItemFailures"]
     if failures:
+        records = event.get("Records", []) if isinstance(event, dict) else []
         log.warning(
             "worker: %d of %d record(s) returned to the queue",
             len(failures),
             len(records),
         )
-    return {"batchItemFailures": failures}
+    return result

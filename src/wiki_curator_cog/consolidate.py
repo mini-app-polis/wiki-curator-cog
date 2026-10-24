@@ -41,7 +41,7 @@ from mini_app_polis.llm.base import LLMClient
 from mini_app_polis.llm.errors import LLMError
 
 from . import link
-from ._deadline import run_parallel
+from ._parallel import run_parallel
 from .identity import FOLD_GROUPS, FOLDABLE_KINDS, SAME_ONLY_KINDS
 from .render import WcsWikiExport
 
