@@ -1,3 +1,12 @@
+## [3.11.15](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.14...v3.11.15) (2026-10-24)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.22.1 ([7ee6e15](https://github.com/mini-app-polis/wiki-curator-cog/commit/7ee6e15ddbfa5a294915005a1e0973da5576b283))
+* **deps:** bump miniapppolis-common-utils to 6.22.2 ([dd4938b](https://github.com/mini-app-polis/wiki-curator-cog/commit/dd4938bc34ab9e5fe256f8ba1e87cfd7309085dd))
+* **worker:** use the shared Lambda worker module and queue message models ([ccdc0ee](https://github.com/mini-app-polis/wiki-curator-cog/commit/ccdc0ee935629a956f13d9673fb2c2bc49c23307))
+
 ## [3.11.14](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.13...v3.11.14) (2026-10-23)
 
 
