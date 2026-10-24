@@ -70,7 +70,7 @@ Every model pass is watermarked in the API, so a repeated job makes no model cal
 
 ## Concurrency and the job budget
 
-The queue is FIFO, and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (the groups are set by api-kaianolevine-com when it enqueues; the ceiling is declared in mini-app-polis/infra). A job's budget is the invocation's remaining time; `_deadline.py` stops it a margin before Lambda would, so it fails cleanly and its record returns to the queue.
+The queue is FIFO, and jobs that write the same state entries never run side by side. `consolidate` and `generate` share one message group, so two never pay for one entity; `link` runs a group per source and `materialise` spreads over a few page groups, so lessons link and pages rebuild side by side, up to the function's concurrency ceiling (the groups are set by api-kaianolevine-com when it enqueues; the ceiling is declared in mini-app-polis/infra). A job's budget is the invocation's remaining time; `mini_app_polis.lambda_worker.deadline` stops it a margin before Lambda would, so it fails cleanly and its record returns to the queue.
 
 The curator version is auto-derived at runtime from `pyproject.toml` via `importlib.metadata.version("wiki-curator-cog")`. semantic-release bumps it on push to main based on conventional commits (`feat:` → minor, `fix:` → patch), and CI deploys each release to the Lambda.
 

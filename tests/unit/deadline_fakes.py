@@ -14,12 +14,23 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from mini_app_polis.lambda_worker import RunOutOfTime, deadline
 
-from wiki_curator_cog._deadline import DEADLINE_MARGIN_SECONDS, RunOutOfTime, deadline
+from wiki_curator_cog.worker import DEADLINE_MARGIN_SECONDS
 
 #: How long a held call waits to be released. Longer than the deadline, so
 #: a pass that waits for its calls takes at least this long.
 HOLD_SECONDS = 5
+
+
+class _Context:
+    """Lambda's context, as far as the deadline reads it."""
+
+    def __init__(self, remaining_seconds: float) -> None:
+        self._remaining_ms = int(remaining_seconds * 1000)
+
+    def get_remaining_time_in_millis(self) -> int:
+        return self._remaining_ms
 
 
 class Held:
@@ -51,7 +62,10 @@ def run_past_the_deadline(llm: Held, run: Callable[[], object]) -> float:
     begun = time.monotonic()
     try:
         with pytest.raises(RunOutOfTime):
-            with deadline(DEADLINE_MARGIN_SECONDS + 1):
+            with deadline(
+                _Context(DEADLINE_MARGIN_SECONDS + 1),
+                margin_seconds=DEADLINE_MARGIN_SECONDS,
+            ):
                 run()
         took = time.monotonic() - begun
     finally:
