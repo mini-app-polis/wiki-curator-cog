@@ -107,7 +107,7 @@ references, and how developed each entity is (thin, single-source, isolated).
 Exits 1 if any link has no page, after writing, so the result can be read.
 
 ```bash
-WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > render-summary.json
+WIKI_REPO_PATH=../wcs-wiki doppler run -- uv run python -m wiki_curator_cog.main render > "${TMPDIR:-/tmp}/render-summary.json"
 ```
 
 To see the linking pass's references on the pages, overlay a links file
@@ -116,14 +116,14 @@ gains `## Mentions` and `## Referenced by`, and per pair the newest statement
 wins — a later denial removes a link:
 
 ```bash
-WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render > render-summary.json
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render > "${TMPDIR:-/tmp}/render-summary.json"
 ```
 
 **Identity fixes.** If a note says two names are the same thing (an
 `alias_of` relation), every local mode builds with them merged: the
 preferred entity absorbs the other's content and lists its name as an alias,
 and the other page goes. A newer `distinct_from` splits them again. Nothing
-upstream changes; `render-summary.json` lists the merges under `merged`.
+upstream changes; the render summary lists the merges under `merged`.
 
 **Facets.** `consolidate` decides, for every concept and technique,
 whether it is a facet of a broader one (*stationary anchor* → *anchor*), and
@@ -302,7 +302,7 @@ with a readable `prose-review.md` beside it.
 WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main generate --entity connection --entity anchor-step
 
 # then put the overviews on the pages (with the link overlay)
-WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render > render-summary.json
+WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_curator_cog.main render > "${TMPDIR:-/tmp}/render-summary.json"
 ```
 
 `--workers N` runs N model calls at once (default 4 for `generate`, 1 for
