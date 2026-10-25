@@ -5,11 +5,11 @@
 
 Builds the WCS wiki from the canonical corpus in `api-kaianolevine-com`, and stores each page in the API as a document that the API serves filtered by what each reader may see.
 
-It runs as the wiki-jobs Lambda worker (ADR-006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all. The Railway `export` run that cloned, rendered and pushed it was retired with its service. The page schema is defined in `wcs-wiki/CLAUDE.md`.
+It runs as the wiki-jobs Lambda worker (ADR-0006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all. The Railway `export` run that cloned, rendered and pushed it was retired with its service. The page schema is defined in `wcs-wiki/CLAUDE.md`.
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
-> **The self-generating wiki (ADR-005, ADR-006).** LLM passes link
+> **The self-generating wiki (ADR-0005, ADR-0006).** LLM passes link
 > statements to the concepts they mention, fold narrow entities into broader
 > ones, and maintain each entity's prose by integrating new statements into
 > the page as it stands. Their state — and what it cost — is held by the API.
@@ -100,7 +100,7 @@ contract and refuses a field it would drop. No network, no model.
 
 ### Render locally (no commit, no push)
 
-The proof-of-concept loop (ADR-005). Writes into your existing clone and
+The proof-of-concept loop (ADR-0005). Writes into your existing clone and
 stops — no commit, no push, no run report, and `log.md` is left alone — then
 prints a JSON summary: pages written and removed, broken links, dropped
 references, and how developed each entity is (thin, single-source, isolated).
@@ -174,7 +174,7 @@ authored notes' statements, so only the pages notes speak to are
 regenerated. `consolidate` keeps one version per kind group
 (`CONSOLIDATOR_VERSIONS`), so changing the drill prompt re-asks only drills.
 
-### Where the state lives: the API (ADR-006)
+### Where the state lives: the API (ADR-0006)
 
 The three passes' state — `links.json`, `facets.json`, `prose.json` — is held
 by the API. `render`, `link`, `generate` and `consolidate` read it from there
@@ -203,7 +203,7 @@ The import refuses a field the API does not store, goes up in chunks
 (`--batch-size`, default 250), and is safe to repeat. A run's writes refuse
 unknown fields the same way, and a refused write stops the run.
 
-### One job per message (ADR-006)
+### One job per message (ADR-0006)
 
 `units.handle` is the body of the wiki-jobs worker: one job in, its
 result and the jobs that should follow out. `link` takes one source;
@@ -226,7 +226,7 @@ newly linked statements touched, a repeated job touching none; `materialise`
 for every page a `generate` was asked about). The command does not run them;
 run each the same way, or let the worker's dispatch do it.
 
-### Page documents (ADR-006)
+### Page documents (ADR-0006)
 
 `materialise` builds each entity page as a structured document — definition,
 In practice, Details, statements by teacher with their citations, Mentions,
@@ -252,7 +252,7 @@ summary) — the generated or condensed pages, or every page after a link or
 consolidate run that changed anything. A dry run, or `--state files`, stores
 no pages.
 
-### The worker (ADR-006)
+### The worker (ADR-0006)
 
 On AWS the same units run as a Lambda behind this cog's FIFO queue
 (`wiki_curator_cog.worker.lambda_handler`, deployed by CI on each release;
@@ -269,7 +269,7 @@ that it still costs one build per revision (the 2026-10-18 incident). A failed j
 finished parts are no-ops), and an unreadable message is reported once and
 dead-lettered.
 
-### Link locally (ADR-005)
+### Link locally (ADR-0005)
 
 The linking pass, local half: reads the export, asks an LLM which concepts
 each statement mentions, and writes the references to the links state (the
@@ -286,7 +286,7 @@ WIKI_REPO_PATH=../wcs-wiki doppler run --config prd -- uv run python -m wiki_cur
 Needs `ANTHROPIC_API_KEY` (or `LLM_PROVIDER=openai` and `OPENAI_API_KEY`);
 `LLM_MODEL` overrides the model.
 
-### Generate overviews locally (ADR-005)
+### Generate overviews locally (ADR-0005)
 
 Generation, local half: for each entity, an LLM is given the page's current
 definition and context and the statements not yet integrated — the entity's

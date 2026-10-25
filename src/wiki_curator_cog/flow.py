@@ -3,7 +3,7 @@
 Every command here runs on a laptop against the production API: ``render``
 writes the wcs-wiki markdown export from the page documents, and ``link``,
 ``consolidate``, ``generate``, ``materialise`` and ``job`` run the curator's
-passes, with their state held by the API (ADR-006). The worker
+passes, with their state held by the API (ADR-0006). The worker
 (:mod:`wiki_curator_cog.worker`) uses the same export read, corpus check and
 state client.
 
@@ -253,7 +253,7 @@ def link_local(
     With ``dry_run``, nothing is called and nothing is written: the summary
     says how many calls a real run would make and what they would cost.
 
-    ADR-005, local half. Reads the export (read-only), links every
+    ADR-0005, local half. Reads the export (read-only), links every
     statement not already in ``links_path`` under the current linker version
     — or a reproducible sample of ``sample`` of them — and saves after every
     batch, so a run cut short keeps what it paid for. Writes a readable
@@ -344,7 +344,7 @@ def generate_local(
     With ``condense``, no new evidence is integrated: only pages whose prose
     has outgrown the fixed shape are rewritten to fit it.
 
-    ADR-005, local half. Reads the export (read-only) and, when
+    ADR-0005, local half. Reads the export (read-only) and, when
     given, the links file — for the concepts it proposed and the statements
     that refer to each entity. ``wiki_repo_path`` is where the current pages
     are read from, so an overview edited on the page becomes the base. Saves

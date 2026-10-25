@@ -1,9 +1,10 @@
-# ADR-001 — Architecture and scope
+# ADR-0001 — Architecture and scope
 
 **Date:** 2026-05-16 (revised 2026-05-18)
-**Status:** Accepted — partially superseded by ADR-004
-**Superseded parts:** "Three operating modes" and the `wiki_curator_router` dispatcher. There is one mode, `export`, and no router; see ADR-004.
-**Amendment (2026-10-16):** ADR-002 also supersedes this ADR's foundations — Layer 1 no longer routes `notes_json` via alias maps, and the `_aliases.yaml` files and `backfill` / `interactive` modes described below no longer exist. The cog renders the canonical entity graph; read ADR-002 for the current model.
+**Status:** Accepted — partially superseded by ADR-0004
+**Superseded in part by:** ADR-0002, ADR-0004
+**Superseded parts:** "Three operating modes" and the `wiki_curator_router` dispatcher. There is one mode, `export`, and no router; see ADR-0004.
+**Amendment (2026-10-16):** ADR-0002 also supersedes this ADR's foundations — Layer 1 no longer routes `notes_json` via alias maps, and the `_aliases.yaml` files and `backfill` / `interactive` modes described below no longer exist. The cog renders the canonical entity graph; read ADR-0002 for the current model.
 
 ## Context
 
@@ -18,13 +19,13 @@ The operating spec the curator follows lives in `wcs-wiki/CLAUDE.md`.
 **Two-layer wiki architecture.** Per `wcs-wiki/CLAUDE.md`, the wiki is produced by two layers operating against the same repo:
 
 - **Layer 1 — deterministic collection.** This cog implements it. Reads `notes_json` from the API, routes its fields onto wiki pages mechanically via three alias maps. No LLM at runtime; given the same input the output is byte-identical. Owns source pages, the `## By teacher` paragraphs, the `## Sources` / `## Referenced by` bullets, the index, the log, the views.
-- **Layer 2 — LLM polish pass.** Operates on Layer 1's output: prose synthesis, instructor-page background/themes/framings, terminology-page creation when vocabulary collapses are ambiguous, lint, query answering. Runs after Layer 1. (The Prefect concurrency slot this originally named is gone — ADR-004. Layer 2's own coordination is still to be designed, and it will be the second thing in this repo shaped like a periodic whole-corpus rebuild.)
+- **Layer 2 — LLM polish pass.** Operates on Layer 1's output: prose synthesis, instructor-page background/themes/framings, terminology-page creation when vocabulary collapses are ambiguous, lint, query answering. Runs after Layer 1. (The Prefect concurrency slot this originally named is gone — ADR-0004. Layer 2's own coordination is still to be designed, and it will be the second thing in this repo shaped like a periodic whole-corpus rebuild.)
 
 **API-only access to upstream.** The curator is an HTTP client of `api-kaianolevine-com`, not a database client. Reads via `GET /v1/wcs/notes/all` (Clerk M2M, `wcs_admin` scope). Writes only to `POST /v1/evaluations` for pipeline-evaluation findings. No direct database connection under any circumstance.
 
 **Markdown in a git repo as the storage substrate.** The wiki is browseable in Obsidian, GitHub web UI, or any markdown viewer. The curator commits one per source ingest plus a final residual commit per run. Schema (`CLAUDE.md`) versioned in the same repo.
 
-~~**Three operating modes**, dispatched by a router flow (`wiki_curator_router` in `main.py`):~~ **Superseded by ADR-004** — one mode, `export`, a full idempotent re-render; no router. The three below are kept for the record.
+~~**Three operating modes**, dispatched by a router flow (`wiki_curator_router` in `main.py`):~~ **Superseded by ADR-0004** — one mode, `export`, a full idempotent re-render; no router. The three below are kept for the record.
 
 - `backfill` — full-corpus rebuild. Wipes the derived layer (`concepts/`, `techniques/`, `instructors/`, `terminology/`) at start of run, preserving the `_aliases.yaml` files; bypasses the version-equality skip and force-re-ingests every source. Used when shipping curator behavior changes that should reshape the derived layer.
 - `incremental` — steady-state, processes notes created since the last run. Honors the version-equality skip. Used downstream of new lesson processing.

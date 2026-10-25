@@ -1,18 +1,19 @@
-# ADR-002 — Repurpose curator as renderer over canonical entities
+# ADR-0002 — Repurpose curator as renderer over canonical entities
 
 **Date:** 2026-05-19
-**Status:** Accepted — partially superseded by ADR-003 (bucketed source directories) and ADR-004 (Prefect deployment shape)
-**Amendment (2026-10-16):** ADR-005 partially supersedes this ADR. The cog will generate entity prose: an LLM integrates new statements into the current page, and the cog writes the result to the API, which owns the prose and its revisions. "It does not synthesize" and "the polish pass … doesn't write markdown" no longer describe the plan. Prose living on canonical rows, not in markdown, stands.
-**Supersedes (partially):** ADR-001 (Architecture and scope)
+**Status:** Accepted — partially superseded by ADR-0003 (bucketed source directories) and ADR-0004 (Prefect deployment shape)
+**Amendment (2026-10-16):** ADR-0005 partially supersedes this ADR. The cog will generate entity prose: an LLM integrates new statements into the current page, and the cog writes the result to the API, which owns the prose and its revisions. "It does not synthesize" and "the polish pass … doesn't write markdown" no longer describe the plan. Prose living on canonical rows, not in markdown, stands.
+**Supersedes, in part:** ADR-0001 (Architecture and scope)
+**Superseded in part by:** ADR-0003, ADR-0004, ADR-0005
 **Related:** `api-kaianolevine-com` ADR-0002 (WCS entity substrate), ADR-0004 (rebuild from scratch)
 
 ## Context
 
-ADR-001 of this repo established the two-layer wiki architecture: Layer 1 (this cog) deterministically routes `notes_json` fields onto markdown pages; Layer 2 (deferred) is an LLM polish pass over Layer 1's output. The wiki repo was treated as the system of record for the conceptual model; this cog was its maintainer.
+ADR-0001 of this repo established the two-layer wiki architecture: Layer 1 (this cog) deterministically routes `notes_json` fields onto markdown pages; Layer 2 (deferred) is an LLM polish pass over Layer 1's output. The wiki repo was treated as the system of record for the conceptual model; this cog was its maintainer.
 
 `api-kaianolevine-com` ADR-0002 commits to a different architecture: the canonical representation of WCS knowledge is a normalized entity graph in Postgres. The wiki is no longer a system of record — it is a view, projected as markdown for Obsidian browsing.
 
-This invalidates the foundational decisions in ADR-001:
+This invalidates the foundational decisions in ADR-0001:
 
 - "Two-layer wiki architecture" with L1 mechanical pass and L2 polish pass — there is no Layer 1 mechanical pass anymore. Canonical structure exists in Postgres; this cog renders it. Polish prose lives on entity rows in the canonical store; it survives every render without an L1↔L2 coordination protocol.
 - "API-only access to upstream" — preserved, but the upstream changes. Reads switch from `GET /v1/wcs/notes/all` to entity-shaped read endpoints (`GET /v1/wcs/wiki/concepts/{slug}`, etc., or a bulk export endpoint).
@@ -51,7 +52,7 @@ The following pieces of the current codebase are reusable in the renderer:
 - **`markdown_utils.py`** — markdown parser/serializer with frontmatter and section helpers. Preserved; the renderer uses it to emit markdown.
 - **`config.py`** — config loading, with adjustments (no `curator_version`, no `state_path`, simpler).
 - **`main.py`** — entrypoint pattern; simplified to one production flow (`export`) plus the existing `regenerate-views` utility (which becomes redundant once `export` itself regenerates views every time).
-- ~~**The Prefect deployment shape and concurrency slot.** A single-instance flow that exports the wiki, scheduled or triggered on demand.~~ **Superseded by ADR-004** — Prefect is gone. One wake is one one-shot process on Railway; the slot is removed rather than replaced.
+- ~~**The Prefect deployment shape and concurrency slot.** A single-instance flow that exports the wiki, scheduled or triggered on demand.~~ **Superseded by ADR-0004** — Prefect is gone. One wake is one one-shot process on Railway; the slot is removed rather than replaced.
 
 ### What goes away
 
@@ -73,11 +74,11 @@ The repo name remains `wiki-curator-cog`. "Curator" continues to describe the ro
 
 Keeping the name avoids one-time migration cost (GitHub URL, CI badges, Railway service rewiring, package import name updates across `pyproject.toml`/src/tests). The cost-benefit comes out cleanly in favor of retention given that the role can be honestly described with the existing name.
 
-ADR-001 of this repo, including the discussion of the curator's two-layer model, the alias maps in the repo, the wipe-and-rebuild backfill, and the three operating modes, is superseded by this ADR and by `api-kaianolevine-com` ADR-0002. It is preserved as a historical record; future readers should treat it as documenting "what we tried first."
+ADR-0001 of this repo, including the discussion of the curator's two-layer model, the alias maps in the repo, the wipe-and-rebuild backfill, and the three operating modes, is superseded by this ADR and by `api-kaianolevine-com` ADR-0002. It is preserved as a historical record; future readers should treat it as documenting "what we tried first."
 
 ### Two-layer model: dissolved
 
-ADR-001's two-layer split (L1 deterministic / L2 polish) does not apply to the new architecture. The reasoning:
+ADR-0001's two-layer split (L1 deterministic / L2 polish) does not apply to the new architecture. The reasoning:
 
 - **There is no L1 mechanical pass.** Canonical structure exists in the entity store. The renderer renders it.
 - **Polish prose lives on entity rows.** `entities.overview_md`, `instructors.background_md`, `instructors.teaching_themes_md`, etc. are columns on canonical rows. The polish pass (when it ships) writes to these columns. The renderer renders them when present.

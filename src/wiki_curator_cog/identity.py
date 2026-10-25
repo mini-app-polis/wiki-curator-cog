@@ -1,4 +1,4 @@
-"""Identity fixes from notes: two names, one thing (ADR-005).
+"""Identity fixes from notes: two names, one thing (ADR-0005).
 
 A note can say that two entities are the same thing and which name to use;
 the extraction records that as a relation of kind ``alias_of``, from the name

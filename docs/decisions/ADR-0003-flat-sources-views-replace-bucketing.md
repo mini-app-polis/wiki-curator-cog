@@ -1,8 +1,8 @@
-# ADR-003 — Flat sources directory; views replace bucketed routing
+# ADR-0003 — Flat sources directory; views replace bucketed routing
 
 **Date:** 2026-05-29
 **Status:** Accepted
-**Supersedes (partially):** ADR-002 (which referenced bucketed source directories per the v0.5 layout)
+**Supersedes, in part:** ADR-0002 (which referenced bucketed source directories per the v0.5 layout)
 **Related:** wcs-wiki/CLAUDE.md v1.1
 
 ## Context

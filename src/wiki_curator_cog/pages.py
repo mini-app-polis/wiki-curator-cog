@@ -1,4 +1,4 @@
-"""Page documents: each entity page as structured data (ADR-006).
+"""Page documents: each entity page as structured data (ADR-0006).
 
 The curator owns the page logic — folds, the reference overlay, By teacher.
 :func:`page_document` runs it for one entity and returns the page as a

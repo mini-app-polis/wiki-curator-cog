@@ -1,6 +1,6 @@
 # Pipeline architecture
 
-`wiki-curator-cog` builds the WCS wiki from the canonical entity graph in `api-kaianolevine-com`. The structured data comes from `transcription-cog`'s LLM extraction over lesson and note transcripts; this cog adds the wiki's own LLM work — references between entities, facet folding, page prose (ADR-005) — keeps its state in the API (ADR-006), and stores each finished page there as a document. The API serves the documents to `wcs.kaianolevine.com`, filtered by what each reader may see. The `wcs-wiki` markdown repo is a local export of the same pages.
+`wiki-curator-cog` builds the WCS wiki from the canonical entity graph in `api-kaianolevine-com`. The structured data comes from `transcription-cog`'s LLM extraction over lesson and note transcripts; this cog adds the wiki's own LLM work — references between entities, facet folding, page prose (ADR-0005) — keeps its state in the API (ADR-0006), and stores each finished page there as a document. The API serves the documents to `wcs.kaianolevine.com`, filtered by what each reader may see. The `wcs-wiki` markdown repo is a local export of the same pages.
 
 ## Flow diagram
 

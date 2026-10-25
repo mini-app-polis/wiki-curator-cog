@@ -1,4 +1,4 @@
-"""Generation: an LLM maintains each entity's overview (ADR-005).
+"""Generation: an LLM maintains each entity's overview (ADR-0005).
 
 Local half. For each entity, the model is given the page's current overview
 — whatever the page says now — and the statements not yet integrated into
@@ -28,7 +28,7 @@ over a few runs instead of one enormous call.
 **Watermarked.** Each entity records which statement keys it has integrated
 under the current :data:`GENERATOR_VERSION`. An entity with nothing new costs
 no call. Raising the version regenerates every page from scratch — the
-rebuild path ADR-005 keeps as the escape hatch for drift.
+rebuild path ADR-0005 keeps as the escape hatch for drift.
 """
 
 from __future__ import annotations

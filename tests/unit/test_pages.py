@@ -1,4 +1,4 @@
-"""Page documents (ADR-006): built once, stored by the API, exported as markdown.
+"""Page documents (ADR-0006): built once, stored by the API, exported as markdown.
 
 The document is the page model; the markdown export and the API both read
 it. These pin the parts a reader depends on: neutral links that come back to

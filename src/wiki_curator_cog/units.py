@@ -1,6 +1,6 @@
 """One unit of work per job: what the wiki-jobs worker runs.
 
-ADR-006 has the API enqueue wiki work after a source is composed, one message
+ADR-0006 has the API enqueue wiki work after a source is composed, one message
 per unit, and a Lambda worker handle each message. This module is that
 worker's body, runtime-agnostic: :func:`handle` takes one job, runs it
 against a :class:`RunContext` built for that invocation, writes the result to

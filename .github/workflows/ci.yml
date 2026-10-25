@@ -100,7 +100,7 @@ jobs:
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-  # The wiki-jobs worker (ADR-006), deployed here as a job: a release
+  # The wiki-jobs worker (ADR-0006), deployed here as a job: a release
   # published with GITHUB_TOKEN starts no workflows, so `on: release` would
   # never fire and the Lambda would drift behind main.
   deploy:

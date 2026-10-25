@@ -1,18 +1,19 @@
-# ADR-005 — Self-generating wiki: prove generation and updates before infrastructure
+# ADR-0005 — Self-generating wiki: prove generation and updates before infrastructure
 
 **Date:** 2026-10-16
-**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half built 2026-10-17 under ADR-006 (state in the API; worker); end-to-end note test and go/no-go open
-**Supersedes (partially):** ADR-002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination), ADR-004 (the claim that Layer 2 has no per-item work)
+**Status:** Accepted — local half implemented (linking, render overlay, generation, identity merges, facet consolidation incl. drills and patterns); durable half built 2026-10-17 under ADR-0006 (state in the API; worker); end-to-end note test and go/no-go open
+**Superseded in part by:** ADR-0006
+**Supersedes, in part:** ADR-0002, ADR-0004 — ADR-0002 ("the renderer does not synthesize"; "polish prose … doesn't write markdown" coordination); ADR-0004 (the claim that Layer 2 has no per-item work)
 **Related:** `api-kaianolevine-com` ADR-0002, ADR-0003, ADR-0006
 
 ## Context
 
 The cog renders the canonical entity graph into markdown deterministically and
-calls no LLM. Since the Prefect removal (ADR-004), its work has been
+calls no LLM. Since the Prefect removal (ADR-0004), its work has been
 operational: runtime, CI, conformance. What it produces has not moved, and the
 original intent — a wiki that writes and maintains itself from the lesson
 corpus, after Karpathy's "LLM Wiki" — was never built. The Layer 2 polish pass
-named in ADR-001 was never designed, and the prose columns ADR-002 put on the
+named in ADR-0001 was never designed, and the prose columns ADR-0002 put on the
 entity rows (`overview_md`, `background_md`, `teaching_themes_md`) have no
 writer.
 
@@ -254,7 +255,7 @@ proven as part of this work, not assumed.
 2. The linking pass, local: mentions become references in
    `links.json`, general concepts get pages, denials and newest-wins,
    `## Mentions` / `## Referenced by` via `render --links`. Durable half
-   (references in the API, importing `links.json`): ADR-006, step 1.
+   (references in the API, importing `links.json`): ADR-0006, step 1.
 3. Notes and corrections ingest as sources. transcription-cog's
    minimum-length gate (`MIN_TRANSCRIPT_CHARS`) currently drops short notes;
    the extraction must emit a correction as a statement that can supersede an
@@ -292,10 +293,10 @@ proven as part of this work, not assumed.
 
 - The cog stops being "deterministic, no LLM at runtime". README and
   PIPELINE.md carry notes pointing here until the code lands.
-- The Layer 1 / Layer 2 split of ADR-001, dissolved by ADR-002, returns in a
+- The Layer 1 / Layer 2 split of ADR-0001, dissolved by ADR-0002, returns in a
   different form: mechanical evidence sections and LLM-owned prose on the same
   page, with the prose stored in the API rather than coordinated in markdown.
-- Generation is per entity. ADR-004 and `evaluator.yaml` say the Layer 2 pass
+- Generation is per entity. ADR-0004 and `evaluator.yaml` say the Layer 2 pass
   would be a whole-corpus rebuild with no per-item work; that is not how it is
   being built. Each entity with new statements is a distinct unit of work,
   which is what a queue-driven Lambda worker expects. That reading belongs to
@@ -305,7 +306,7 @@ proven as part of this work, not assumed.
   with the files written under a lock. In the cloud each unit is its own
   message and its own invocation — the same code, run per message.
 - If the markdown repo stops being the edit surface, the git dependency — the
-  reason ADR-004's Lambda fit check failed — stops being load-bearing.
+  reason ADR-0004's Lambda fit check failed — stops being load-bearing.
 - New API surface: linker-origin relations with an assert/deny polarity and
   a statement reference, a per-statement linking watermark, a prose revisions
   table, a per-entity integration watermark, and write endpoints for the cog.
@@ -316,7 +317,7 @@ proven as part of this work, not assumed.
 
 ## Follow-ons, if the full-corpus run is a go
 
-The pipeline and reading design for these is ADR-006 (proposed 2026-10-16).
+The pipeline and reading design for these is ADR-0006 (proposed 2026-10-16).
 
 Separate work, not part of this decision:
 
