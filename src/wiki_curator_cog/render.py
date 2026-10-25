@@ -95,7 +95,7 @@ REFERENCED_BY_LINK_LIMIT = 25
 
 @dataclass(frozen=True)
 class LinkOverlay:
-    """References from the linking pass, already resolved (ADR-005).
+    """References from the linking pass, already resolved (ADR-0005).
 
     Built by :func:`wiki_curator_cog.link.build_overlay`. Each pair of
     entities has been settled newest-wins, so a pair a later statement denied
@@ -1137,7 +1137,7 @@ def find_broken_links(
 
     The renderers only ever link to what they render, so today this should
     come back empty; it exists so that stays true as references grow
-    (ADR-005: every referenced concept has a page).
+    (ADR-0005: every referenced concept has a page).
     """
     known = {_page_key(p) for p in bundle} | {_page_key(p) for p in existing_paths}
     broken: list[tuple[str, str]] = []
@@ -1153,7 +1153,7 @@ def corpus_quality(export: WcsWikiExport, indexes: ExportIndexes) -> dict[str, A
     """How developed the corpus is, entity by entity.
 
     For reading, not for gating: a thin page is expected and is fed by more
-    material, not flagged (ADR-005).
+    material, not flagged (ADR-0005).
 
     - ``thin``: no attribution and no definition — a page with a name and,
       at most, links.

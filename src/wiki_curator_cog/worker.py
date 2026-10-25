@@ -1,7 +1,7 @@
 """The Lambda entrypoint: one wiki job in, its result and follow-ons out.
 
 The curator runs on Lambda behind its own FIFO queue, declared in
-mini-app-polis/infra (ADR-006). The API is the only producer: it
+mini-app-polis/infra (ADR-0006). The API is the only producer: it
 enqueues a ``link`` job when a source is composed, and the jobs a job names
 as its follow-ons, which this worker posts back to it. Every message is
 

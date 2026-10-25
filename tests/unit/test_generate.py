@@ -1,4 +1,4 @@
-"""Generation, local half (ADR-005).
+"""Generation, local half (ADR-0005).
 
 The model is faked. These pin what generation does around it: which
 evidence an entity gets, the watermark, the page as the base, and the

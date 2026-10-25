@@ -1,6 +1,6 @@
 """The linking pass: the concepts each statement mentions become references.
 
-ADR-005 (local half). The extraction names specific ideas — "anchor
+ADR-0005 (local half). The extraction names specific ideas — "anchor
 as a stationary arrival" — and rarely the general concept they belong to, so
 *connection*, *anchor* and *timing* are discussed on hundreds of pages and
 linked from almost none. This pass reads each statement and names the

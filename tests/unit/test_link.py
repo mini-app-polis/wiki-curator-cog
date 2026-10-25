@@ -1,4 +1,4 @@
-"""The linking pass, local half (ADR-005).
+"""The linking pass, local half (ADR-0005).
 
 The model is faked: these tests pin what the pass does with whatever it
 answers — which statements it reads, how names resolve, what the watermark

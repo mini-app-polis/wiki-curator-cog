@@ -1,13 +1,14 @@
-# ADR-006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
+# ADR-0006 — The wiki in the pipeline: per-unit Lambda jobs, page documents in the API, served dynamically
 
 **Date:** 2026-10-16
 **Status:** Accepted — steps 1–4 built 2026-10-17: state in the API and imported, the API as the curator's store and one unit per job, the wiki-jobs queue and Lambda worker with API dispatch, flag on, page documents and visibility. The Railway service and its `export` code are retired; the site's /wiki, /wiki/page and admin views shipped in website-astro-wcs 2.6.0 (step 5; admin review split out as separate work); the wcs-wiki repo stays as a local export from the page documents (decided 2026-10-17)
-**Supersedes (when built):** ADR-004 (one-shot on Railway); ADR-005's local files in `wcs-wiki/.curator/` as the store
-**Related:** ADR-005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time)
+**Supersedes:** ADR-0004 (one-shot on Railway)
+**Supersedes, in part:** ADR-0005 — its local files in `wcs-wiki/.curator/` as the store
+**Related:** ADR-0005; `evaluator.yaml` CD-021 (Lambda); `api-kaianolevine-com` (canonical store, scope-guarded `/v1/wcs/*`); `website-astro-wcs` (static shells, data at request time)
 
 ## Context
 
-ADR-005 proved the self-generating wiki on a laptop: `link`, `consolidate`,
+ADR-0005 proved the self-generating wiki on a laptop: `link`, `consolidate`,
 `generate` and `render` run against the production export, keep their state in
 JSON files in the private `wcs-wiki` repo, and write markdown that is read in
 Obsidian. That proves the mechanism, not where it lives. Three things are
@@ -59,7 +60,7 @@ function of its input and the API's current state:
 
 ### Storage: the API holds the state and the pages
 
-New tables in `api-kaianolevine-com`, the durable half of ADR-005:
+New tables in `api-kaianolevine-com`, the durable half of ADR-0005:
 
 - **references** — statement, target entity, polarity, linker version, model.
 - **facet decisions** — entity, parent, same-as, reason, decided by (model or
@@ -156,7 +157,7 @@ building it:
   everything; `?as=public` shows what a reader with no grants would see.
 
 What the filter cannot do: generated prose may draw on private sources it no
-longer cites. The public-only rebuild of ADR-005 is still what closes that,
+longer cites. The public-only rebuild of ADR-0005 is still what closes that,
 before the wiki has any reader but Kaiano.
 
 The markdown export reads the same documents: `render` builds them and writes
@@ -200,7 +201,7 @@ request time from the scope-guarded API (Clerk token in the browser). No
   pages".
 
 A page edit, when it comes, is written to the API as a prose revision marked
-as an edit (the page-as-base rule of ADR-005 carries over).
+as an edit (the page-as-base rule of ADR-0005 carries over).
 
 ### Later, not now
 
@@ -239,10 +240,10 @@ version bump and a replay.
 
 ## Consequences
 
-- The curator becomes a worker like the other cogs; ADR-004's one-shot,
+- The curator becomes a worker like the other cogs; ADR-0004's one-shot,
   wake-and-run shape and the git push go away.
 - A lesson changes the wiki minutes after it is ingested, with no command run
-  by hand; the cost per lesson is ADR-005's estimate (~$0.20–0.40).
+  by hand; the cost per lesson is ADR-0005's estimate (~$0.20–0.40).
 - The API grows four tables and a page-serving path, and becomes the place
   where visibility is enforced for the wiki as for everything else.
 - The site gains wiki pages without a build step or an adapter, consistent with

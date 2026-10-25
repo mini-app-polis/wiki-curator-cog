@@ -3,7 +3,7 @@
 The three passes keep their state — and their watermarks — in
 ``links.json``, ``facets.json`` and ``prose.json``. Those were paid for in
 model calls (about $33 to build), so moving them to the API
-(ADR-006) is an import, never a relink or a regeneration, and it is
+(ADR-0006) is an import, never a relink or a regeneration, and it is
 checked before anything relies on it:
 
 - **Nothing unknown is sent.** Every entry is checked against the contract

@@ -1,20 +1,22 @@
-# ADR-004 — One shot on Railway, no Prefect, no queue
+# ADR-0004 — One shot on Railway, no Prefect, no queue
 
 **Date:** 2026-09-23
-**Status:** Superseded by ADR-006 (2026-10-17): the curator runs as the wiki-jobs Lambda worker, and the Railway service and its `export` mode are retired. The Prefect removal stands. Kept for the record.
+**Status:** Superseded by ADR-0006 (2026-10-17): the curator runs as the wiki-jobs Lambda worker, and the Railway service and its `export` mode are retired. The Prefect removal stands. Kept for the record.
+**Superseded by:** ADR-0006
+**Superseded in part by:** ADR-0005
 **Earlier status:** Accepted — amended 2026-10-16
-**Amendment (2026-10-16):** Two parts of this ADR no longer hold. (1) "Healthchecks.io per run, not per boot" is reversed: no Healthchecks check exists for this cog, and the ping code and `HEALTHCHECKS_URL_WIKI_CURATOR_COG` were removed. There is no external liveness check; see `evaluator.yaml` CD-010. (2) Staying on Railway was revisited on 2026-10-14: the cog is to move to Lambda (see `evaluator.yaml` CD-021); its design is ADR-006 (proposed 2026-10-16). Smaller drift: the run budget default is 600s, not 1800s, and the restart policy lives in `.railway/railway.ts`, not `railway.json`. The Prefect removal stands.
-**Amendment (2026-10-16, ADR-005):** the expectation that the Layer 2 pass is "a periodic whole-corpus rebuild with no per-item work" does not hold. Generation is per entity, integrating new statements, so each changed entity is a distinct unit of work. The Lambda move stays deferred until the proof of concept in ADR-005 is done.
-**Supersedes:** ADR-001's "Three operating modes" and its `wiki_curator_router`
-dispatcher; ADR-002's "The Prefect deployment shape and concurrency slot"
+**Amendment (2026-10-16):** Two parts of this ADR no longer hold. (1) "Healthchecks.io per run, not per boot" is reversed: no Healthchecks check exists for this cog, and the ping code and `HEALTHCHECKS_URL_WIKI_CURATOR_COG` were removed. There is no external liveness check; see `evaluator.yaml` CD-010. (2) Staying on Railway was revisited on 2026-10-14: the cog is to move to Lambda (see `evaluator.yaml` CD-021); its design is ADR-0006 (proposed 2026-10-16). Smaller drift: the run budget default is 600s, not 1800s, and the restart policy lives in `.railway/railway.ts`, not `railway.json`. The Prefect removal stands.
+**Amendment (2026-10-16, ADR-0005):** the expectation that the Layer 2 pass is "a periodic whole-corpus rebuild with no per-item work" does not hold. Generation is per entity, integrating new statements, so each changed entity is a distinct unit of work. The Lambda move stays deferred until the proof of concept in ADR-0005 is done.
+**Supersedes, in part:** ADR-0001, ADR-0002 — ADR-0001's "Three operating modes" and its `wiki_curator_router`
+dispatcher; ADR-0002's "The Prefect deployment shape and concurrency slot"
 
 ## Context
 
 Through 2026-09 the fleet moved off Prefect one cog at a time, onto SQS
 queues with Lambda workers. evaluator-cog, deejay-cog and transcription-cog
-all made that move, and ecosystem-standards ADR-009 wrote the destination
+all made that move, and ecosystem-standards ADR-0009 wrote the destination
 into the taxonomy: `pipeline-cog` now *means* a queue-driven Lambda worker.
-This cog was the fourth and last, and ADR-009 names it as failing PIPE-016
+This cog was the fourth and last, and ecosystem-standards ADR-0009 names it as failing PIPE-016
 and PIPE-017 until it moved.
 
 A fit check against Lambda was run first, before any edits, and it failed.
@@ -99,7 +101,7 @@ Prefect. The lock fell from 173 packages to 87.
 
 - Prefect is retired from this cog, which is what the fleet-wide migration
   needed. The Prefect Cloud teardown is now unblocked.
-- **The AWS-shaped rules are exempted, not deferred.** ADR-009 says
+- **The AWS-shaped rules are exempted, not deferred.** ecosystem-standards ADR-0009 says
   `pipeline-cog` means a queue-driven Lambda worker, and this cog is none of
   those things, so PIPE-016, PIPE-017, PIPE-018, CD-010 and CD-024 — all of
   which read an `infra/` that does not exist — do not describe it. A deferral
@@ -110,12 +112,12 @@ Prefect. The lock fell from 173 packages to 87.
   `get_remaining_time_in_millis`, cannot see it.
 
 - **That is a taxonomy signal, and it is recorded as one.** Six exemptions
-  for a single structural reason is exactly ADR-002's test for a taxonomy
-  that has fallen behind, and ADR-009 rejected both a second cog type and
+  for a single structural reason is exactly ecosystem-standards ADR-0002's test for a taxonomy
+  that has fallen behind, and ecosystem-standards ADR-0009 rejected both a second cog type and
   exempting cogs on that same test. The Layer 2 polish pass described in
-  ADR-001 will be the second thing shaped like this — a periodic
+  ADR-0001 will be the second thing shaped like this — a periodic
   whole-corpus rebuild with no per-item work. `evaluator.yaml` says so at the
-  top, so the exemptions read as evidence for reopening ADR-009 rather than
+  top, so the exemptions read as evidence for reopening ecosystem-standards ADR-0009 rather than
   as a way around it.
 - A failed run is not retried. `railway.json` sets `restartPolicyType: NEVER`
   rather than `ON_FAILURE` with three retries: each restart would be a fresh

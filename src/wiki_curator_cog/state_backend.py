@@ -1,7 +1,7 @@
 """Where the curator's state is read from and written to.
 
 The three passes' state — links, facets, prose — is held by the API
-(ADR-006). :class:`ApiState` makes it the store: every command reads
+(ADR-0006). :class:`ApiState` makes it the store: every command reads
 each document from the API, and a run writes back the entries it changed as
 it goes, so nothing paid for lives only on this machine. The local file is
 kept as a cache, written in exactly the layout it always had, so the reviews,

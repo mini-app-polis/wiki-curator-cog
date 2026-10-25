@@ -2,9 +2,9 @@
 
 `wiki-curator-cog` runs as the **wiki-jobs Lambda worker**
 (`wiki_curator_cog.worker.lambda_handler`), like the other pipeline cogs: one
-SQS message is one job, and each job names the jobs that follow it (ADR-006).
+SQS message is one job, and each job names the jobs that follow it (ADR-0006).
 The Railway one-shot `export` process that cloned, rendered and pushed the
-markdown wiki was retired with its service; see ADR-004 for what it
+markdown wiki was retired with its service; see ADR-0004 for what it
 was and why it is gone.
 
 ## What runs where
