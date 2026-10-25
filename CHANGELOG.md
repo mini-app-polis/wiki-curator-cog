@@ -1,3 +1,10 @@
+## [3.11.16](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.15...v3.11.16) (2026-10-25)
+
+
+### Bug Fixes
+
+* **deps:** bump the minor-and-patch group with 5 updates ([202dec5](https://github.com/mini-app-polis/wiki-curator-cog/commit/202dec5dffd0d115237052002792542457942556))
+
 ## [3.11.15](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.14...v3.11.15) (2026-10-24)
 
 
