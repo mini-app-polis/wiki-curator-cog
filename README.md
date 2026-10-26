@@ -5,7 +5,7 @@
 
 Builds the WCS wiki from the canonical corpus in `api-kaianolevine-com`, and stores each page in the API as a document that the API serves filtered by what each reader may see.
 
-It runs as the wiki-jobs Lambda worker (ADR-0006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all. The Railway `export` run that cloned, rendered and pushed it was retired with its service. The page schema is defined in `wcs-wiki/CLAUDE.md`.
+It runs as the wiki-jobs Lambda worker (ADR-0006): when a lesson or note is composed, the API enqueues a `link` job, and each job names the ones that follow — `consolidate`, `generate`, then `materialise`, which stores the changed pages. The [`wcs-wiki`](https://github.com/mini-app-polis/wcs-wiki) markdown repo is a local export of the same pages, written by `render` and committed by hand if at all. The Railway `export` run that cloned, rendered and pushed it was retired with its service. The page schema is defined in [`docs/PAGES.md`](docs/PAGES.md).
 
 See `docs/PIPELINE.md` for the ecosystem flow diagram and `docs/decisions/` for ADRs.
 
@@ -350,7 +350,7 @@ Three layers:
 
 ## Key concepts
 
-**The curator does not invent content.** Every wiki claim traces to an upstream source. The schema in `wcs-wiki/CLAUDE.md` is the operating manual; this cog implements it.
+**The curator does not invent content.** Every wiki claim traces to an upstream source. The page spec in [`docs/PAGES.md`](docs/PAGES.md) is the operating manual; this cog implements it.
 
 **A deterministic render over model-written state.** `render` and `materialise` call no model: given the same export and the same state (references, facets, prose), they produce the same pages. The model calls are in `link`, `consolidate` and `generate` — locally or in the worker — each watermarked, so a re-run pays only for what is new.
 
