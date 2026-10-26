@@ -282,7 +282,7 @@ def test_generation_sees_the_merged_evidence(tmp_path: Path) -> None:
 def test_render_local_reports_merges(tmp_path: Path) -> None:
     wiki = tmp_path / "wcs-wiki"
     (wiki / "patterns").mkdir(parents=True)
-    (wiki / "CLAUDE.md").write_text("# spec\n")
+    (wiki / "index.md").write_text("# index\n")
     (wiki / "patterns" / f"{UT}.md").write_text("old page\n")
     export = _export(_rel("n1", UT, RSP_UT, "alias_of", NOTE_1), sources=[NOTE_1])
 

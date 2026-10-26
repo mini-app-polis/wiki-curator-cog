@@ -2,7 +2,7 @@
 
 Pure-ish module. Takes a canonical export and produces an in-memory map
 of {relative_path: file_text} for the entire wiki bundle per
-wcs-wiki/CLAUDE.md v1.1.
+the page spec, docs/PAGES.md v1.1.
 """
 
 from __future__ import annotations

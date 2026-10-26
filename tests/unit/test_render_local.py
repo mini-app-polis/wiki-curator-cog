@@ -148,7 +148,7 @@ def test_corpus_quality_separates_thin_single_source_and_isolated() -> None:
 def _clone(tmp_path: Path) -> Path:
     wiki = tmp_path / "wcs-wiki"
     (wiki / "concepts").mkdir(parents=True)
-    (wiki / "CLAUDE.md").write_text("# spec\n")
+    (wiki / "index.md").write_text("# index\n")
     (wiki / "log.md").write_text("# log\n")
     (wiki / "concepts" / "gone.md").write_text("no longer produced\n")
     return wiki
@@ -189,14 +189,14 @@ def test_an_empty_export_writes_and_removes_nothing(
         flow.render_local(wiki)
     assert (wiki / "concepts" / "gone.md").exists()
     assert sorted(p.name for p in wiki.rglob("*.md")) == [
-        "CLAUDE.md",
         "gone.md",
+        "index.md",
         "log.md",
     ]
 
 
 def test_render_local_refuses_a_directory_that_is_not_the_wiki(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="CLAUDE.md"):
+    with pytest.raises(RuntimeError, match="index.md"):
         flow.render_local(tmp_path)
 
 

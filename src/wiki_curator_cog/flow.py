@@ -144,10 +144,12 @@ def render_local(
     ``log.md`` is not touched. Stale derived pages are removed from the
     working tree, so ``git status`` shows everything that changed.
     """
-    if not (wiki_repo_path / "CLAUDE.md").exists():
+    # index.md is a page every render writes, so a directory without it was
+    # never rendered into and is not the wiki: nothing is written or removed.
+    if not (wiki_repo_path / "index.md").exists():
         raise RuntimeError(
             f"WIKI_REPO_PATH does not look like a wcs-wiki clone "
-            f"(no CLAUDE.md found): {wiki_repo_path}"
+            f"(no index.md found): {wiki_repo_path}"
         )
 
     export = _fetch_export()

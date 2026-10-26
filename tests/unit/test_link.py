@@ -571,7 +571,7 @@ def test_without_an_overlay_pages_are_unchanged() -> None:
 def test_render_local_with_links_reports_the_overlay(tmp_path: Path) -> None:
     wiki = tmp_path / "wcs-wiki"
     wiki.mkdir()
-    (wiki / "CLAUDE.md").write_text("# spec\n")
+    (wiki / "index.md").write_text("# index\n")
     links_path = tmp_path / "links.json"
     _links_with(("anchor-step", "2026-03-01", [("connection", None, "assert")])).save(
         links_path
