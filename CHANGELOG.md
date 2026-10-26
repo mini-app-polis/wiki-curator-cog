@@ -1,3 +1,10 @@
+## [3.11.20](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.19...v3.11.20) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.27.0 ([ae4481a](https://github.com/mini-app-polis/wiki-curator-cog/commit/ae4481aaa02d80e93d263ff3c997cc3da61cf570))
+
 ## [3.11.19](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.18...v3.11.19) (2026-10-25)
 
 
