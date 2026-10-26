@@ -1,3 +1,13 @@
+## [3.11.21](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.20...v3.11.21) (2026-10-26)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.28.0 ([74f74da](https://github.com/mini-app-polis/wiki-curator-cog/commit/74f74da1b378ac5ad7464c2ef18ccad7d7ac58e0))
+* **deps:** bump miniapppolis-common-utils to 6.29.0 ([95237c7](https://github.com/mini-app-polis/wiki-curator-cog/commit/95237c796dad0302484c42f648489fe9e7d2597b))
+* **deps:** bump miniapppolis-common-utils to 6.30.0 ([d00751e](https://github.com/mini-app-polis/wiki-curator-cog/commit/d00751e5f16c858d8435889626e326d46da2514e))
+* own the wiki page spec and recognise the wiki by its index page ([d6c4159](https://github.com/mini-app-polis/wiki-curator-cog/commit/d6c41598b2eb867588673ff28b17d23d1f06f73e))
+
 ## [3.11.20](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.19...v3.11.20) (2026-10-26)
 
 
