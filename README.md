@@ -57,7 +57,7 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 
 ### Setup
 
-Secrets come from Doppler's shared `dev` config through the
+Secrets come from this repo's own Doppler `dev` config through the
 [Doppler CLI](https://docs.doppler.com/docs/install-cli) — nothing reads a
 `.env` file. Local commands use `dev`. A command in this README that says
 `doppler run --config prd` is a **production command**: it reads the
