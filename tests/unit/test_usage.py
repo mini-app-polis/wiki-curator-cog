@@ -215,3 +215,14 @@ def test_a_real_run_reports_its_usage(tmp_path: Path) -> None:
         summary = flow.consolidate_local(tmp_path / "facets.json")
     assert summary["usage"]["calls"] == 3
     assert summary["consolidator_versions"] == consolidate.CONSOLIDATOR_VERSIONS
+
+
+def test_llm_from_env_treats_empty_settings_as_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Doppler holds an unset optional setting empty, and `doppler run`
+    # passes it through as "": the defaults apply.
+    monkeypatch.setenv("LLM_PROVIDER", "")
+    monkeypatch.setenv("LLM_MODEL", "")
+    _, model = link.llm_from_env(dry_run=True)
+    assert model == "anthropic/claude-sonnet-4-6"

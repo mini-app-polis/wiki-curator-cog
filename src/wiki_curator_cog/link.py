@@ -80,12 +80,14 @@ def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
     """
     from . import usage
 
-    provider = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower() or "anthropic"
     if provider not in _DEFAULT_MODELS:
         raise RuntimeError(
             f"Unsupported LLM_PROVIDER: {provider!r}. Must be one of {sorted(_DEFAULT_MODELS)}."
         )
-    model = os.getenv("LLM_MODEL", _DEFAULT_MODELS[provider]).strip()
+    # Empty means the default: an optional setting is held empty in Doppler
+    # until it is set, and `doppler run` passes it through as "".
+    model = (os.getenv("LLM_MODEL") or "").strip() or _DEFAULT_MODELS[provider]
     name = f"{provider}/{model}"
     if dry_run:
         return usage.DryRunLLM(name), name
