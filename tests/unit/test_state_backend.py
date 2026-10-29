@@ -263,7 +263,7 @@ def test_the_thin_list_is_made_the_api_s_in_chunks(
     assert [len(p.entities) for p in api.thin_posts] == [2, 2]
 
     api.thin_posts.clear()
-    # c changed; a and d are no longer thin; b is as it was
+    # c changed; a and d have stopped being thin; b is as it was
     second = store.save_thin([_thin("b"), _thin("c", definition="Now defined.")])
     assert second == {"total": 2, "written": 1, "removed": 2}
     assert [(len(p.entities), p.remove) for p in api.thin_posts] == [

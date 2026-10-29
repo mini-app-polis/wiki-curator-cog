@@ -369,7 +369,7 @@ class ApiState(FileState):
         """Make the API's thin list this one: upsert what differs, remove the rest.
 
         The stored list is read first, so an entity that has not changed is
-        not sent again and a slug no longer thin is removed. Upserts go
+        not sent again and a slug that has stopped being thin is removed. Upserts go
         before removals, in chunks the contract allows. No model call.
         """
         stored = {

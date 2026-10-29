@@ -317,8 +317,8 @@ def test_work_left_undone_is_an_issue(job: dict, result: dict, issue: tuple) -> 
     ],
 )
 def test_a_job_that_did_something_is_posted(job: dict, result: dict) -> None:
-    """A clean rebuild of every page used to be a log line and nothing in
-    Discord (2026-10-18); every other queue-driven cog posts such a run."""
+    """A clean rebuild of every page is posted to Discord, not just logged,
+    as every other queue-driven cog posts such a run."""
     assert worker.record(_Report(), job, result) is True
 
 
