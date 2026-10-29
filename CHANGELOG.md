@@ -1,3 +1,15 @@
+## [3.11.24](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.23...v3.11.24) (2026-10-29)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 6.34.0 ([37580e0](https://github.com/mini-app-polis/wiki-curator-cog/commit/37580e08892f12b9aa507b4ab38cd8c1674233e2))
+* **deps:** bump miniapppolis-common-utils to 6.35.0 ([2b3f687](https://github.com/mini-app-polis/wiki-curator-cog/commit/2b3f687c9afad8246be13d18628bf9616e9edd65))
+* **deps:** bump miniapppolis-common-utils to 6.36.0 ([c108f20](https://github.com/mini-app-polis/wiki-curator-cog/commit/c108f20a44222c29ffd685a09ddc2e1b876e9916))
+* **deps:** bump miniapppolis-common-utils to 7.1.0 ([85a9644](https://github.com/mini-app-polis/wiki-curator-cog/commit/85a9644e37af24bc9be43346eba149d6baba85c2))
+* **deps:** move to common-python-utils 7.x ([34a1e41](https://github.com/mini-app-polis/wiki-curator-cog/commit/34a1e413876683441ef5614a9b37ae729829f47c))
+* **llm:** treat an empty LLM_PROVIDER or LLM_MODEL as unset so the default applies ([78c99cd](https://github.com/mini-app-polis/wiki-curator-cog/commit/78c99cd81791e5376d87707a0c1a7fa1c06b9cb8))
+
 ## [3.11.23](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.22...v3.11.23) (2026-10-28)
 
 
