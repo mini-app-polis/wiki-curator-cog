@@ -1,3 +1,12 @@
+## [3.11.26](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.25...v3.11.26) (2026-10-30)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 7.3.0 ([e1ae8d9](https://github.com/mini-app-polis/wiki-curator-cog/commit/e1ae8d94d2d1172ee250dee546788bb8e07a8b8a))
+* **deps:** bump miniapppolis-common-utils to 7.4.0 ([5244b52](https://github.com/mini-app-polis/wiki-curator-cog/commit/5244b52fcd729d4c548c8518c085b5e798d81b67))
+* **deps:** bump miniapppolis-common-utils to 7.6.0 ([c44785c](https://github.com/mini-app-polis/wiki-curator-cog/commit/c44785ca4bdb216f52fb2d6f88cae7a589eb8edd))
+
 ## [3.11.25](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.24...v3.11.25) (2026-10-30)
 
 
