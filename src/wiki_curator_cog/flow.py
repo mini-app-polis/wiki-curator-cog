@@ -614,7 +614,7 @@ def materialise_local(
     summary = {
         "dry_run": dry_run,
         "pages": len(result["entities"]),
-        # names folded into a page, or no longer pages: asked to be removed
+        # names folded into a page, or that stopped being pages: asked to be removed
         "gone": len(result["removed"]),
         "written": result["written"],
         # of those, the ones that had a stored page
