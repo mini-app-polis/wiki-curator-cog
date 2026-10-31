@@ -1,3 +1,15 @@
+# [3.12.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.27...v3.12.0) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 7.8.0 ([67cac39](https://github.com/mini-app-polis/wiki-curator-cog/commit/67cac3997ca1df362d39c6b92f05bbe42c556bf0))
+
+
+### Features
+
+* **worker:** log effective settings once at startup with log_settings ([923bc7c](https://github.com/mini-app-polis/wiki-curator-cog/commit/923bc7c008853be708f0a9c7f8eb7e92d343e84d))
+
 ## [3.11.27](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.26...v3.11.27) (2026-10-31)
 
 
