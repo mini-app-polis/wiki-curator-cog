@@ -1,3 +1,11 @@
+## [3.11.27](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.26...v3.11.27) (2026-10-31)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 7.7.0 ([06fdf8c](https://github.com/mini-app-polis/wiki-curator-cog/commit/06fdf8cc0c767c8a997c85ca7b6ec03a0bbcefa9))
+* **deps:** patch vulnerable dependencies (pyasn1) ([b148e5b](https://github.com/mini-app-polis/wiki-curator-cog/commit/b148e5beec1071b3f2f5963a52c96d9c786a34c6))
+
 ## [3.11.26](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.11.25...v3.11.26) (2026-10-30)
 
 
