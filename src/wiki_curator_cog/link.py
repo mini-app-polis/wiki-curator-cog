@@ -70,6 +70,19 @@ _LLM_TIMEOUT_SECONDS = 180.0
 _LLM_MAX_RETRIES = 2
 
 
+def llm_settings() -> tuple[str, str]:
+    """The provider and model in effect, defaults applied; nothing is checked.
+
+    Empty means the default: an optional setting is held empty in Doppler
+    until it is set, and `doppler run` passes it through as "". An unknown
+    provider comes back as given, with no default model;
+    :func:`llm_from_env` refuses it.
+    """
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower() or "anthropic"
+    model = (os.getenv("LLM_MODEL") or "").strip() or _DEFAULT_MODELS.get(provider, "")
+    return provider, model
+
+
 def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
     """The client and model name, from ``LLM_PROVIDER`` / ``LLM_MODEL``.
 
@@ -80,14 +93,11 @@ def llm_from_env(*, dry_run: bool = False) -> tuple[LLMClient, str]:
     """
     from . import usage
 
-    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower() or "anthropic"
+    provider, model = llm_settings()
     if provider not in _DEFAULT_MODELS:
         raise RuntimeError(
             f"Unsupported LLM_PROVIDER: {provider!r}. Must be one of {sorted(_DEFAULT_MODELS)}."
         )
-    # Empty means the default: an optional setting is held empty in Doppler
-    # until it is set, and `doppler run` passes it through as "".
-    model = (os.getenv("LLM_MODEL") or "").strip() or _DEFAULT_MODELS[provider]
     name = f"{provider}/{model}"
     if dry_run:
         return usage.DryRunLLM(name), name

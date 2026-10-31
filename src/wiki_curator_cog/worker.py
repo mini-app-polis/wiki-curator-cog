@@ -53,11 +53,12 @@ the follow-ons are asked for again.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from mini_app_polis import load_secrets, timing
+from mini_app_polis import environment, load_secrets, timing
 from mini_app_polis import logger as logger_mod
 from mini_app_polis.api.contract import (
     WcsWikiJob,
@@ -93,10 +94,53 @@ _ENQUEUE_PER_REQUEST: int = next(
     if getattr(m, "max_length", None) is not None
 )
 
+#: Whether this container has logged its effective settings yet.
+_settings_logged = False
+
 # At import, once per cold start (see transcription-cog's worker).
 # An empty DSN in production logs an ERROR rather than passing silently
 # (CD-038); the service tag tells this cog's events apart in the shared project.
 init_sentry(MACHINE_NAME)
+
+
+def effective_settings() -> dict[str, Any]:
+    """Every name this worker reads, with the value in effect, defaults applied.
+
+    The API base URL is keyed by the variable actually read in this
+    environment. Only names on ``SETTINGS_ALLOWLIST`` are logged with their
+    value (:func:`mini_app_polis.environment.log_settings`); the rest are
+    logged as set or unset.
+    """
+    provider, model = link.llm_settings()
+
+    def raw(name: str) -> str:
+        return (os.environ.get(name) or "").strip()
+
+    return {
+        "ENVIRONMENT": environment.current_environment().value,
+        environment.env_var_name("KAIANO_API_BASE_URL"): environment.api_base_url(),
+        "WIKI_CURATOR_COG_API_KEY": raw("WIKI_CURATOR_COG_API_KEY"),
+        "LLM_PROVIDER": provider,
+        "LLM_MODEL": model,
+        "ANTHROPIC_API_KEY": raw("ANTHROPIC_API_KEY"),
+        "OPENAI_API_KEY": raw("OPENAI_API_KEY"),
+        "LLM_PRICE_INPUT_PER_MTOK": raw("LLM_PRICE_INPUT_PER_MTOK"),
+        "LLM_PRICE_OUTPUT_PER_MTOK": raw("LLM_PRICE_OUTPUT_PER_MTOK"),
+        "LOGGING_LEVEL": raw("LOGGING_LEVEL").upper() or "INFO",
+        "SENTRY_DSN_COGS": raw("SENTRY_DSN_COGS"),
+    }
+
+
+def _log_settings_once() -> None:
+    """Log the effective settings on this container's first invocation.
+
+    After the first load from SSM, so the values are the ones in effect.
+    """
+    global _settings_logged
+    if _settings_logged:
+        return
+    _settings_logged = True
+    environment.log_settings(effective_settings())
 
 
 def job_of(body: str) -> dict[str, Any]:
@@ -313,6 +357,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 — nothing can run without its settings
         log.exception("worker: could not refresh settings from SSM")
         return all_failed(event)
+    _log_settings_once()
 
     def handle(record: dict[str, Any]) -> None:
         message_id = str(record.get("messageId") or "")

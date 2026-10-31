@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -176,6 +177,30 @@ def test_the_job_is_given_lambdas_context() -> None:
     ):
         worker.lambda_handler({"Records": [record]}, ctx)
     assert run.call_args.kwargs["context"] is ctx
+
+
+def test_effective_settings_are_logged_once_with_allowlisted_values_only(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    secret = "sk-ant-do-not-log"
+    monkeypatch.setattr(worker, "_settings_logged", False)
+    monkeypatch.setenv("SETTINGS_ALLOWLIST", "LLM_PROVIDER,LLM_MODEL")
+    monkeypatch.setenv("LLM_MODEL", "claude-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", secret)
+    record = _record(_body({"job": "generate", "entity": "a"}))
+    with (
+        caplog.at_level(logging.INFO),
+        patch.object(worker, "load_secrets"),
+        patch.object(worker, "process_message", return_value={}),
+    ):
+        worker.lambda_handler({"Records": [record]}, None)
+        worker.lambda_handler({"Records": [record]}, None)
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines.count("LLM_PROVIDER=anthropic (default)") == 1
+    assert lines.count("LLM_MODEL=claude-test (set)") == 1
+    assert lines.count("ANTHROPIC_API_KEY (set)") == 1
+    assert "WIKI_CURATOR_COG_API_KEY (unset)" in lines
+    assert not any(secret in r.getMessage() for r in caplog.records)
 
 
 # ── Run reports ──
