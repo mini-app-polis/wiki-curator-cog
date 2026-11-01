@@ -21,7 +21,7 @@ Per [ADR-0002](decisions/ADR-0002-curate-from-canonical-entities.md), the curato
 > (MINI-89, MINI-94); `.curator/` keeps only a local cache of it and the
 > reviews, all git-ignored, including the private `thin-review.md`. The spec
 > will be revised when the page documents land (MINI-96). Also stale
-> below: the runtime (Prefect is gone — one-shot process, [ADR-0004](decisions/ADR-0004-one-shot-on-railway-no-prefect.md)), the auth
+> below: the runtime (the wiki-jobs Lambda worker, [ADR-0006](decisions/ADR-0006-wiki-in-the-pipeline-served-from-the-api.md); `render` runs locally and neither commits nor pushes), the auth
 > (a named machine API key, not Clerk M2M), and "four views" (there are three).
 
 ---
@@ -431,7 +431,7 @@ The renderer overwrites the derived pages wholesale each run. There is nothing t
 
 ### Concurrency
 
-Single-instance Prefect flow (concurrency slot of 1), matching the ecosystem pattern. Two concurrent runs would race on git operations.
+`render` runs by hand, one run at a time against one `WIKI_REPO_PATH`. Two concurrent runs against the same working tree would race on its files.
 
 ---
 
