@@ -1,3 +1,11 @@
+## [3.13.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.13.0...v3.13.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 7.19.0 ([9933dff](https://github.com/mini-app-polis/wiki-curator-cog/commit/9933dff840d8c4b4813d49605490cdbcb201fa54))
+* **deps:** bump oauthlib to 4.0.1 and miniapppolis-common-utils to 7.20.0 ([477ca45](https://github.com/mini-app-polis/wiki-curator-cog/commit/477ca45fdb64c51a44aba66d5090206ea57e517b))
+
 # [3.13.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.12.6...v3.13.0) (2026-11-05)
 
 
