@@ -1,3 +1,10 @@
+## [3.13.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.13.1...v3.13.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 8.0.1 ([cbec003](https://github.com/mini-app-polis/wiki-curator-cog/commit/cbec003bd97e6c5ff24714606f93e47c97d52daa))
+
 ## [3.13.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.13.0...v3.13.1) (2026-11-05)
 
 
