@@ -3,7 +3,7 @@ name = "wiki-curator-cog"
 dynamic = ["version"]
 description = "Builds the WCS wiki from the canonical corpus in api-kaianolevine-com: links, folds and generates each page, and stores it as a document in the API. Runs as the wiki-jobs Lambda worker."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
     "miniapppolis-common-utils[llm]>=8.0.0,<9",
     "anthropic>=0.40",
@@ -57,7 +57,7 @@ testpaths = ["tests/unit", "tests/integration"]
 addopts = "--cov=wiki_curator_cog --cov-report=term-missing"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.14"
 strict = false
 ignore_missing_imports = true
 

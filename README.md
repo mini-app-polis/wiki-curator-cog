@@ -48,7 +48,7 @@ Pipeline-evaluation findings (quality signals, judgment-call records) are emitte
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.14+
 - [uv](https://docs.astral.sh/uv/) installed
 - The [Doppler CLI](https://docs.doppler.com/docs/install-cli), logged in (`doppler login`)
 - A local clone of `wcs-wiki`
