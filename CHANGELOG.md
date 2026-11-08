@@ -1,3 +1,12 @@
+## [3.14.2](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.1...v3.14.2) (2026-11-08)
+
+
+### Bug Fixes
+
+* **deps:** bump anthropic from 1.15.0 to 2.3.0 in the majors group ([9e43ada](https://github.com/mini-app-polis/wiki-curator-cog/commit/9e43ada8a6cf9007ce9be47eb428471b122b10b7))
+* **deps:** bump miniapppolis-common-utils to 9.0.1 ([090c01f](https://github.com/mini-app-polis/wiki-curator-cog/commit/090c01f39aef0db7818465091fb2e57b21b1240c))
+* **deps:** bump the minor-and-patch group with 6 updates ([a88c34f](https://github.com/mini-app-polis/wiki-curator-cog/commit/a88c34f0bae8a3b3b9d20712279e593c76cf70db))
+
 ## [3.14.1](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.0...v3.14.1) (2026-11-08)
 
 
