@@ -1,3 +1,16 @@
+# [3.14.0](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.13.4...v3.14.0) (2026-11-08)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 8.10.1 ([03de509](https://github.com/mini-app-polis/wiki-curator-cog/commit/03de5093c76975c4d88fedc20c2c1ac1669d449a))
+* **deps:** bump miniapppolis-common-utils to 8.9.0 ([4737cf2](https://github.com/mini-app-polis/wiki-curator-cog/commit/4737cf2208c81ccd4775d8c709609c38eee34e3e))
+
+
+### Features
+
+* run on Python 3.14 ([b714d8a](https://github.com/mini-app-polis/wiki-curator-cog/commit/b714d8a7d8b144a5df82785ffa3b9578979addd1))
+
 ## [3.13.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.13.3...v3.13.4) (2026-11-07)
 
 
