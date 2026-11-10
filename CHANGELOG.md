@@ -1,3 +1,11 @@
+## [3.14.4](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.3...v3.14.4) (2026-11-10)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 9.1.0 ([a6932f2](https://github.com/mini-app-polis/wiki-curator-cog/commit/a6932f2138319c82a6dbfd8dff3181f2b5bb0ebc))
+* **deps:** bump miniapppolis-common-utils to 9.3.0 ([f1b5fda](https://github.com/mini-app-polis/wiki-curator-cog/commit/f1b5fda768e25afa3cdb855f41b01f2f8738e3c4))
+
 ## [3.14.3](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.2...v3.14.3) (2026-11-09)
 
 
