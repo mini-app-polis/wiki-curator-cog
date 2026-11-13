@@ -1,3 +1,14 @@
+## [3.14.8](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.7...v3.14.8) (2026-11-13)
+
+
+### Bug Fixes
+
+* **deps:** bump miniapppolis-common-utils to 9.10.0 ([d4bf5c1](https://github.com/mini-app-polis/wiki-curator-cog/commit/d4bf5c14493619c8982d5b7d9e0146dfdcac52e9))
+* **deps:** bump miniapppolis-common-utils to 9.10.1 ([975fe5f](https://github.com/mini-app-polis/wiki-curator-cog/commit/975fe5f5bbfa46545137ac47019cbdd8dba3e40f))
+* **deps:** bump miniapppolis-common-utils to 9.10.2 ([c4aa652](https://github.com/mini-app-polis/wiki-curator-cog/commit/c4aa652b83e5a99b1751e8ce1e843be6d19305eb))
+* **deps:** bump miniapppolis-common-utils to 9.10.4 ([4355d1b](https://github.com/mini-app-polis/wiki-curator-cog/commit/4355d1b8974f34d7d08a4bda5f6828b803f363a6))
+* **deps:** patch vulnerable dependencies (opentelemetry-api) ([daa2037](https://github.com/mini-app-polis/wiki-curator-cog/commit/daa2037161622c8bc4c8e89d185fa04896f758ab))
+
 ## [3.14.7](https://github.com/mini-app-polis/wiki-curator-cog/compare/v3.14.6...v3.14.7) (2026-11-12)
 
 
